@@ -135,10 +135,13 @@ Three patterns were considered:
   writes `./.claude/handoff-task.md` from a markdown template embedded
   in `SKILL.md`. A Stop hook runs `extract.py`, which produces
   `./.claude/handoff.md` — a short wrapper containing
-  `@.claude/handoff-task.md` plus extracted files-touched and last
-  user prompts. Project `CLAUDE.md` has `@.claude/handoff.md`, and
-  Claude Code's `@` resolution recurses (up to 5 hops) so both files
-  load at session start.
+  `@handoff-task.md` plus extracted files-touched and last user
+  prompts. Project `CLAUDE.md` has `@.claude/handoff.md`, and Claude
+  Code's `@` resolution recurses (up to 5 hops) so both files load at
+  session start. Each `@` is resolved relative to the file that
+  contains it: `@.claude/handoff.md` is relative to project-root
+  `CLAUDE.md`, and `@handoff-task.md` inside `handoff.md` is relative
+  to `.claude/`.
 
 The chosen pattern has three concrete wins over the JSON approach:
 

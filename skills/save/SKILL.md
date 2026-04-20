@@ -103,8 +103,9 @@ not a script to run manually), which writes
 `./.claude/handoff.md` with:
 
 - Timestamp and session ID as the top heading.
-- `@.claude/handoff-task.md` reference that Claude Code expands
-  recursively when the outer file is loaded.
+- `@handoff-task.md` reference (resolved relative to `handoff.md`'s
+  own directory, so it points to the sibling task file) that Claude
+  Code expands recursively when the outer file is loaded.
 - Last 5 real user prompts verbatim, each with a thin anchor from the
   preceding assistant turn (tool call + target, or first line of the
   response) so anaphoric prompts stay meaningful.

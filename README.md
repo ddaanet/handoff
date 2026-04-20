@@ -81,7 +81,7 @@ Per project, under `./.claude/`:
 
 - `handoff-task.md` — agent-written task + open decisions.
 - `handoff.md` — hook-generated wrapper containing
-  `@.claude/handoff-task.md` plus extracted session data.
+  `@handoff-task.md` plus extracted session data.
 - `handoff-error.log` — written only if extraction fails.
 
 The two files are paired: ask the agent to save again with nothing

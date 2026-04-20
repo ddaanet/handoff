@@ -21,8 +21,9 @@ to edit the plugin's skill, hook, or script.
   delegates extraction to `extract.py`; captures stderr to
   `.claude/handoff-error.log` on failure
 - `scripts/extract.py` — parses the session JSONL, writes
-  `.claude/handoff.md` with `@.claude/handoff-task.md` at the top and
-  extracted sections below
+  `.claude/handoff.md` with `@handoff-task.md` at the top (resolved
+  relative to `handoff.md`'s own directory) and extracted sections
+  below
 - `DESIGN.md` — living design document, research, and decisions
 
 Loading is delegated to the user's project `CLAUDE.md` via
@@ -82,3 +83,7 @@ fictional data will mislead.
   trust the template in SKILL.md.
 - Cross-session thread management. This plugin handles one `/clear`
   transition; auto-memory handles durable state.
+
+## Handoff
+
+@.claude/handoff.md

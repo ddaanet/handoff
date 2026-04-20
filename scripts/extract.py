@@ -7,7 +7,7 @@ Output format:
 
     Session: `<session-id>`
 
-    @.claude/handoff-task.md
+    @handoff-task.md
 
     ## Files touched
     - ...
@@ -18,9 +18,12 @@ Output format:
     > <verbatim prompt>
     ...
 
-The `@.claude/handoff-task.md` line is resolved by Claude Code's `@`
-reference expansion when the outer `handoff.md` is included. The task
-file is agent-authored from the SKILL.md template.
+The `@handoff-task.md` line is resolved by Claude Code's `@`
+reference expansion when the outer `handoff.md` is included. Claude
+Code resolves `@` paths relative to the file containing the
+reference, so this points to `./.claude/handoff-task.md` (same
+directory as `handoff.md`). The task file is agent-authored from
+the SKILL.md template.
 
 Usage:
     extract.py <transcript.jsonl> <output.md>
@@ -169,7 +172,7 @@ def emit(transcript_path: str, output_path: pathlib.Path) -> None:
     lines.append("")
     lines.append(f"Session: `{session_id}`")
     lines.append("")
-    lines.append("@.claude/handoff-task.md")
+    lines.append("@handoff-task.md")
     lines.append("")
     lines.append("## Files touched")
     if files_touched:
