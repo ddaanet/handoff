@@ -1,0 +1,17 @@
+{
+  "description": "On Stop, regenerate .claude/handoff.md from the session JSONL whenever handoff-task.md is fresher.",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
