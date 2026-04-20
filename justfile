@@ -56,7 +56,7 @@ release bump='patch': validate
     jq --arg v "$new_version" '.version = $v' "$manifest" > "$tmp"
     mv "$tmp" "$manifest"
     git add "$manifest"
-    git commit -m "🔖 Release $new_version"
+    git commit -m "chore: release $new_version"
     git tag -a "$tag" -m "Release $new_version"
     git push
     git push origin "$tag"
