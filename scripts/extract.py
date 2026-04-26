@@ -51,6 +51,7 @@ WRAPPER_PREFIXES = (
     "<command-message>",
     "<command-args>",
     "<system-reminder>",
+    "Base directory for this skill:",
 )
 
 WRAPPER_EXACT = frozenset({

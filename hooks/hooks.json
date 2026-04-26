@@ -1,13 +1,35 @@
 {
-  "description": "On Stop, regenerate .claude/handoff.md from the session JSONL whenever handoff-task.md is fresher.",
+  "description": "PreToolUse(Skill): wipe prior handoff files when handoff:handoff activates. PreToolUse(Write|Edit): deny handoff-task.md writes outside this project's .claude/. PostToolUse(Write|Edit): regenerate .claude/handoff.md when handoff-task.md is written.",
   "hooks": {
-    "Stop": [
+    "PreToolUse": [
       {
-        "matcher": "*",
+        "matcher": "Skill",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/stop-hook.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/skill-pre-hook.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-guard.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-extract.sh",
             "timeout": 15
           }
         ]

@@ -6,20 +6,34 @@ to edit the plugin's skill, hook, or script.
 ## Layout
 
 - `.claude-plugin/plugin.json` — manifest
-- `skills/save/SKILL.md` — the save-and-cleanup skill
-  (`/handoff:save`), contains the markdown template for
-  `handoff-task.md`
-- `skills/save/references/design.md` — condensed design notes; full
-  rationale is in the plugin-root `DESIGN.md`
+- `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
+  contains the markdown template for `handoff-task.md`
+- `skills/handoff/references/design.md` — condensed design notes;
+  full rationale is in the plugin-root `DESIGN.md`
 - `skills/setup/SKILL.md` — the first-run setup skill
   (`/handoff:setup`), adds `@.claude/handoff.md` to the project's
   `CLAUDE.md`. Idempotent, append-only.
-- `hooks/hooks.json` — declares one hook: `Stop` (regenerate
-  `handoff.md` when `handoff-task.md` is fresher)
-- `scripts/stop-hook.sh` — Stop hook entry point: mtime-compare; no-op
-  unless `.claude/handoff-task.md` is newer than `.claude/handoff.md`;
-  delegates extraction to `extract.py`; captures stderr to
-  `.claude/handoff-error.log` on failure
+- `hooks/hooks.json` — declares three hooks.
+  `PreToolUse(Skill)`: wipe prior handoff files when `handoff:handoff`
+  activates.
+  `PreToolUse(Write|Edit)`: deny `handoff-task.md` writes whose
+  resolved path is not `$cwd/.claude/handoff-task.md`.
+  `PostToolUse(Write|Edit)`: regenerate `.claude/handoff.md` whenever
+  `handoff-task.md` is written, so extraction is visible in the same
+  agent turn.
+- `scripts/skill-pre-hook.sh` — PreToolUse(Skill) entry point:
+  matches `tool_input.skill == "handoff:handoff"` and `rm`s any prior
+  `.claude/handoff-task.md` and `.claude/handoff.md`. Mechanical reset
+  before the skill body is loaded — keeps the agent out of the
+  cleanup path.
+- `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Refuses
+  with a helpful agent-facing message when `basename` is
+  `handoff-task.md` but `realpath` differs from
+  `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
+- `scripts/write-extract.sh` — PostToolUse(Write|Edit) entry point:
+  matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`
+  and runs `extract.py` to (re)generate `$cwd/.claude/handoff.md`.
+  Captures stderr to `.claude/handoff-error.log` on failure.
 - `scripts/extract.py` — parses the session JSONL, writes
   `.claude/handoff.md` with `@handoff-task.md` at the top (resolved
   relative to `handoff.md`'s own directory) and extracted sections
@@ -33,6 +47,8 @@ hops, so the single reference pulls in both files.
 ## Conventions
 
 - Use `${CLAUDE_PLUGIN_ROOT}` in `hooks.json` for portability.
+- All hooks are mechanical and cwd-scoped. Anything that requires
+  judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
 - Output paths are fixed: `.claude/handoff-task.md` (agent-written)
@@ -50,11 +66,17 @@ hops, so the single reference pulls in both files.
 
 ## Testing
 
-- `just validate` — lint manifest, hooks JSON, bash/python syntax.
-- `just smoke` — run `extract.py` against the most recent session
-  JSONL and print the result.
-- `just hook-test` — dry-run the Stop hook in an ephemeral tmpdir
-  with a synthetic task file.
+- `just validate` — lint manifest, hooks JSON, bash/python syntax
+  across `scripts/` and `tests/`.
+- `just smoke` — `tests/smoke.sh`: run `extract.py` against the most
+  recent session JSONL and print the result.
+- `just hook-test` — `tests/hook-test.sh`: end-to-end test of the
+  three hook scripts against synthetic tool-event payloads, with
+  assertions and a pass/fail summary. Exit code is propagated.
+
+Test scripts live under `tests/`. The justfile recipes are
+one-liners that delegate. Add new test scenarios to the existing
+script rather than adding new just recipes.
 
 Never mock the session JSONL format — always test against a real
 transcript. The format is undocumented and evolves; tests against

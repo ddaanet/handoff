@@ -1,4 +1,4 @@
-# save — Design Notes
+# handoff — Design Notes
 
 Condensed rationale. Full design doc lives at the plugin root
 (`../../../DESIGN.md`).
@@ -31,9 +31,10 @@ That leaves two fields only the agent can fill:
 - **Open decisions** — unmade choices still blocking progress
 
 These are the irreducible residual. They live in `handoff-task.md`
-(agent-authored from the template in `SKILL.md`). The Stop hook adds
-the mechanical extras (files touched, last user prompts) into
-`handoff.md`, which `@`-refs the task file.
+(agent-authored from the template in `SKILL.md`). A
+`PostToolUse(Write|Edit)` hook adds the mechanical extras (files
+touched, last user prompts) into `handoff.md`, which `@`-refs the
+task file.
 
 ## Why user prompts verbatim instead of summarised
 
@@ -70,15 +71,25 @@ the skill's anti-patterns section guards against drift. The agent's
 natural output quality is higher when writing prose than when filling
 JSON fields.
 
-## Why a Stop hook rather than inline extraction
+## Why PostToolUse rather than Stop or inline extraction
 
-The skill could have the agent run the extract script inline after
-writing the task file (one turn, two tool calls). Reasonable.
+Inline extraction (skill body has the agent run extract.py after
+writing) puts mechanical work back on the agent. Skipping that.
 
-The Stop hook is preferred because it runs *after* the agent's
-confirmation message, so the JSONL is more complete at extraction
-time. Inline extraction might miss the final assistant turn if the
-JSONL is flushed asynchronously.
+A `Stop` hook with mtime compare works but ships extraction *after*
+the agent's reply, so the user gets no same-turn confirmation that
+`handoff.md` was generated. It also fires on every stop, regardless
+of whether anything handoff-related happened.
 
-The mtime trigger (task file newer than output) makes the hook
-self-synchronising — no marker file, no explicit signalling.
+`PostToolUse(Write|Edit)` filtered on the resolved file path is
+causally tied to the actual write: extraction happens immediately
+after `handoff-task.md` is created, the agent sees the result in the
+same turn, and unrelated stops don't trigger anything.
+
+## Cross-project guard
+
+A `PreToolUse(Write|Edit)` hook denies writes whose target basename
+is `handoff-task.md` but whose `realpath` is not
+`$cwd/.claude/handoff-task.md`. Catches multi-checkout confusion and
+absolute-path mistakes; the deny message points the agent at the
+correct path.

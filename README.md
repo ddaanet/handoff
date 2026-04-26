@@ -38,20 +38,27 @@ Before `/clear`, ask the agent to save a handoff:
 - "wrap up"
 - "I'm done"
 
-The agent updates auto-memory with any durable learnings, then either
-writes a short task file or — if there's nothing outstanding — cleans
-up prior handoff files. On the next agent stop, a Stop hook produces
-`./.claude/handoff.md` combining the task file with auto-extracted
-session data (last few user prompts verbatim, files edited this
-session). After `/clear`, the `@` reference in your `CLAUDE.md` loads
-the handoff automatically. Auto-memory restores independently.
+Or invoke explicitly with `/handoff:handoff`.
+
+A `PreToolUse(Skill)` hook wipes any prior handoff files the moment
+the skill activates, so the slate is always clean. The agent then
+updates auto-memory with any durable learnings, and either writes a
+short task file or — if there's nothing outstanding — leaves the
+slate clean. The instant the task file is written, a
+`PostToolUse(Write|Edit)` hook produces `./.claude/handoff.md`
+combining the task file with auto-extracted session data (last few
+user prompts verbatim, files edited this session) — the agent sees
+the result in the same turn. A `PreToolUse(Write|Edit)` guard refuses
+`handoff-task.md` writes that resolve outside the current project's
+`.claude/`. After `/clear`, the `@` reference in your `CLAUDE.md`
+loads the handoff automatically. Auto-memory restores independently.
 
 ## Staleness and cleanup
 
 The artifact carries its own timestamp in its first heading. When the
-task is finished, ask the agent to save again with nothing
-outstanding — the skill removes both the task file and the
-hook-generated wrapper so the next session starts clean.
+task is finished, invoke the skill again with nothing outstanding —
+the activation hook wipes prior files and the agent writes nothing
+new, so the next session starts clean.
 
 Commit the files to git if you want an archived trail. There is no
 separate archive directory.
@@ -84,9 +91,9 @@ Per project, under `./.claude/`:
   `@handoff-task.md` plus extracted session data.
 - `handoff-error.log` — written only if extraction fails.
 
-The two files are paired: ask the agent to save again with nothing
-outstanding and both get removed (the "finalize" case). Nothing outside
-the current project is modified.
+The two files are paired: invoke the skill again with nothing
+outstanding and both get wiped at activation (the "finalize" case).
+Nothing outside the current project is modified.
 
 ## Uninstall
 
@@ -101,8 +108,8 @@ Existing `handoff.md` files stay where they are.
 - [`DESIGN.md`](DESIGN.md) — research, SOTA analysis, decisions.
 - [`CLAUDE.md`](CLAUDE.md) — agent instructions for working on the
   plugin itself.
-- [`skills/save/SKILL.md`](skills/save/SKILL.md) — the skill that the
-  agent follows when you ask for a handoff.
+- [`skills/handoff/SKILL.md`](skills/handoff/SKILL.md) — the skill
+  that the agent follows when you ask for a handoff.
 
 ## License
 

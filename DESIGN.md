@@ -3,7 +3,7 @@
 Living document. Captures the research, analysis, and decisions behind
 this plugin. Updated as the design evolves.
 
-Last updated: 2026-04-20.
+Last updated: 2026-04-26.
 
 ## Problem
 
@@ -115,7 +115,7 @@ small JSON with the judgment fields, a hook does the extraction and
 composition. No read+write round-trip, no LLM-summarising full history,
 no drift.
 
-## Activation: Stop hook with mtime trigger, agent-authored template file
+## Activation: PostToolUse extraction, agent-authored template file
 
 Three patterns were considered:
 
@@ -126,15 +126,16 @@ Three patterns were considered:
   now" from "done forever".
 
 - **JSON marker + compose**: agent writes a JSON marker with
-  `current_task` and `open_decisions`, a Stop hook composes markdown
-  from the marker + extracted session data. Works, but requires a JSON
-  schema, a PostToolUse validator, and a compose step that translates
+  `current_task` and `open_decisions`, a hook composes markdown from
+  the marker + extracted session data. Works, but requires a JSON
+  schema, a write-time validator, and a compose step that translates
   typed fields back into markdown.
 
-- **Agent-authored template file + Stop-hook extract** (chosen): agent
-  writes `./.claude/handoff-task.md` from a markdown template embedded
-  in `SKILL.md`. A Stop hook runs `extract.py`, which produces
-  `./.claude/handoff.md` — a short wrapper containing
+- **Agent-authored template file + PostToolUse extract** (chosen):
+  agent writes `./.claude/handoff-task.md` from a markdown template
+  embedded in `SKILL.md`. A `PostToolUse(Write|Edit)` hook runs
+  `extract.py` whenever the resolved file path is the project's task
+  file, producing `./.claude/handoff.md` — a short wrapper containing
   `@handoff-task.md` plus extracted files-touched and last user
   prompts. Project `CLAUDE.md` has `@.claude/handoff.md`, and Claude
   Code's `@` resolution recurses (up to 5 hops) so both files load at
@@ -146,37 +147,98 @@ Three patterns were considered:
 The chosen pattern has three concrete wins over the JSON approach:
 
 1. **No schema, no validator.** The template in `SKILL.md` is the
-   single source of truth for format. The agent writes markdown in its
-   own voice. No PostToolUse hook needed.
-2. **Simpler extraction.** `extract.py` no longer merges typed fields
-   with extracted content — it just writes a fixed header, an `@`
-   ref, and the extracted sections. No JSON-to-markdown translation.
+   single source of truth for format. The agent writes markdown in
+   its own voice.
+2. **Simpler extraction.** `extract.py` does not merge typed fields
+   with extracted content — it writes a fixed header, an `@` ref,
+   and the extracted sections. No JSON-to-markdown translation.
 3. **Agent writes prose directly.** More natural than filling JSON
    fields, and the template makes the expected shape obvious.
 
-The Stop hook uses an mtime comparison: if `handoff-task.md` is newer
-than `handoff.md` (or `handoff.md` is missing), regenerate. Otherwise
-no-op. Self-synchronising — no marker file needed.
+### PostToolUse over Stop
 
-### Cleanup via the "nothing to do" case
+An earlier iteration used a `Stop` hook with an mtime compare
+(regenerate when `handoff-task.md` is fresher than `handoff.md`).
+Replaced with `PostToolUse(Write|Edit)` filtered on the resolved
+path. PostToolUse wins on:
 
-The skill has two outcomes:
+- **Same-turn confirmation.** Extraction happens immediately after
+  the write, so the agent sees `handoff.md` exists and can mention
+  the path in the very same response. With Stop, the artifact only
+  materialises after the agent has already finished talking — the
+  next session sees it, but the user gets no confirmation in the
+  current turn.
+- **Causal trigger.** The hook fires because the task file was
+  written, not because the session happened to stop. No surprise
+  rewrites on unrelated stops; no dependency on mtime resolution.
+- **No state machine.** Drop the mtime compare and the
+  "self-synchronising" rationale that came with it.
 
-- Active task → write `handoff-task.md`
-- Nothing to hand off → remove both `handoff-task.md` and
-  `handoff.md`
+The Stop-time-completeness concern from the earlier design (some
+JSONL entries flush late) is theoretical for this use case: user
+prompts are flushed by the time the agent is acting, and the only
+tool_use event that matters is the Write of the task file itself —
+which is in the JSONL by the time PostToolUse fires.
 
-This gives `save handoff` a second useful semantic: "finalize, nothing
-outstanding, clean up." Stale handoff files are the main UX failure
-mode; folding cleanup into the save skill handles it deterministically
-at the user-triggered moment.
+### Cleanup via PreToolUse(Skill) hook
+
+Cleanup is mechanical and deterministic — exactly the kind of work
+that belongs in the harness, not the agent. A `PreToolUse` hook
+matched on the `Skill` tool fires the moment `handoff:handoff`
+activates, wipes any prior `handoff-task.md` and `handoff.md`, and
+returns. The skill body is then loaded against a guaranteed-clean
+slate.
+
+Effect on the protocol: invoking the skill is unconditionally a
+reset. If the agent decides there is an active task, it writes a
+fresh `handoff-task.md`. If not, it writes nothing — the wipe at
+activation already finalized the session.
+
+This was an explicit design decision *against* an in-skill `rm` step.
+Skills should not have the agent doing mechanical work the harness
+can do — agent compliance is a weaker guarantee than a hook, and
+splitting the cleanup logic into prose obscures it. The `Skill`
+matcher in `hooks.json` plus a one-line skill-name filter in the
+hook script keeps the mechanism in one place.
+
+### Cross-project guard via PreToolUse(Write|Edit)
+
+Per-project scope is enforced at write time. A
+`PreToolUse(Write|Edit)` hook denies any Write/Edit whose target
+basename is `handoff-task.md` and whose `realpath` differs from
+`$cwd/.claude/handoff-task.md`. Catches absolute-path mistakes and
+multi-checkout confusion (agent operating in project A but resolving
+a path that lands in project B). The denial message tells the agent
+the expected path so it can retry.
+
+### Cleanup via PreToolUse(Skill) hook
+
+Cleanup is mechanical and deterministic — exactly the kind of work
+that belongs in the harness, not the agent. A `PreToolUse` hook
+matched on the `Skill` tool fires the moment `handoff:handoff`
+activates, wipes any prior `handoff-task.md` and `handoff.md`, and
+returns. The skill body is then loaded against a guaranteed-clean
+slate.
+
+Effect on the protocol: invoking the skill is unconditionally a
+reset. If the agent decides there is an active task, it writes a
+fresh `handoff-task.md`. If not, it writes nothing — the wipe at
+activation already finalized the session.
+
+This was an explicit design decision *against* an in-skill `rm` step.
+Skills should not have the agent doing mechanical work the harness
+can do — agent compliance is a weaker guarantee than a hook, and
+splitting the cleanup logic into prose obscures it. The `Skill`
+matcher in `hooks.json` plus a one-line skill-name filter in the
+hook script keeps the mechanism in one place.
 
 ### Missing-extract edge case
 
-If the agent writes `handoff-task.md` but the Stop hook never fires
-(e.g., the user quits before the next stop), `handoff.md` is missing.
-Next session, `@.claude/handoff.md` resolves to nothing. The task file
-alone is not loaded.
+If the agent's Write of `handoff-task.md` somehow doesn't fire the
+PostToolUse hook (hook timeout, extract.py crash logged to
+`handoff-error.log`), `handoff.md` is missing. Next session,
+`@.claude/handoff.md` resolves to nothing. The task file alone is not
+loaded.
 
 Acceptable — the user will notice (no handoff content in context) and
 re-run save. The plugin does not try to be clever here.
@@ -253,13 +315,13 @@ git (if the user commits the file) or the session JSONL.
   turn. Prefer `tool_use` name + target; fall back to the first line of
   assistant text, trimmed to 120 chars.
 
-## Skills: save and setup
+## Skills: handoff and setup
 
 Two skills ship with the plugin:
 
-- **`/handoff:save`** — the main skill. Updates memory, writes
-  `handoff-task.md` from a template, or cleans up when there's
-  nothing outstanding.
+- **`/handoff:handoff`** — the main skill. Updates memory, then
+  decides whether to write `handoff-task.md` from a template. The
+  cleanup case is handled by the PreToolUse hook at activation.
 - **`/handoff:setup`** — first-run helper. Adds the
   `@.claude/handoff.md` reference to the project's `CLAUDE.md`.
   Idempotent, append-only. Keeps setup to a single command per
@@ -267,7 +329,11 @@ Two skills ship with the plugin:
 
 The split is intentional: `setup` is a once-per-project action with no
 bearing on the runtime save/load flow, so it doesn't belong in the
-save skill's protocol.
+main skill's protocol.
+
+The skill is named `handoff` (matching the plugin) so CLI completion
+on `/handoff:` lands directly on the action, with no second namespace
+hop.
 
 ## Relationship to `/ddaa:handoff`
 
@@ -305,9 +371,11 @@ extraction + minimal judgment. Non-overlapping. Both can coexist.
 - Should the output live inside `.claude/` (gitignored by convention) or
   outside the repo (e.g., `~/.claude/handoff/<project-hash>/`)? Current:
   in-repo, leave gitignore choice to the user.
-- Should a slash command `/handoff:save` wrap the skill for explicit
-  triggering? Currently relying on skill auto-trigger from description
-  phrases. Add if it proves insufficient.
+- Should a slash command wrap the skill for explicit triggering?
+  Resolved: the skill itself is invokable as `/handoff:handoff` (CLI
+  completion on `/handoff:` lands on it directly), and the skill's
+  description phrases cover the natural-language path. No separate
+  command needed.
 
 ## References
 

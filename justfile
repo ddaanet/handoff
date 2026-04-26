@@ -9,7 +9,11 @@ validate:
     jq . .claude-plugin/plugin.json > /dev/null
     jq . hooks/hooks.json > /dev/null
     python3 -c "import ast; ast.parse(open('scripts/extract.py').read())"
-    bash -n scripts/stop-hook.sh
+    bash -n scripts/skill-pre-hook.sh
+    bash -n scripts/write-guard.sh
+    bash -n scripts/write-extract.sh
+    bash -n tests/hook-test.sh
+    bash -n tests/smoke.sh
     @echo "ok"
 
 # Extract handoff.md from an explicit transcript (testing)
@@ -18,19 +22,7 @@ extract transcript output:
 
 # Smoke test: extract against the most recent session JSONL
 smoke:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    proj="$HOME/.claude/projects/-Users-david-code-handoff"
-    transcript=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)
-    if [ -z "$transcript" ]; then
-        echo "no session transcript at $proj — open this dir in claude first" >&2
-        exit 1
-    fi
-    output=$(mktemp --suffix=.md)
-    python3 scripts/extract.py "$transcript" "$output"
-    echo "--- $output ---"
-    cat "$output"
-    rm -f "$output"
+    bash tests/smoke.sh
 
 # Create release: bump plugin.json version, commit, tag, push, GH release
 release bump='patch': validate
@@ -63,23 +55,6 @@ release bump='patch': validate
     gh release create "$tag" --title "Release $new_version" --generate-notes
     echo "Release $tag complete"
 
-# Dry-run the Stop hook against a synthetic task file
+# Run the hook test suite against synthetic tool-event input
 hook-test:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tmp=$(mktemp -d)
-    mkdir -p "$tmp/.claude"
-    cat > "$tmp/.claude/handoff-task.md" <<'EOF'
-    ## Current task
-
-    hook smoke test
-
-    ## Open decisions
-
-    - none
-    EOF
-    transcript=$(ls -t "$HOME/.claude/projects/-Users-david-code-handoff"/*.jsonl 2>/dev/null | head -1 || echo "")
-    printf '{"cwd":"%s","transcript_path":"%s"}' "$tmp" "$transcript" | bash scripts/stop-hook.sh
-    echo "--- $tmp/.claude/handoff.md ---"
-    cat "$tmp/.claude/handoff.md" || true
-    rm -rf "$tmp"
+    bash tests/hook-test.sh
