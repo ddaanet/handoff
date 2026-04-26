@@ -211,27 +211,6 @@ multi-checkout confusion (agent operating in project A but resolving
 a path that lands in project B). The denial message tells the agent
 the expected path so it can retry.
 
-### Cleanup via PreToolUse(Skill) hook
-
-Cleanup is mechanical and deterministic — exactly the kind of work
-that belongs in the harness, not the agent. A `PreToolUse` hook
-matched on the `Skill` tool fires the moment `handoff:handoff`
-activates, wipes any prior `handoff-task.md` and `handoff.md`, and
-returns. The skill body is then loaded against a guaranteed-clean
-slate.
-
-Effect on the protocol: invoking the skill is unconditionally a
-reset. If the agent decides there is an active task, it writes a
-fresh `handoff-task.md`. If not, it writes nothing — the wipe at
-activation already finalized the session.
-
-This was an explicit design decision *against* an in-skill `rm` step.
-Skills should not have the agent doing mechanical work the harness
-can do — agent compliance is a weaker guarantee than a hook, and
-splitting the cleanup logic into prose obscures it. The `Skill`
-matcher in `hooks.json` plus a one-line skill-name filter in the
-hook script keeps the mechanism in one place.
-
 ### Missing-extract edge case
 
 If the agent's Write of `handoff-task.md` somehow doesn't fire the

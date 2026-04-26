@@ -107,6 +107,15 @@ jq -nc --arg cwd "$tmp" \
     | bash scripts/skill-pre-hook.sh
 [[ -e "$tmp/.claude/handoff-task.md" ]] || fail "skill-pre-hook wiped on unrelated skill"
 
+# 8. skill-pre-hook creates .claude/ when missing.
+echo "=== skill-pre-hook (missing .claude: create) ==="
+fresh="$(mktemp -d)"
+jq -nc --arg cwd "$fresh" \
+    '{cwd:$cwd, tool_name:"Skill", tool_input:{skill:"handoff:handoff"}}' \
+    | bash scripts/skill-pre-hook.sh
+[[ -d "$fresh/.claude" ]] || fail "skill-pre-hook did not create .claude/"
+rm -rf "$fresh"
+
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
     exit 1

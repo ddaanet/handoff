@@ -19,19 +19,13 @@ the task file is written, so extraction is visible in the same turn.
 If durable learnings surfaced this session, capture them in
 auto-memory now. Skip if nothing durable surfaced — do not force.
 
-### Step 2: Decide
+### Step 2: Write the task file if warranted
 
-Is there an active task with specific next steps, unmade decisions, or
-non-obvious context worth preserving for the next agent?
-
-- **Yes** → write the task file (Step 3).
-- **No** → done. Prior files were already wiped at activation; the
-  next session starts clean.
-
-### Step 3: Write the task file
-
-Write `./.claude/handoff-task.md` with this template. Create the
-directory if missing.
+If there's an active task with specific next steps, unmade decisions,
+or non-obvious context worth preserving for the next agent, write
+`./.claude/handoff-task.md` from the template below. Otherwise stop —
+the activation hook already finalized the session by wiping prior
+files.
 
 ```markdown
 ## Current task
@@ -55,11 +49,6 @@ Rules:
   post-write hook adds files-touched.
 - No location other than `./.claude/handoff-task.md` — the hook reads
   this exact path.
-
-### Step 4: Confirm
-
-Report what happened: task file written (and `handoff.md` regenerated
-by the post-write hook in the same turn), or nothing to hand off.
 
 ## Anti-patterns
 

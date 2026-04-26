@@ -18,6 +18,8 @@ skill="$(jq -r '.tool_input.skill // ""' <<<"$input")"
 cwd="$(jq -r '.cwd // ""' <<<"$input")"
 [[ -n "$cwd" ]] || cwd="$PWD"
 
+mkdir -p "$cwd/.claude"
+
 removed=()
 for f in "$cwd/.claude/handoff-task.md" "$cwd/.claude/handoff.md"; do
     if [[ -f "$f" ]]; then
