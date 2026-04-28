@@ -180,26 +180,41 @@ prompts are flushed by the time the agent is acting, and the only
 tool_use event that matters is the Write of the task file itself —
 which is in the JSONL by the time PostToolUse fires.
 
-### Cleanup via PreToolUse(Skill) hook
+### Cleanup via activation hooks
 
 Cleanup is mechanical and deterministic — exactly the kind of work
-that belongs in the harness, not the agent. A `PreToolUse` hook
-matched on the `Skill` tool fires the moment `handoff:handoff`
-activates, wipes any prior `handoff-task.md` and `handoff.md`, and
-returns. The skill body is then loaded against a guaranteed-clean
-slate.
+that belongs in the harness, not the agent. Two hooks together fire
+the moment `handoff:handoff` activates, wipe any prior
+`handoff-task.md` and `handoff.md`, and return. The skill body is
+then loaded against a guaranteed-clean slate.
+
+Two hooks are needed because the skill has two activation paths:
+
+- **Agent invocation (`Skill` tool).** A `PreToolUse` hook matched
+  on `Skill` and filtered to `tool_input.skill == "handoff:handoff"`
+  fires before the tool runs.
+- **User invocation (`/handoff:handoff` slash command).** This path
+  loads the skill body directly into context without going through
+  the `Skill` tool, so `PreToolUse(Skill)` does not fire. A
+  `UserPromptSubmit` hook covers it: every submitted prompt is
+  passed to the script, which checks whether the `prompt` field
+  starts with `/handoff:handoff` and runs the same wipe if so.
+  `UserPromptSubmit` does not support the `matcher` field (silently
+  ignored), so the filter lives in the script.
 
 Effect on the protocol: invoking the skill is unconditionally a
-reset. If the agent decides there is an active task, it writes a
-fresh `handoff-task.md`. If not, it writes nothing — the wipe at
-activation already finalized the session.
+reset, regardless of invocation path. If the agent decides there is
+an active task, it writes a fresh `handoff-task.md`. If not, it
+writes nothing — the wipe at activation already finalized the
+session.
 
 This was an explicit design decision *against* an in-skill `rm` step.
 Skills should not have the agent doing mechanical work the harness
 can do — agent compliance is a weaker guarantee than a hook, and
-splitting the cleanup logic into prose obscures it. The `Skill`
-matcher in `hooks.json` plus a one-line skill-name filter in the
-hook script keeps the mechanism in one place.
+splitting the cleanup logic into prose obscures it. The hook scripts
+are thin filters on top of one shared wipe — duplicated rather than
+factored, since five lines of `rm` per script is clearer than an
+indirection.
 
 ### Cross-project guard via PreToolUse(Write|Edit)
 

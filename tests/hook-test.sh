@@ -38,7 +38,7 @@ assert_eq() {
     fi
 }
 
-# 1. write-extract on the matching path produces handoff.md.
+# write-extract on the matching path produces handoff.md.
 echo "=== write-extract (matching path) ==="
 jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/.claude/handoff-task.md" \
     '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
@@ -47,7 +47,7 @@ jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/.claude/handoff-tas
 grep -q '^@handoff-task.md$' "$tmp/.claude/handoff.md" \
     || fail "handoff.md missing @handoff-task.md ref"
 
-# 2. write-extract on an unrelated path is a no-op.
+# write-extract on an unrelated path is a no-op.
 echo "=== write-extract (unrelated path: no-op) ==="
 rm -f "$tmp/.claude/handoff.md"
 jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/README.md" \
@@ -55,7 +55,7 @@ jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/README.md" \
     | bash scripts/write-extract.sh
 [[ ! -e "$tmp/.claude/handoff.md" ]] || fail "write-extract regenerated on unrelated path"
 
-# 3. write-guard allows the canonical path.
+# write-guard allows the canonical path.
 echo "=== write-guard (matching path: allow) ==="
 set +e
 jq -nc --arg cwd "$tmp" --arg fp "$tmp/.claude/handoff-task.md" \
@@ -65,7 +65,7 @@ rc=$?
 set -e
 assert_eq "$rc" "0" "write-guard same-project exit code"
 
-# 4. write-guard denies cross-project writes with exit 2 and JSON deny.
+# write-guard denies cross-project writes with exit 2 and JSON deny.
 echo "=== write-guard (cross-project: deny) ==="
 set +e
 out="$(
@@ -78,8 +78,10 @@ set -e
 assert_eq "$rc" "2" "write-guard cross-project exit code"
 echo "$out" | grep -q '"permissionDecision":"deny"' \
     || fail "write-guard did not emit deny decision"
+echo "$out" | grep -q '"permissionDecisionReason"' \
+    || fail "write-guard did not include permissionDecisionReason"
 
-# 5. write-guard ignores writes to other filenames.
+# write-guard ignores writes to other filenames.
 echo "=== write-guard (unrelated filename: allow) ==="
 set +e
 jq -nc --arg cwd "$tmp" --arg fp "$other/.claude/some-other-file.md" \
@@ -89,7 +91,7 @@ rc=$?
 set -e
 assert_eq "$rc" "0" "write-guard non-matching filename exit code"
 
-# 6. skill-pre-hook on handoff:handoff wipes both files.
+# skill-pre-hook on handoff:handoff wipes both files.
 echo "=== skill-pre-hook (handoff:handoff: wipe) ==="
 : > "$tmp/.claude/handoff-task.md"
 : > "$tmp/.claude/handoff.md"
@@ -99,7 +101,7 @@ jq -nc --arg cwd "$tmp" \
 [[ ! -e "$tmp/.claude/handoff-task.md" ]] || fail "skill-pre-hook left handoff-task.md"
 [[ ! -e "$tmp/.claude/handoff.md" ]] || fail "skill-pre-hook left handoff.md"
 
-# 7. skill-pre-hook on a different skill is a no-op.
+# skill-pre-hook on a different skill is a no-op.
 echo "=== skill-pre-hook (other skill: no-op) ==="
 : > "$tmp/.claude/handoff-task.md"
 jq -nc --arg cwd "$tmp" \
@@ -107,7 +109,7 @@ jq -nc --arg cwd "$tmp" \
     | bash scripts/skill-pre-hook.sh
 [[ -e "$tmp/.claude/handoff-task.md" ]] || fail "skill-pre-hook wiped on unrelated skill"
 
-# 8. skill-pre-hook creates .claude/ when missing.
+# skill-pre-hook creates .claude/ when missing.
 echo "=== skill-pre-hook (missing .claude: create) ==="
 fresh="$(mktemp -d)"
 jq -nc --arg cwd "$fresh" \
@@ -115,6 +117,31 @@ jq -nc --arg cwd "$fresh" \
     | bash scripts/skill-pre-hook.sh
 [[ -d "$fresh/.claude" ]] || fail "skill-pre-hook did not create .claude/"
 rm -rf "$fresh"
+
+# prompt-pre-hook on /handoff:handoff wipes both files.
+echo "=== prompt-pre-hook (/handoff:handoff: wipe) ==="
+: > "$tmp/.claude/handoff-task.md"
+: > "$tmp/.claude/handoff.md"
+jq -nc --arg cwd "$tmp" \
+    '{cwd:$cwd, prompt:"/handoff:handoff"}' \
+    | bash scripts/prompt-pre-hook.sh
+[[ ! -e "$tmp/.claude/handoff-task.md" ]] || fail "prompt-pre-hook left handoff-task.md"
+[[ ! -e "$tmp/.claude/handoff.md" ]] || fail "prompt-pre-hook left handoff.md"
+
+# prompt-pre-hook on /handoff:setup is a no-op.
+echo "=== prompt-pre-hook (/handoff:setup: no-op) ==="
+: > "$tmp/.claude/handoff-task.md"
+jq -nc --arg cwd "$tmp" \
+    '{cwd:$cwd, prompt:"/handoff:setup"}' \
+    | bash scripts/prompt-pre-hook.sh
+[[ -e "$tmp/.claude/handoff-task.md" ]] || fail "prompt-pre-hook wiped on /handoff:setup"
+
+# prompt-pre-hook on an unrelated prompt is a no-op.
+echo "=== prompt-pre-hook (unrelated prompt: no-op) ==="
+jq -nc --arg cwd "$tmp" \
+    '{cwd:$cwd, prompt:"hello world"}' \
+    | bash scripts/prompt-pre-hook.sh
+[[ -e "$tmp/.claude/handoff-task.md" ]] || fail "prompt-pre-hook wiped on unrelated prompt"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2

@@ -10,6 +10,7 @@ validate:
     jq . hooks/hooks.json > /dev/null
     python3 -c "import ast; ast.parse(open('scripts/extract.py').read())"
     bash -n scripts/skill-pre-hook.sh
+    bash -n scripts/prompt-pre-hook.sh
     bash -n scripts/write-guard.sh
     bash -n scripts/write-extract.sh
     bash -n tests/hook-test.sh

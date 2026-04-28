@@ -13,9 +13,12 @@ to edit the plugin's skill, hook, or script.
 - `skills/setup/SKILL.md` — the first-run setup skill
   (`/handoff:setup`), adds `@.claude/handoff.md` to the project's
   `CLAUDE.md`. Idempotent, append-only.
-- `hooks/hooks.json` — declares three hooks.
-  `PreToolUse(Skill)`: wipe prior handoff files when `handoff:handoff`
-  activates.
+- `hooks/hooks.json` — declares four hooks.
+  `PreToolUse(Skill)` and `UserPromptSubmit`: wipe prior handoff files
+  when `handoff:handoff` activates. The two together cover both
+  invocation paths — the `Skill` tool (agent-driven) and the slash
+  command `/handoff:handoff` (user-driven, which loads the skill body
+  directly without going through the `Skill` tool).
   `PreToolUse(Write|Edit)`: deny `handoff-task.md` writes whose
   resolved path is not `$cwd/.claude/handoff-task.md`.
   `PostToolUse(Write|Edit)`: regenerate `.claude/handoff.md` whenever
@@ -26,6 +29,10 @@ to edit the plugin's skill, hook, or script.
   `.claude/handoff-task.md` and `.claude/handoff.md`. Mechanical reset
   before the skill body is loaded — keeps the agent out of the
   cleanup path.
+- `scripts/prompt-pre-hook.sh` — UserPromptSubmit entry point:
+  matches prompts starting with `/handoff:handoff` and runs the same
+  wipe. `UserPromptSubmit` does not support the `matcher` field, so
+  the script does its own prefix check on the `prompt` JSON field.
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Refuses
   with a helpful agent-facing message when `basename` is
   `handoff-task.md` but `realpath` differs from
