@@ -18,8 +18,19 @@ target="$(realpath -m -- "$file_path")"
 expected="$(realpath -m -- "$cwd/.claude/handoff-task.md")"
 [[ "$target" == "$expected" ]] && exit 0
 
-read -r -d '' msg <<EOF || true
-handoff: refusing to write a handoff-task.md outside this project's .claude/ directory. Resolved target: $target. Expected exactly: $expected. The handoff plugin is per-project — write to './.claude/handoff-task.md' relative to the current working directory ($cwd) and try again. If you intended to write a different file with the same name, choose a different filename.
+read -r -d '' agent_reason <<EOF || true
+Refusing to write 'handoff-task.md' outside this project's '.claude/' directory.
+Resolved target: $target
+Expected:        $expected
+
+The handoff plugin is per-project. The intended path is
+'./.claude/handoff-task.md' relative to the current working directory
+($cwd). If a different file with the same name was intended, choose a
+different filename.
 EOF
-jq -nc --arg m "$msg" '{hookSpecificOutput: {permissionDecision: "deny"}, systemMessage: $m}' >&2
+
+human_msg="write-guard: blocked handoff-task.md write outside $cwd/.claude/"
+
+jq -nc --arg r "$agent_reason" --arg s "$human_msg" \
+  '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}, systemMessage: $s}' >&2
 exit 2

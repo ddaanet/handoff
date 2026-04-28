@@ -1,0 +1,7 @@
+# Runtime handoff artifacts (regenerated each session)
+.claude/handoff.md
+.claude/handoff-task.md
+.claude/handoff-error.log
+
+# Local-only Claude Code settings
+.claude/settings.local.json

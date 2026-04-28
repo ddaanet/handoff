@@ -45,6 +45,20 @@ to edit the plugin's skill, hook, or script.
   `.claude/handoff.md` with `@handoff-task.md` at the top (resolved
   relative to `handoff.md`'s own directory) and extracted sections
   below
+- `plugin-dev/` — vendored
+  [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
+  toolkit (currently `v0.1.1`). Provides:
+  - `release.just` — shared `release` recipe imported by the top-level
+    justfile. Owns version bumps, tagging, push, GH release. The
+    plugin's own `precommit` recipe is its dependency.
+  - `version-guard.sh` — PreToolUse(Write|Edit) hook wired in
+    `.claude/settings.json` that refuses agent edits that change
+    `plugin.json`'s `.version` (release recipe is the only path).
+  - `install.sh` — first-run wiring (idempotent). To update the
+    vendored copy: `just update-plugin-dev vX.Y.Z`.
+- `.claude/settings.json` — project Claude Code settings. Wires the
+  toolkit's `version-guard.sh` as a PreToolUse(Write|Edit) hook.
+  Tracked in git so the guard applies to every clone.
 - `DESIGN.md` — living design document, research, and decisions
 
 Loading is delegated to the user's project `CLAUDE.md` via
@@ -73,13 +87,15 @@ hops, so the single reference pulls in both files.
 
 ## Testing
 
-- `just validate` — lint manifest, hooks JSON, bash/python syntax
-  across `scripts/` and `tests/`.
+- `just precommit` — lint manifest + settings, syntax-check scripts,
+  run the hook test suite. The toolkit's `release` recipe depends on
+  this name.
 - `just smoke` — `tests/smoke.sh`: run `extract.py` against the most
   recent session JSONL and print the result.
 - `just hook-test` — `tests/hook-test.sh`: end-to-end test of the
-  three hook scripts against synthetic tool-event payloads, with
-  assertions and a pass/fail summary. Exit code is propagated.
+  handoff-specific hook scripts against synthetic tool-event payloads,
+  with assertions and a pass/fail summary. Exit code is propagated.
+  `version-guard.sh` is tested in the toolkit, not here.
 
 Test scripts live under `tests/`. The justfile recipes are
 one-liners that delegate. Add new test scenarios to the existing
