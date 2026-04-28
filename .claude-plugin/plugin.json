@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Pre-/clear task snapshot for Claude Code: agent notes current task + open decisions, a PostToolUse hook composes them with auto-extracted last-N user prompts and files touched from the session JSONL.",
   "author": {
     "name": "David Allouche",
