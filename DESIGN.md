@@ -3,7 +3,7 @@
 Living document. Captures the research, analysis, and decisions behind
 this plugin. Updated as the design evolves.
 
-Last updated: 2026-04-26.
+Last updated: 2026-04-29.
 
 ## Problem
 
@@ -216,6 +216,20 @@ are thin filters on top of one shared wipe — duplicated rather than
 factored, since five lines of `rm` per script is clearer than an
 indirection.
 
+#### Two notification channels: user and agent
+
+Each wipe-hook emits both a `systemMessage` (user-facing, shown in
+the Claude Code UI/transcript) and a
+`hookSpecificOutput.additionalContext` (agent-facing, injected into
+the agent's input for that turn). The two channels are independent:
+`systemMessage` does not reach the agent. Without
+`additionalContext`, the agent has no signal that the wipe happened
+and is tempted to verify with `ls`/`cat` — exactly the redundant
+work the hook exists to avoid. The agent message is short and
+factual ("handoff activation hook wiped prior handoff files (X, Y);
+they are absent.") so it informs without instructing — consistent
+with the deny-message convention elsewhere in the plugin.
+
 ### Cross-project guard via PreToolUse(Write|Edit)
 
 Per-project scope is enforced at write time. A
@@ -250,7 +264,7 @@ toolkit, vendored at `plugin-dev/` via `git subtree`. Rationale:
   keeps the contract one file.
 - `git subtree --squash` rather than a submodule keeps the toolkit
   files visible in this repo's tree (no extra clone, no fragile
-  pointer), and pinning to a tag (`v0.1.1`) makes upgrades explicit.
+  pointer), and pinning to a tag (`v0.1.2`) makes upgrades explicit.
 - The toolkit's `release.just` requires consumers to define a
   `precommit` recipe — the per-plugin checks that must pass before a
   release. handoff's `precommit` lints its own manifests, syntax-

@@ -41,10 +41,11 @@ Before `/clear`, ask the agent to save a handoff:
 Or invoke explicitly with `/handoff:handoff`.
 
 A `PreToolUse(Skill)` hook wipes any prior handoff files the moment
-the skill activates, so the slate is always clean. The agent then
-updates auto-memory with any durable learnings, and either writes a
-short task file or — if there's nothing outstanding — leaves the
-slate clean. The instant the task file is written, a
+the skill activates, so the slate is always clean — and tells the
+agent so it doesn't redundantly verify. The agent then updates
+auto-memory with any durable learnings, and either writes a short
+task file or — if there's nothing outstanding — leaves the slate
+clean. The instant the task file is written, a
 `PostToolUse(Write|Edit)` hook produces `./.claude/handoff.md`
 combining the task file with auto-extracted session data (last few
 user prompts verbatim, files edited this session) — the agent sees

@@ -29,6 +29,9 @@ for f in "$cwd/.claude/handoff-task.md" "$cwd/.claude/handoff.md"; do
 done
 
 if (( ${#removed[@]} > 0 )); then
-    msg="handoff: wiped prior $(IFS=', '; echo "${removed[*]}")"
-    printf '{"systemMessage": "%s"}\n' "$msg"
+    files="$(IFS=', '; echo "${removed[*]}")"
+    msg="handoff: wiped prior $files"
+    agent_ctx="handoff activation hook wiped prior handoff files ($files); they are absent."
+    jq -nc --arg m "$msg" --arg c "$agent_ctx" \
+        '{systemMessage: $m, hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $c}}'
 fi

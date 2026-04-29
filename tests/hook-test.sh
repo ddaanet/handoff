@@ -91,15 +91,24 @@ rc=$?
 set -e
 assert_eq "$rc" "0" "write-guard non-matching filename exit code"
 
-# skill-pre-hook on handoff:handoff wipes both files.
+# skill-pre-hook on handoff:handoff wipes both files and notifies both
+# audiences (systemMessage for the user, additionalContext for the agent).
 echo "=== skill-pre-hook (handoff:handoff: wipe) ==="
 : > "$tmp/.claude/handoff-task.md"
 : > "$tmp/.claude/handoff.md"
-jq -nc --arg cwd "$tmp" \
-    '{cwd:$cwd, tool_name:"Skill", tool_input:{skill:"handoff:handoff"}}' \
-    | bash scripts/skill-pre-hook.sh
+out="$(
+    jq -nc --arg cwd "$tmp" \
+        '{cwd:$cwd, tool_name:"Skill", tool_input:{skill:"handoff:handoff"}}' \
+        | bash scripts/skill-pre-hook.sh
+)"
 [[ ! -e "$tmp/.claude/handoff-task.md" ]] || fail "skill-pre-hook left handoff-task.md"
 [[ ! -e "$tmp/.claude/handoff.md" ]] || fail "skill-pre-hook left handoff.md"
+echo "$out" | jq -e '.systemMessage' >/dev/null \
+    || fail "skill-pre-hook missing systemMessage"
+echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null \
+    || fail "skill-pre-hook missing hookSpecificOutput.additionalContext"
+echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null \
+    || fail "skill-pre-hook hookEventName != PreToolUse"
 
 # skill-pre-hook on a different skill is a no-op.
 echo "=== skill-pre-hook (other skill: no-op) ==="
@@ -118,15 +127,24 @@ jq -nc --arg cwd "$fresh" \
 [[ -d "$fresh/.claude" ]] || fail "skill-pre-hook did not create .claude/"
 rm -rf "$fresh"
 
-# prompt-pre-hook on /handoff:handoff wipes both files.
+# prompt-pre-hook on /handoff:handoff wipes both files and notifies both
+# audiences (systemMessage for the user, additionalContext for the agent).
 echo "=== prompt-pre-hook (/handoff:handoff: wipe) ==="
 : > "$tmp/.claude/handoff-task.md"
 : > "$tmp/.claude/handoff.md"
-jq -nc --arg cwd "$tmp" \
-    '{cwd:$cwd, prompt:"/handoff:handoff"}' \
-    | bash scripts/prompt-pre-hook.sh
+out="$(
+    jq -nc --arg cwd "$tmp" \
+        '{cwd:$cwd, prompt:"/handoff:handoff"}' \
+        | bash scripts/prompt-pre-hook.sh
+)"
 [[ ! -e "$tmp/.claude/handoff-task.md" ]] || fail "prompt-pre-hook left handoff-task.md"
 [[ ! -e "$tmp/.claude/handoff.md" ]] || fail "prompt-pre-hook left handoff.md"
+echo "$out" | jq -e '.systemMessage' >/dev/null \
+    || fail "prompt-pre-hook missing systemMessage"
+echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null \
+    || fail "prompt-pre-hook missing hookSpecificOutput.additionalContext"
+echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null \
+    || fail "prompt-pre-hook hookEventName != UserPromptSubmit"
 
 # prompt-pre-hook on /handoff:setup is a no-op.
 echo "=== prompt-pre-hook (/handoff:setup: no-op) ==="
