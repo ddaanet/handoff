@@ -21,7 +21,11 @@ release bump='patch' yes='': precommit
     manifest=".claude-plugin/plugin.json"
     git diff --quiet HEAD || { echo "error: uncommitted changes" >&2; exit 1; }
     branch=$(git symbolic-ref -q --short HEAD || echo "")
-    main_branch=$(git rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo "main")
+    # Use symbolic-ref (not rev-parse): when origin/HEAD is unset,
+    # rev-parse exits non-zero AND prints "origin/HEAD" to stdout, so
+    # the substitution captures both the failed output and the
+    # fallback. symbolic-ref is silent on stdout when the ref is unset.
+    main_branch=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || echo "main")
     [ "$branch" = "$main_branch" ] || { echo "error: must be on $main_branch (currently $branch)" >&2; exit 1; }
     manifest_version=$(jq -r .version "$manifest")
     latest_tag=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)
