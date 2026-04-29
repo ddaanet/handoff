@@ -22,7 +22,12 @@ inversion in mind when editing.
   consumer's `justfile`, and adds the version-guard hook to its
   `.claude/settings.json`.
 - `justfile` — *this repo's own* dev recipes (distinct from
-  `release.just`).
+  `release.just`). Defines `precommit` and the toolkit's self-`release`
+  recipe.
+- `VERSION` — last-released toolkit version, plain text. Bumped by
+  the self-release recipe; mirrors the latest git tag. Exists so
+  consumers (which vendor via subtree, where tags don't propagate) can
+  identify the version they're on with `cat plugin-dev/VERSION`.
 - `DESIGN.md` — living rationale for every design decision. Update
   when design choices change.
 
@@ -38,14 +43,14 @@ catch justfile syntax errors. Must be green before committing.
 
 ## Releasing the toolkit
 
-Toolkit releases are manual — `release.just` is for consumers, not for
-this repo:
-
 ```sh
-git tag -a vX.Y.Z -m "Release X.Y.Z"
-git push origin vX.Y.Z
-gh release create vX.Y.Z --title "Release X.Y.Z" --generate-notes
+just release [patch|minor|major]
 ```
+
+Reads `VERSION`, bumps, commits `release: X.Y.Z`, tags, pushes main +
+tag, and creates a GitHub release. Refuses to run on a dirty tree or
+when `VERSION` disagrees with the latest tag (same invariant as the
+consumer release recipe protects on `plugin.json`).
 
 Tags only; never expect consumers to track `main`. See DESIGN.md
 "Versioning" for the reasoning.
@@ -78,10 +83,11 @@ Tags only; never expect consumers to track `main`. See DESIGN.md
 ## Non-goals for this repo
 
 - Don't add a `.claude-plugin/plugin.json` here. It is not a Claude
-  Code plugin.
+  Code plugin. The `VERSION` file is the source of truth.
 - Don't run `release.just`'s recipes from this repo. They expect a
   consumer-shaped layout (`.claude-plugin/plugin.json`, a `precommit`
-  recipe) and will fail or produce nonsense here.
+  recipe) and will fail or produce nonsense here. Use the local
+  `release` recipe in this repo's `justfile` instead.
 - Don't add hybrid Python+plugin support to `release.just`. Repos
   like `edify` are deliberately out of scope; their release shape is
   different enough that wrapping them would obscure the main path.
