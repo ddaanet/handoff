@@ -47,7 +47,7 @@ to edit the plugin's skill, hook, or script.
   below
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
-  toolkit (currently `v0.1.1`). Provides:
+  toolkit (currently `v0.1.2`). Provides:
   - `release.just` — shared `release` recipe imported by the top-level
     justfile. Owns version bumps, tagging, push, GH release. The
     plugin's own `precommit` recipe is its dependency.
