@@ -258,17 +258,22 @@ in the [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
 toolkit, vendored at `plugin-dev/` via `git subtree`. Rationale:
 
 - The release dance — clean-tree check, version bump, tag, push, GH
-  release, plus a guard that refuses agent-driven version edits — is
-  identical across every plugin we ship. Inlining it in each
-  consumer's justfile produces drift; vendoring the source of truth
-  keeps the contract one file.
+  release, marketplace bump, plus a guard that refuses agent-driven
+  version edits — is identical across every plugin we ship. Inlining
+  it in each consumer's justfile produces drift; vendoring the source
+  of truth keeps the contract one file.
 - `git subtree --squash` rather than a submodule keeps the toolkit
   files visible in this repo's tree (no extra clone, no fragile
-  pointer), and pinning to a tag (`v0.1.2`) makes upgrades explicit.
+  pointer), and pinning to a tag (`v0.2.0`) makes upgrades explicit.
 - The toolkit's `release.just` requires consumers to define a
   `precommit` recipe — the per-plugin checks that must pass before a
   release. handoff's `precommit` lints its own manifests, syntax-
   checks scripts, and runs the handoff-specific hook test suite.
+- The release recipe also bumps the plugin's entry in the sibling
+  `claude-plugins` marketplace repo (path from `$MARKETPLACE_DIR`,
+  set in `.envrc`) and pushes that repo. A tag without a marketplace
+  bump is invisible to end-users, so the recipe treats both pushes as
+  one atomic release.
 
 Updates: `just update-plugin-dev vX.Y.Z` (recipe imported from
 `release.just`).

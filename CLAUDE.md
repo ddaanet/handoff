@@ -50,15 +50,20 @@ to edit the plugin's skill, hook, or script.
   below
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
-  toolkit (currently `v0.1.2`). Provides:
+  toolkit (currently `v0.2.0`). Provides:
   - `release.just` — shared `release` recipe imported by the top-level
-    justfile. Owns version bumps, tagging, push, GH release. The
-    plugin's own `precommit` recipe is its dependency.
+    justfile. Owns version bumps, tagging, push, GH release, and the
+    marketplace bump in `$MARKETPLACE_DIR`. The plugin's own
+    `precommit` recipe is its dependency.
   - `version-guard.sh` — PreToolUse(Write|Edit) hook wired in
     `.claude/settings.json` that refuses agent edits that change
     `plugin.json`'s `.version` (release recipe is the only path).
   - `install.sh` — first-run wiring (idempotent). To update the
     vendored copy: `just update-plugin-dev vX.Y.Z`.
+- `.envrc` — exports `MARKETPLACE_DIR` (sibling `claude-plugins`
+  repo). Required by `just release`; if the marketplace isn't bumped
+  alongside the plugin tag, end-users won't see the new version.
+  Run `direnv allow` once per clone.
 - `.claude/settings.json` — project Claude Code settings. Wires the
   toolkit's `version-guard.sh` as a PreToolUse(Write|Edit) hook.
   Tracked in git so the guard applies to every clone.
