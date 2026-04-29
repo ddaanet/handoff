@@ -7,12 +7,21 @@
 # The plugin must define its own `precommit` recipe; `release` depends on it.
 # `.claude-plugin/plugin.json` must exist with a semver `.version` field.
 #
+# Required env (typically set via .envrc):
+#   MARKETPLACE_DIR — path to the `claude-plugins` marketplace repo. The
+#   release recipe bumps the plugin's entry in
+#   `$MARKETPLACE_DIR/.claude-plugin/marketplace.json` and pushes that
+#   repo too. A release without the marketplace bump is incomplete:
+#   end-users discover plugins via the marketplace, so a tag without a
+#   marketplace bump is invisible to them.
+#
 # Requirements: bash, jq, git, gh.
 
 toolkit_url := "git@github.com:ddaanet/claude-plugin-dev.git"
 toolkit_prefix := "plugin-dev"
 
-# Create release: bump plugin.json version, commit, tag, push, GH release.
+# Create release: bump plugin.json version, commit, tag, push main + tag,
+# create GitHub release, then bump the marketplace entry and push.
 # Pass `--yes` as the second arg to skip the interactive confirmation
 # (useful when an outer permission layer already gates the command).
 release bump='patch' yes='': precommit
@@ -35,6 +44,15 @@ release bump='patch' yes='': precommit
       echo "      revert any manual version bump and re-run." >&2
       exit 1
     fi
+    # Marketplace pre-flight (fail fast before any destructive op).
+    [ -n "${MARKETPLACE_DIR:-}" ] || { echo "error: MARKETPLACE_DIR not set (set in .envrc to the claude-plugins repo root)" >&2; exit 1; }
+    marketplace_json="$MARKETPLACE_DIR/.claude-plugin/marketplace.json"
+    [ -f "$marketplace_json" ] || { echo "error: $marketplace_json not found" >&2; exit 1; }
+    plugin_name=$(jq -r .name "$manifest")
+    jq -e --arg n "$plugin_name" '.plugins[] | select(.name == $n)' "$marketplace_json" >/dev/null \
+      || { echo "error: no entry for '$plugin_name' in $marketplace_json" >&2; exit 1; }
+    git -C "$MARKETPLACE_DIR" diff --quiet HEAD \
+      || { echo "error: $MARKETPLACE_DIR has uncommitted changes" >&2; exit 1; }
     new_version=$(jq -r --arg bump "{{bump}}" '
       (.version | split(".") | map(tonumber)) as [$maj,$min,$pat]
       | if   $bump == "major" then [$maj+1, 0, 0]
@@ -58,7 +76,16 @@ release bump='patch' yes='': precommit
     git push
     git push origin "$tag"
     gh release create "$tag" --title "Release $new_version" --generate-notes
-    echo "Release $tag complete"
+    # Marketplace bump.
+    mp_tmp=$(mktemp)
+    jq --arg n "$plugin_name" --arg v "$new_version" \
+      '(.plugins[] | select(.name == $n) | .version) = $v' \
+      "$marketplace_json" > "$mp_tmp"
+    mv "$mp_tmp" "$marketplace_json"
+    git -C "$MARKETPLACE_DIR" add .claude-plugin/marketplace.json
+    git -C "$MARKETPLACE_DIR" commit -m "release: $plugin_name $new_version"
+    git -C "$MARKETPLACE_DIR" push
+    echo "Release $tag complete (marketplace bumped to $new_version)"
 
 # Update the vendored plugin-dev toolkit to a specific tag (recommended)
 # or branch. Run from the consumer plugin root, on a clean tree.
@@ -72,3 +99,16 @@ update-plugin-dev ref:
       main|master|HEAD) echo "warning: pulling a branch ref ({{ref}}) — prefer a tag (vX.Y.Z) for reproducibility" >&2 ;;
     esac
     git subtree pull --prefix="{{toolkit_prefix}}" "{{toolkit_url}}" "{{ref}}" --squash
+    # Verify VERSION matches the requested tag (catches half-applied
+    # subtree pulls). VERSION first appeared in v0.2.0; older refs
+    # lack it, so the check is best-effort.
+    case "{{ref}}" in
+      v*)
+        expected="$(printf '%s' "{{ref}}" | sed 's/^v//')"
+        if [ -f "{{toolkit_prefix}}/VERSION" ]; then
+          actual=$(tr -d '[:space:]' < "{{toolkit_prefix}}/VERSION")
+          [ "$actual" = "$expected" ] \
+            || echo "warning: {{toolkit_prefix}}/VERSION ($actual) does not match requested ref ({{ref}})" >&2
+        fi
+        ;;
+    esac

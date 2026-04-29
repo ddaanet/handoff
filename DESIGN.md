@@ -166,6 +166,39 @@ jq), because `new_string` is a fragment, not a full JSON document.
 The Write branch uses jq because `tool_input.content` is the full
 file.
 
+### Toolkit version source of truth: `VERSION` file (not tags only)
+
+The toolkit ships a plain-text `VERSION` file at the repo root, bumped
+by the self-release recipe in lockstep with the git tag.
+
+Tag-only SOT was the obvious first choice — the toolkit has no
+`plugin.json`, and tags already encode releases. It was rejected
+because the toolkit is consumed via `git subtree`, and **tags don't
+propagate through subtree pulls**. A consumer's vendored
+`plugin-dev/` directory is "just files," with no way to ask "what
+version is this?" from inside the consumer's checkout.
+
+Concrete consequences without `VERSION`:
+
+- Consumers had to hand-maintain a version string in their
+  `CLAUDE.md` to remember what they vendored — drift inevitable.
+- `update-plugin-dev vX.Y.Z` had no way to verify the subtree pull
+  actually applied (a half-applied pull, e.g. with merge conflicts,
+  could leave older content in place silently).
+- The toolkit's own `install.sh` and scripts couldn't self-identify
+  without `git describe`, which fails on subtree-vendored copies.
+
+`VERSION` solves all three: `cat plugin-dev/VERSION` is the
+authoritative answer inside any consumer; `update-plugin-dev` can
+warn on mismatch; toolkit scripts can read their own version from
+disk.
+
+The cost is one line in the self-release recipe (write VERSION before
+the commit) and the discipline of bumping it together with the tag —
+the same invariant the consumer release recipe enforces on
+`plugin.json`. Submodules and packages would have made this moot,
+but those were rejected for other reasons (see "Distribution").
+
 ### Manifest version represents the *last released* version
 
 `plugin.json`'s `.version` field reflects whatever was last tagged.
