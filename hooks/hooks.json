@@ -41,7 +41,7 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-extract.sh",
-            "timeout": 15
+            "timeout": 30
           }
         ]
       }

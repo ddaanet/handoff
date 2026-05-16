@@ -16,7 +16,7 @@ if [[ -z "$transcript" ]]; then
     exit 1
 fi
 
-output="$(mktemp --suffix=.md)"
+output="$(mktemp "${TMPDIR:-/tmp}/handoff.XXXXXX.md")"
 trap 'rm -f "$output"' EXIT
 
 python3 scripts/extract.py "$transcript" "$output"

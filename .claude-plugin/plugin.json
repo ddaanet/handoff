@@ -6,5 +6,7 @@
     "name": "David Allouche",
     "email": "david@allouche.net"
   },
+  "homepage": "https://github.com/ddaanet/handoff",
+  "repository": "https://github.com/ddaanet/handoff",
   "license": "MIT"
 }

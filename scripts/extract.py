@@ -152,7 +152,7 @@ def anchor_for(entries: list[dict], user_index: int) -> str:
 
 
 def format_quote(text: str) -> list[str]:
-    return [f"> {line}" if line else ">" for line in text.splitlines()]
+    return [f"> {line}" if line.strip() else ">" for line in text.splitlines()]
 
 
 def emit(transcript_path: str, output_path: pathlib.Path) -> None:
@@ -165,7 +165,7 @@ def emit(transcript_path: str, output_path: pathlib.Path) -> None:
     user_prompts = extract_user_prompts(entries)
     tail_prompts = user_prompts[-LAST_N_PROMPTS:]
 
-    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S %z").strip()
+    now = _dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
     session_id = transcript.stem if transcript else "(no transcript)"
 
     lines: list[str] = []

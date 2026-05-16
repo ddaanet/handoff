@@ -14,8 +14,12 @@ file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
 cwd="$(jq -r '.cwd // ""' <<<"$input")"
 [[ -n "$cwd" ]] || cwd="$PWD"
 
-target="$(realpath -m -- "$file_path")"
-expected="$(realpath -m -- "$cwd/.claude/handoff-task.md")"
+# `realpath -m` is GNU-only; use python3 for portability (BSD realpath
+# rejects -m). Equivalent: returns an absolute path even when components
+# don't exist yet.
+resolve() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+target="$(resolve "$file_path")"
+expected="$(resolve "$cwd/.claude/handoff-task.md")"
 [[ "$target" == "$expected" ]] && exit 0
 
 read -r -d '' agent_reason <<EOF || true

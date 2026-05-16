@@ -16,8 +16,10 @@ transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
 [[ -n "$file_path" ]] || exit 0
 [[ "$(basename "$file_path")" == "handoff-task.md" ]] || exit 0
 
-target="$(realpath -m -- "$file_path")"
-expected="$(realpath -m -- "$cwd/.claude/handoff-task.md")"
+# `realpath -m` is GNU-only; use python3 for portability.
+resolve() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+target="$(resolve "$file_path")"
+expected="$(resolve "$cwd/.claude/handoff-task.md")"
 [[ "$target" == "$expected" ]] || exit 0
 
 [[ -f "$target" ]] || exit 0
