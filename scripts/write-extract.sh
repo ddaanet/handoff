@@ -30,9 +30,11 @@ output="$cwd/.claude/handoff.md"
 log="$cwd/.claude/handoff-error.log"
 if ! python3 "$script_dir/extract.py" "$transcript" "$output" >/dev/null 2>"$log"; then
     tail=$(tail -c 400 "$log" 2>/dev/null | tr '\n' ' ')
-    printf '{"systemMessage": "handoff extract failed (see %s): %s"}\n' "$log" "$tail"
+    jq -nc --arg log "$log" --arg tail "$tail" \
+        '{systemMessage: ("handoff extract failed (see " + $log + "): " + $tail)}'
     exit 0
 fi
 rm -f "$log"
 
-printf '{"systemMessage": "handoff extracted to %s"}\n' "$output"
+jq -nc --arg output "$output" \
+    '{systemMessage: ("handoff extracted to " + $output)}'

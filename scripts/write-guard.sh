@@ -35,6 +35,9 @@ EOF
 
 human_msg="write-guard: blocked handoff-task.md write outside $cwd/.claude/"
 
+# Modern PreToolUse deny: structured JSON on stdout, exit 0. Matches the
+# wipe scripts' channel (also stdout/exit 0) and avoids mixing the
+# legacy stderr-fed-to-Claude path with the structured permissionDecision
+# output.
 jq -nc --arg r "$agent_reason" --arg s "$human_msg" \
-  '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}, systemMessage: $s}' >&2
-exit 2
+  '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}, systemMessage: $s}'

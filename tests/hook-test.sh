@@ -65,21 +65,26 @@ rc=$?
 set -e
 assert_eq "$rc" "0" "write-guard same-project exit code"
 
-# write-guard denies cross-project writes with exit 2 and JSON deny.
+# write-guard denies cross-project writes via structured JSON on stdout
+# (exit 0). Modern PreToolUse deny path; matches the wipe scripts.
 echo "=== write-guard (cross-project: deny) ==="
 set +e
 out="$(
     jq -nc --arg cwd "$tmp" --arg fp "$other/.claude/handoff-task.md" \
         '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$fp}}' \
-        | bash scripts/write-guard.sh 2>&1
+        | bash scripts/write-guard.sh
 )"
 rc=$?
 set -e
-assert_eq "$rc" "2" "write-guard cross-project exit code"
-echo "$out" | grep -q '"permissionDecision":"deny"' \
+assert_eq "$rc" "0" "write-guard cross-project exit code"
+echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
     || fail "write-guard did not emit deny decision"
-echo "$out" | grep -q '"permissionDecisionReason"' \
+echo "$out" | jq -e '.hookSpecificOutput.permissionDecisionReason' >/dev/null \
     || fail "write-guard did not include permissionDecisionReason"
+echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null \
+    || fail "write-guard hookEventName != PreToolUse"
+echo "$out" | jq -e '.systemMessage' >/dev/null \
+    || fail "write-guard missing systemMessage"
 
 # write-guard ignores writes to other filenames.
 echo "=== write-guard (unrelated filename: allow) ==="
