@@ -60,15 +60,20 @@ WRAPPER_EXACT = frozenset({
 
 
 def load_entries(transcript: pathlib.Path) -> list[dict]:
+    # Strip sidechain entries at load — defence-in-depth against
+    # sub-agent rollups being interleaved into the main JSONL.
     entries: list[dict] = []
     for line in transcript.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            entries.append(json.loads(line))
+            entry = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if entry.get("isSidechain"):
+            continue
+        entries.append(entry)
     return entries
 
 
@@ -100,8 +105,14 @@ def user_text(message: dict) -> str:
     non_result = [b for b in content if isinstance(b, dict) and b.get("type") != "tool_result"]
     if not non_result:
         return ""
-    texts = [b.get("text", "") for b in non_result if isinstance(b, dict) and b.get("type") == "text"]
-    return "\n".join(t for t in texts if t).strip()
+    parts: list[str] = []
+    for b in non_result:
+        btype = b.get("type")
+        if btype == "text":
+            parts.append(b.get("text", ""))
+        else:
+            parts.append(f"[{btype} block]")
+    return "\n".join(p for p in parts if p).strip()
 
 
 def is_wrapper_entry(text: str) -> bool:
