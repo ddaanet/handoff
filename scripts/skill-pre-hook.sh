@@ -5,7 +5,9 @@
 # itself then either writes a fresh handoff-task.md or leaves nothing
 # (the "nothing to hand off" case).
 #
-# Mechanical work — agent is not involved.
+# Mechanical work — agent is not involved. Wipe+emit is shared with
+# prompt-pre-hook.sh via _wipe-emit.sh; this script is just the
+# Skill-tool filter on top.
 set -euo pipefail
 
 input="$(cat)"
@@ -18,20 +20,4 @@ skill="$(jq -r '.tool_input.skill // ""' <<<"$input")"
 cwd="$(jq -r '.cwd // ""' <<<"$input")"
 [[ -n "$cwd" ]] || cwd="$PWD"
 
-mkdir -p "$cwd/.claude"
-
-removed=()
-for f in "$cwd/.claude/handoff-task.md" "$cwd/.claude/handoff.md"; do
-    if [[ -f "$f" ]]; then
-        rm -f "$f"
-        removed+=("$(basename "$f")")
-    fi
-done
-
-if (( ${#removed[@]} > 0 )); then
-    files="$(IFS=', '; echo "${removed[*]}")"
-    msg="handoff: wiped prior $files"
-    agent_ctx="handoff activation hook wiped prior handoff files ($files); they are absent."
-    jq -nc --arg m "$msg" --arg c "$agent_ctx" \
-        '{systemMessage: $m, hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $c}}'
-fi
+exec bash "$(dirname "$0")/_wipe-emit.sh" "$cwd" "PreToolUse"

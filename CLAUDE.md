@@ -25,17 +25,21 @@ to edit the plugin's skill, hook, or script.
   `handoff-task.md` is written, so extraction is visible in the same
   agent turn.
 - `scripts/skill-pre-hook.sh` — PreToolUse(Skill) entry point:
-  matches `tool_input.skill == "handoff:handoff"` and `rm`s any prior
-  `.claude/handoff-task.md` and `.claude/handoff.md`. Mechanical reset
+  matches `tool_input.skill == "handoff:handoff"`, then `exec`s
+  `_wipe-emit.sh` with `hookEventName=PreToolUse`. Mechanical reset
   before the skill body is loaded — keeps the agent out of the
-  cleanup path. Emits both `systemMessage` (user-facing) and
-  `hookSpecificOutput.additionalContext` (agent-facing) so the agent
-  knows the wipe happened and doesn't redundantly verify.
+  cleanup path.
 - `scripts/prompt-pre-hook.sh` — UserPromptSubmit entry point:
-  matches prompts starting with `/handoff:handoff` and runs the same
-  wipe. `UserPromptSubmit` does not support the `matcher` field, so
-  the script does its own prefix check on the `prompt` JSON field.
-  Emits the same dual output as `skill-pre-hook.sh`.
+  matches prompts starting with `/handoff:handoff`, then `exec`s
+  `_wipe-emit.sh` with `hookEventName=UserPromptSubmit`.
+  `UserPromptSubmit` does not support the `matcher` field, so the
+  script does its own prefix check on the `prompt` JSON field.
+- `scripts/_wipe-emit.sh` — shared helper used by both entry scripts.
+  Removes `.claude/handoff-task.md` and `.claude/handoff.md` if
+  present and, if anything was removed, emits dual-channel JSON:
+  `systemMessage` (user-facing) and
+  `hookSpecificOutput.additionalContext` (agent-facing, so the agent
+  knows the wipe happened and doesn't redundantly verify).
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Refuses
   with a helpful agent-facing message when `basename` is
   `handoff-task.md` but `realpath` differs from

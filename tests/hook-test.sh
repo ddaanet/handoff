@@ -108,10 +108,13 @@ out="$(
 )"
 [[ ! -e "$tmp/.claude/handoff-task.md" ]] || fail "skill-pre-hook left handoff-task.md"
 [[ ! -e "$tmp/.claude/handoff.md" ]] || fail "skill-pre-hook left handoff.md"
-echo "$out" | jq -e '.systemMessage' >/dev/null \
-    || fail "skill-pre-hook missing systemMessage"
-echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null \
-    || fail "skill-pre-hook missing hookSpecificOutput.additionalContext"
+msg="$(echo "$out" | jq -r '.systemMessage // ""')"
+assert_eq "$msg" "handoff: wiped prior handoff-task.md, handoff.md" \
+    "skill-pre-hook systemMessage format"
+ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+assert_eq "$ctx" \
+    "handoff activation hook wiped prior handoff files (handoff-task.md, handoff.md); they are absent." \
+    "skill-pre-hook additionalContext format"
 echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null \
     || fail "skill-pre-hook hookEventName != PreToolUse"
 
@@ -144,10 +147,13 @@ out="$(
 )"
 [[ ! -e "$tmp/.claude/handoff-task.md" ]] || fail "prompt-pre-hook left handoff-task.md"
 [[ ! -e "$tmp/.claude/handoff.md" ]] || fail "prompt-pre-hook left handoff.md"
-echo "$out" | jq -e '.systemMessage' >/dev/null \
-    || fail "prompt-pre-hook missing systemMessage"
-echo "$out" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null \
-    || fail "prompt-pre-hook missing hookSpecificOutput.additionalContext"
+msg="$(echo "$out" | jq -r '.systemMessage // ""')"
+assert_eq "$msg" "handoff: wiped prior handoff-task.md, handoff.md" \
+    "prompt-pre-hook systemMessage format"
+ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+assert_eq "$ctx" \
+    "handoff activation hook wiped prior handoff files (handoff-task.md, handoff.md); they are absent." \
+    "prompt-pre-hook additionalContext format"
 echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null \
     || fail "prompt-pre-hook hookEventName != UserPromptSubmit"
 

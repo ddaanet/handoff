@@ -211,10 +211,17 @@ session.
 This was an explicit design decision *against* an in-skill `rm` step.
 Skills should not have the agent doing mechanical work the harness
 can do — agent compliance is a weaker guarantee than a hook, and
-splitting the cleanup logic into prose obscures it. The hook scripts
-are thin filters on top of one shared wipe — duplicated rather than
-factored, since five lines of `rm` per script is clearer than an
-indirection.
+splitting the cleanup logic into prose obscures it.
+
+The wipe+emit logic lives in `scripts/_wipe-emit.sh` and is shared
+by both entry scripts; each entry script is a thin filter (match the
+activation condition, extract `cwd`, `exec` the helper with its
+`hookEventName`). Originally the two scripts each did their own
+five-line `rm` — clearer than an indirection at that size. Once the
+dual-channel `systemMessage` + `additionalContext` emission was added
+the duplicated portion grew past twenty lines and the bit most
+likely to keep evolving (the output envelope) was the duplicated
+bit, so it was factored out.
 
 #### Two notification channels: user and agent
 
