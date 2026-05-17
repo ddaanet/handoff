@@ -104,14 +104,20 @@ hops, so the single reference pulls in both files.
   handoff-specific hook scripts against synthetic tool-event payloads,
   with assertions and a pass/fail summary. Exit code is propagated.
   `version-guard.sh` is tested in the toolkit, not here.
+- `just extract-test` — `tests/extract-test.sh`: fixture-driven test
+  of `extract.py`. Runs against hand-crafted JSONL under
+  `tests/fixtures/` and asserts on the rendered handoff.md (files
+  touched, prompt cap, anchors, wrapper filtering, sidechain
+  stripping, empty/missing transcript).
 
 Test scripts live under `tests/`. The justfile recipes are
 one-liners that delegate. Add new test scenarios to the existing
 script rather than adding new just recipes.
 
-Never mock the session JSONL format — always test against a real
-transcript. The format is undocumented and evolves; tests against
-fictional data will mislead.
+The smoke test must run against a real session JSONL — the format is
+undocumented and evolves. The fixture-driven extract test is allowed
+to use synthetic JSONL, but the fixture must mirror the real format
+(verify by eyeballing a recent transcript); fictional shapes mislead.
 
 ## Extraction logic
 

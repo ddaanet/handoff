@@ -18,8 +18,10 @@ precommit:
     bash -n scripts/write-guard.sh
     bash -n scripts/write-extract.sh
     bash -n tests/hook-test.sh
+    bash -n tests/extract-test.sh
     bash -n tests/smoke.sh
     bash tests/hook-test.sh
+    bash tests/extract-test.sh
     @echo "ok"
 
 # Extract handoff.md from an explicit transcript (testing)
@@ -33,3 +35,7 @@ smoke:
 # Run the hook test suite against synthetic tool-event input
 hook-test:
     bash tests/hook-test.sh
+
+# Run extract.py against the synthetic JSONL fixtures
+extract-test:
+    bash tests/extract-test.sh

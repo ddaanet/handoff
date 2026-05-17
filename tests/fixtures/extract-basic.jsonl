@@ -1,0 +1,22 @@
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"first prompt"}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"/handoff-test/file1.py","content":"x"}}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"Wrote file1"}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"<system-reminder>note</system-reminder>"}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"second prompt"}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/handoff-test/file3.py"}}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"..."}]}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t3","name":"Edit","input":{"file_path":"/handoff-test/file2.py","old_string":"a","new_string":"b"}}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t3","content":"ok"}]}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"Done editing"}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"<elided>"}}]}}
+{"type":"user","isSidechain":true,"message":{"role":"user","content":"sidechain prompt — must not appear"}}
+{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","id":"sx","name":"Write","input":{"file_path":"/handoff-test/sidechain.py","content":"x"}}]}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t4","name":"Write","input":{"file_path":"/handoff-test/file1.py","content":"x"}}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t4","content":"ok"}]}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t5","name":"Bash","input":{"command":"echo hi"}}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"[Request interrupted by user]"}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"<local-command-stdout>out</local-command-stdout>"}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"fourth prompt\n\nwith blank line"}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t6","name":"Edit","input":{"file_path":"/handoff-test/file2.py","old_string":"b","new_string":"c"}}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"fifth prompt"}}
