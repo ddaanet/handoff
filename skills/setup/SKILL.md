@@ -10,18 +10,6 @@ file only loads automatically when the project's `./CLAUDE.md`
 contains an `@.claude/handoff.md` reference. This skill adds that
 reference once per project. Idempotent.
 
-## When to invoke
-
-Invoke when the user:
-
-- Asks to "setup handoff", "install handoff in this project",
-  "initialize handoff"
-- Says "wire up handoff" or "add handoff to CLAUDE.md"
-- Asks to enable handoff loading at the start of new sessions
-
-If the reference is already present, proceed as a no-op and confirm in
-Step 3.
-
 ## Protocol
 
 ### Step 1: Check the current state
@@ -54,11 +42,13 @@ heading text keeps re-runs clean.
 If `./CLAUDE.md` does not exist, create it with just this block using
 Write.
 
-If `./CLAUDE.md` exists, use Edit to append safely: set `old_string`
-to the final line of the current file (read it first), and
-`new_string` to that same final line followed by a blank line and the
-block above. This preserves all existing content exactly — no
-reformatting, no re-ordering, no whitespace changes elsewhere.
+If `./CLAUDE.md` exists, Read the full file, then Write the original
+content followed by a blank line and the block above. Read+Write is
+safer than Edit here: Edit's `old_string` uniqueness check fails when
+the final line repeats anywhere (e.g., a blank trailing line). Read
+the file, append the block to its content in your reply, then Write
+the combined content back — no reformatting, no whitespace changes
+elsewhere.
 
 ### Step 3: Confirm
 
