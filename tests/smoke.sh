@@ -10,6 +10,8 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
 proj="$HOME/.claude/projects/-Users-david-code-handoff"
+# Session JSONLs are UUID-named so ls -t is safe here; no non-alphanumeric names.
+# shellcheck disable=SC2012
 transcript="$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1 || true)"
 if [[ -z "$transcript" ]]; then
     echo "no session transcript at $proj — open this dir in claude first" >&2

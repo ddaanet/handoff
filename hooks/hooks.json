@@ -1,5 +1,5 @@
 {
-  "description": "PreToolUse(Skill) and UserPromptSubmit: wipe prior handoff files when handoff:handoff activates (covers both the Skill-tool and slash-command invocation paths). PreToolUse(Write|Edit): deny handoff-task.md writes outside this project's .claude/. PostToolUse(Write|Edit): regenerate .claude/handoff.md when handoff-task.md is written.",
+  "description": "SessionStart(startup|clear): inject handoff.md content via additionalContext. PreToolUse(Skill) and UserPromptSubmit: wipe prior handoff files when handoff:handoff activates (covers both the Skill-tool and slash-command invocation paths). PreToolUse(Write|Edit): deny handoff-task.md writes outside this project's .claude/. PostToolUse(Write|Edit): regenerate .claude/handoff.md when handoff-task.md is written.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -42,6 +42,18 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-extract.sh",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/load-handoff.sh",
+            "timeout": 5
           }
         ]
       }

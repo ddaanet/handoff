@@ -9,8 +9,11 @@ Preserve the irreducible residual across `/clear`: what was in
 progress and what's still undecided. A `PreToolUse(Skill)` hook wipes
 any prior handoff files before this skill runs, so every invocation
 starts clean. A `PostToolUse(Write|Edit)` hook regenerates
-`.claude/handoff.md` (last user prompts, files touched) the moment
-the task file is written, so extraction is visible in the same turn.
+`.claude/handoff.md` (inlining the task content, plus last user
+prompts and files touched) the moment the task file is written, so
+extraction is visible in the same turn. A
+`SessionStart(startup|clear)` hook injects that file into the next
+session.
 
 ## Protocol
 

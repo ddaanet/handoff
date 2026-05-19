@@ -10,10 +10,9 @@ to edit the plugin's skill, hook, or script.
   contains the markdown template for `handoff-task.md`
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
-- `skills/setup/SKILL.md` — the first-run setup skill
-  (`/handoff:setup`), adds `@.claude/handoff.md` to the project's
-  `CLAUDE.md`. Idempotent, append-only.
-- `hooks/hooks.json` — declares four hooks.
+- `hooks/hooks.json` — declares five hooks.
+  `SessionStart(startup|clear)`: inject handoff.md content into the
+  fresh agent's context via additionalContext.
   `PreToolUse(Skill)` and `UserPromptSubmit`: wipe prior handoff files
   when `handoff:handoff` activates. The two together cover both
   invocation paths — the `Skill` tool (agent-driven) and the slash
@@ -29,6 +28,11 @@ to edit the plugin's skill, hook, or script.
   `_wipe-emit.sh` with `hookEventName=PreToolUse`. Mechanical reset
   before the skill body is loaded — keeps the agent out of the
   cleanup path.
+- `scripts/load-handoff.sh` — SessionStart(startup|clear) entry
+  point. Reads `$cwd/.claude/handoff.md` and emits its contents via
+  `hookSpecificOutput.additionalContext` (agent-facing) plus a curt
+  `systemMessage` with bytes + age (user-facing). Silent no-op when
+  the file is missing or empty.
 - `scripts/prompt-pre-hook.sh` — UserPromptSubmit entry point:
   matches prompts starting with `/handoff:handoff`, then `exec`s
   `_wipe-emit.sh` with `hookEventName=UserPromptSubmit`.
@@ -49,8 +53,8 @@ to edit the plugin's skill, hook, or script.
   and runs `extract.py` to (re)generate `$cwd/.claude/handoff.md`.
   Captures stderr to `.claude/handoff-error.log` on failure.
 - `scripts/extract.py` — parses the session JSONL, writes
-  `.claude/handoff.md` with `@handoff-task.md` at the top (resolved
-  relative to `handoff.md`'s own directory) and extracted sections
+  `.claude/handoff.md` with the inlined contents of
+  `.claude/handoff-task.md` (if it exists) and extracted sections
   below
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
@@ -73,9 +77,10 @@ to edit the plugin's skill, hook, or script.
   Tracked in git so the guard applies to every clone.
 - `DESIGN.md` — living design document, research, and decisions
 
-Loading is delegated to the user's project `CLAUDE.md` via
-`@.claude/handoff.md`. Claude Code's `@` resolution recurses up to 5
-hops, so the single reference pulls in both files.
+Loading is handled by the `SessionStart(startup|clear)` hook —
+`load-handoff.sh` reads `.claude/handoff.md` and injects its contents
+directly into the fresh agent's input. No user setup, no CLAUDE.md
+mutation required.
 
 ## Conventions
 
@@ -88,13 +93,13 @@ hops, so the single reference pulls in both files.
   and `.claude/handoff.md` (hook-written) in the project root.
   Changing these is a breaking change and requires a version bump.
 - `extract.py` must succeed even when the transcript path is empty or
-  missing — a handoff with just the `@` ref and empty extracted
-  sections is still valid.
+  missing — a handoff with just the inlined task content (if any) and
+  empty extracted sections is still valid.
 - Extraction constants (`LAST_N_PROMPTS`, `MAX_FILES`,
   `ANCHOR_TEXT_LIMIT`, `WRAPPER_PREFIXES`, `WRAPPER_EXACT`) live at the
   top of `extract.py`; do not inline them.
 - The markdown template lives in `SKILL.md` (single source of truth).
-  The script does not re-state the template — it just @-refs whatever
+  The script does not re-state the template — it just inlines whatever
   the agent wrote.
 
 ## Testing
@@ -146,7 +151,3 @@ to use synthetic JSONL, but the fixture must mirror the real format
   trust the template in SKILL.md.
 - Cross-session thread management. This plugin handles one `/clear`
   transition; auto-memory handles durable state.
-
-## Handoff
-
-@.claude/handoff.md

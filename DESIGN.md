@@ -3,7 +3,7 @@
 Living document. Captures the research, analysis, and decisions behind
 this plugin. Updated as the design evolves.
 
-Last updated: 2026-04-29.
+Last updated: 2026-05-19.
 
 ## Problem
 
@@ -135,14 +135,11 @@ Three patterns were considered:
   agent writes `./.claude/handoff-task.md` from a markdown template
   embedded in `SKILL.md`. A `PostToolUse(Write|Edit)` hook runs
   `extract.py` whenever the resolved file path is the project's task
-  file, producing `./.claude/handoff.md` — a short wrapper containing
-  `@handoff-task.md` plus extracted files-touched and last user
-  prompts. Project `CLAUDE.md` has `@.claude/handoff.md`, and Claude
-  Code's `@` resolution recurses (up to 5 hops) so both files load at
-  session start. Each `@` is resolved relative to the file that
-  contains it: `@.claude/handoff.md` is relative to project-root
-  `CLAUDE.md`, and `@handoff-task.md` inside `handoff.md` is relative
-  to `.claude/`.
+  file, producing `./.claude/handoff.md` — a self-contained file with
+  the inlined task content plus extracted files-touched and last user
+  prompts. A `SessionStart(startup|clear)` hook injects that file into
+  the next session's context (see the Loading section below). The old
+  `@`-ref load chain is no longer used.
 
 The chosen pattern has three concrete wins over the JSON approach:
 
@@ -150,8 +147,9 @@ The chosen pattern has three concrete wins over the JSON approach:
    single source of truth for format. The agent writes markdown in
    its own voice.
 2. **Simpler extraction.** `extract.py` does not merge typed fields
-   with extracted content — it writes a fixed header, an `@` ref,
-   and the extracted sections. No JSON-to-markdown translation.
+   with extracted content — it writes a fixed header, the inlined
+   task content, and the extracted sections. No JSON-to-markdown
+   translation.
 3. **Agent writes prose directly.** More natural than filling JSON
    fields, and the template makes the expected shape obvious.
 
@@ -252,8 +250,8 @@ the expected path so it can retry.
 If the agent's Write of `handoff-task.md` somehow doesn't fire the
 PostToolUse hook (hook timeout, extract.py crash logged to
 `handoff-error.log`), `handoff.md` is missing. Next session,
-`@.claude/handoff.md` resolves to nothing. The task file alone is not
-loaded.
+`load-handoff.sh` sees no `handoff.md` and is a silent no-op (the
+task file alone is not loaded).
 
 Acceptable — the user will notice (no handoff content in context) and
 re-run save. The plugin does not try to be clever here.
@@ -285,23 +283,40 @@ toolkit, vendored at `plugin-dev/` via `git subtree`. Rationale:
 Updates: `just update-plugin-dev vX.Y.Z` (recipe imported from
 `release.just`).
 
-## Loading: `@` reference in CLAUDE.md, not a SessionStart hook
+## Loading: SessionStart hook, not an `@` reference
 
-An earlier iteration shipped a SessionStart hook that announced
-`handoff.md` with its age. Removed in favour of the simpler pattern used
-in the `edify` plugin: recommend users add `@.claude/handoff.md` to
-their project `CLAUDE.md`. Claude Code resolves `@` references at
-session start, so the fresh agent sees the handoff content directly in
-its context — zero hook overhead, no race conditions, no notification
-channel to maintain.
+An earlier iteration shipped an `@.claude/handoff.md` reference in the
+project `CLAUDE.md`, added by a `/handoff:setup` skill. The chain
+worked — Claude Code resolved `@` refs at session start, recursively
+up to 5 hops, pulling the artifact into context — but it produced one
+structural failure mode:
 
-Missing files resolve silently to nothing, so the reference is safe to
-leave in `CLAUDE.md` permanently.
+> User enables the plugin, invokes `/handoff:handoff`, runs `/clear`,
+> and the next session sees nothing because they never ran setup.
 
-Archival stays an agent-judgement call on read (timestamp in the
-artifact's first heading makes staleness obvious). Each new save
-overwrites `handoff.md`, so in the steady-state case archival is
-unnecessary — the artifact naturally turns over.
+Loading via a `SessionStart(startup|clear)` hook eliminates that class
+entirely. The plugin owns its own load path; no setup step, no
+CLAUDE.md mutation, no detection-and-warn machinery. See
+`docs/superpowers/specs/2026-05-19-sessionstart-hook-loading-design.md`
+for the full decision record.
+
+Matcher choice: `startup` covers fresh `claude` invocations; `clear`
+covers in-session `/clear`. `resume` is omitted — the prior JSONL
+already contains the injection from when this hook fired earlier.
+
+The hook (`scripts/load-handoff.sh`) reads `$cwd/.claude/handoff.md`
+and emits its contents via `hookSpecificOutput.additionalContext`. A
+curt `systemMessage` ("handoff loaded — 3.2 KiB, saved 8m ago") is
+emitted alongside for the user. Errors log to `handoff-error.log`
+and exit 0 so a hook failure never blocks session startup.
+
+Token measurement: the `systemMessage` reports bytes, not API
+tokens. Anthropic has not open-sourced an exact offline tokenizer for
+Claude 3+; the `messages.count_tokens` API endpoint is the only
+precise option, and adds a network round-trip, an API key
+dependency, and a caching subsystem the plugin doesn't otherwise
+need. Bytes answers "is this material enough to care?" just as well
+for a 1–5 KiB artifact.
 
 ## Marker file schema
 
@@ -326,11 +341,7 @@ handoffs are task-scoped, not user-scoped.
 
 Session: `<session-id>`
 
-## Current task
-<from marker>
-
-## Open decisions
-<from marker>
+<inlined contents of ./.claude/handoff-task.md, if it exists>
 
 ## Files touched
 <extracted>
@@ -344,7 +355,10 @@ Session: `<session-id>`
 ```
 
 Location: `./.claude/handoff.md`. Overwrites previous. History is in
-git (if the user commits the file) or the session JSONL.
+git (if the user commits the file) or the session JSONL. The task
+content is inlined verbatim at write time by `extract.py` (reading
+`./.claude/handoff-task.md`); if the task file is missing the
+inlined block is omitted entirely.
 
 ## Extraction rules
 
@@ -357,25 +371,21 @@ git (if the user commits the file) or the session JSONL.
   turn. Prefer `tool_use` name + target; fall back to the first line of
   assistant text, trimmed to 120 chars.
 
-## Skills: handoff and setup
+## Skill: handoff
 
-Two skills ship with the plugin:
+One skill ships with the plugin:
 
 - **`/handoff:handoff`** — the main skill. Updates memory, then
   decides whether to write `handoff-task.md` from a template. The
-  cleanup case is handled by the PreToolUse hook at activation.
-- **`/handoff:setup`** — first-run helper. Adds the
-  `@.claude/handoff.md` reference to the project's `CLAUDE.md`.
-  Idempotent, append-only. Keeps setup to a single command per
-  project; manual editing remains possible.
-
-The split is intentional: `setup` is a once-per-project action with no
-bearing on the runtime save/load flow, so it doesn't belong in the
-main skill's protocol.
+  cleanup case is handled by the PreToolUse hook at activation; the
+  load case is handled by the SessionStart hook at the next session.
 
 The skill is named `handoff` (matching the plugin) so CLI completion
 on `/handoff:` lands directly on the action, with no second namespace
 hop.
+
+An earlier `/handoff:setup` skill was removed in v0.3.0 — see the
+Loading section above.
 
 ## Relationship to `/ddaa:handoff`
 
