@@ -8,25 +8,22 @@ what decisions are still open.
 
 ## Setup
 
-1. Install the plugin:
+Install the plugin:
 
-   ```
-   /plugin marketplace add ddaanet/claude-plugins
-   /plugin install handoff@ddaanet
-   ```
+```
+/plugin marketplace add ddaanet/claude-plugins
+/plugin install handoff@ddaanet
+```
 
-2. In each project you want handoff for, ask the agent to wire it up:
+That's it. No per-project setup step. A `SessionStart(startup|clear)`
+hook reads `./.claude/handoff.md` at session start and injects its
+contents into the fresh agent's context.
 
-   > setup handoff
-
-   The `setup` skill adds an `@.claude/handoff.md` reference to the
-   project's `CLAUDE.md` (creating the file if missing). Idempotent —
-   safe to run again.
-
-   Manual equivalent if you prefer: add `@.claude/handoff.md` to your
-   project's `CLAUDE.md`. Claude Code resolves `@` references at
-   session start; missing files silently skip, so the line is safe to
-   leave in `CLAUDE.md` permanently.
+**Migrating from v0.2.x**: if your project's `CLAUDE.md` contains a
+`## Handoff` section with `@.claude/handoff.md` (added by the old
+`/handoff:setup` skill, removed in v0.3.0), delete it. Leaving it in
+place is harmless but causes the content to load twice (once via the
+SessionStart hook, once via the `@`-ref).
 
 ## Usage
 
@@ -51,8 +48,8 @@ combining the task file with auto-extracted session data (last few
 user prompts verbatim, files edited this session) — the agent sees
 the result in the same turn. A `PreToolUse(Write|Edit)` guard refuses
 `handoff-task.md` writes that resolve outside the current project's
-`.claude/`. After `/clear`, the `@` reference in your `CLAUDE.md`
-loads the handoff automatically. Auto-memory restores independently.
+`.claude/`. After `/clear` (or in a fresh session), the `SessionStart` hook
+injects `handoff.md` into the new agent's context automatically. Auto-memory restores independently.
 
 ## Staleness and cleanup
 
@@ -88,8 +85,9 @@ split.
 Per project, under `./.claude/`:
 
 - `handoff-task.md` — agent-written task + open decisions.
-- `handoff.md` — hook-generated wrapper containing
-  `@handoff-task.md` plus extracted session data.
+- `handoff.md` — hook-generated, self-contained file with the inlined
+  task content plus extracted session data (last user prompts, files
+  edited).
 - `handoff-error.log` — written only if extraction fails.
 
 The two files are paired: invoke the skill again with nothing

@@ -17,6 +17,8 @@ precommit:
     bash -n scripts/prompt-pre-hook.sh
     bash -n scripts/write-guard.sh
     bash -n scripts/write-extract.sh
+    bash -n scripts/load-handoff.sh
+    bash -n scripts/_wipe-emit.sh
     bash -n tests/hook-test.sh
     bash -n tests/extract-test.sh
     bash -n tests/smoke.sh
