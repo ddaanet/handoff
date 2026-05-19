@@ -135,14 +135,11 @@ Three patterns were considered:
   agent writes `./.claude/handoff-task.md` from a markdown template
   embedded in `SKILL.md`. A `PostToolUse(Write|Edit)` hook runs
   `extract.py` whenever the resolved file path is the project's task
-  file, producing `./.claude/handoff.md` — a short wrapper containing
-  `@handoff-task.md` plus extracted files-touched and last user
-  prompts. Project `CLAUDE.md` has `@.claude/handoff.md`, and Claude
-  Code's `@` resolution recurses (up to 5 hops) so both files load at
-  session start. Each `@` is resolved relative to the file that
-  contains it: `@.claude/handoff.md` is relative to project-root
-  `CLAUDE.md`, and `@handoff-task.md` inside `handoff.md` is relative
-  to `.claude/`.
+  file, producing `./.claude/handoff.md` — a self-contained file with
+  the inlined task content plus extracted files-touched and last user
+  prompts. A `SessionStart(startup|clear)` hook injects that file into
+  the next session's context (see the Loading section below). The old
+  `@`-ref load chain is no longer used.
 
 The chosen pattern has three concrete wins over the JSON approach:
 
@@ -150,8 +147,9 @@ The chosen pattern has three concrete wins over the JSON approach:
    single source of truth for format. The agent writes markdown in
    its own voice.
 2. **Simpler extraction.** `extract.py` does not merge typed fields
-   with extracted content — it writes a fixed header, an `@` ref,
-   and the extracted sections. No JSON-to-markdown translation.
+   with extracted content — it writes a fixed header, the inlined
+   task content, and the extracted sections. No JSON-to-markdown
+   translation.
 3. **Agent writes prose directly.** More natural than filling JSON
    fields, and the template makes the expected shape obvious.
 
@@ -252,8 +250,8 @@ the expected path so it can retry.
 If the agent's Write of `handoff-task.md` somehow doesn't fire the
 PostToolUse hook (hook timeout, extract.py crash logged to
 `handoff-error.log`), `handoff.md` is missing. Next session,
-`@.claude/handoff.md` resolves to nothing. The task file alone is not
-loaded.
+`load-handoff.sh` sees no `handoff.md` and is a silent no-op (the
+task file alone is not loaded).
 
 Acceptable — the user will notice (no handoff content in context) and
 re-run save. The plugin does not try to be clever here.
