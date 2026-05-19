@@ -175,6 +175,91 @@ jq -nc --arg cwd "$tmp" \
     | bash scripts/prompt-pre-hook.sh
 [[ -e "$tmp/.claude/handoff-task.md" ]] || fail "prompt-pre-hook wiped on unrelated prompt"
 
+# load-handoff emits additionalContext + systemMessage when handoff.md
+# exists. The script must be a no-op when the file is missing or empty.
+# Exit code is always 0 (errors go to .claude/handoff-error.log).
+echo "=== load-handoff (handoff.md present: emit) ==="
+rm -f "$tmp/.claude/handoff.md"
+cat > "$tmp/.claude/handoff.md" <<'HOF'
+# Handoff — 2026-05-19 21:26:46 +0200
+
+Session: `test-session`
+
+## Current task
+
+load-handoff sentinel cafef00d
+HOF
+# Touch the file to a recent mtime so the "saved" age is deterministic.
+touch "$tmp/.claude/handoff.md"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" \
+        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
+        | bash scripts/load-handoff.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "load-handoff exit code (present)"
+ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+echo "$ctx" | grep -q 'load-handoff sentinel cafef00d' \
+    || fail "load-handoff additionalContext missing inlined content"
+echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null \
+    || fail "load-handoff hookEventName != SessionStart"
+msg="$(echo "$out" | jq -r '.systemMessage // ""')"
+echo "$msg" | grep -Eq '^handoff loaded — [0-9]+ B, saved (just now|[0-9]+m ago)$' \
+    || fail "load-handoff systemMessage format: '$msg'"
+
+# load-handoff is a no-op when handoff.md is missing.
+echo "=== load-handoff (missing handoff.md: no-op) ==="
+rm -f "$tmp/.claude/handoff.md"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" \
+        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
+        | bash scripts/load-handoff.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "load-handoff exit code (missing)"
+echo "${out:-{}}" | jq -e '(.hookSpecificOutput.additionalContext // "") == "" and (.systemMessage // "") == ""' >/dev/null \
+    || fail "load-handoff produced output when handoff.md missing: '$out'"
+
+# load-handoff is a no-op when handoff.md is empty.
+echo "=== load-handoff (empty handoff.md: no-op) ==="
+: > "$tmp/.claude/handoff.md"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" \
+        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
+        | bash scripts/load-handoff.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "load-handoff exit code (empty)"
+echo "${out:-{}}" | jq -e '(.hookSpecificOutput.additionalContext // "") == "" and (.systemMessage // "") == ""' >/dev/null \
+    || fail "load-handoff produced output when handoff.md empty: '$out'"
+
+# load-handoff size formatting: bytes for <1024, KiB.X for >=1024.
+echo "=== load-handoff (size formatting: KiB threshold) ==="
+# 2048 bytes = exactly 2.0 KiB. `yes | head -c` triggers SIGPIPE on
+# `yes` once head closes — tolerate it here (pure test setup).
+set +o pipefail
+yes "padding" | head -c 2048 > "$tmp/.claude/handoff.md"
+set -o pipefail
+touch "$tmp/.claude/handoff.md"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" \
+        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
+        | bash scripts/load-handoff.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "load-handoff exit code (kib)"
+msg="$(echo "$out" | jq -r '.systemMessage // ""')"
+echo "$msg" | grep -Eq '^handoff loaded — 2\.0 KiB, saved' \
+    || fail "load-handoff KiB formatting: '$msg'"
+
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
     exit 1

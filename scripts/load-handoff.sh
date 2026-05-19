@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# SessionStart hook for handoff loading. Fires on `startup` and
+# `clear` (see hooks/hooks.json). Reads $cwd/.claude/handoff.md and:
+#   - emits its contents via hookSpecificOutput.additionalContext so
+#     the fresh agent sees the handoff in its input for this turn;
+#   - emits a curt systemMessage with file size + age for the user
+#     ("handoff loaded — 3.2 KiB, saved 8m ago").
+# Silent no-op when handoff.md is missing or empty. Errors are logged
+# to .claude/handoff-error.log; the hook exits 0 either way so a
+# failure never blocks session startup.
+set -euo pipefail
+
+input="$(cat)"
+cwd="$(jq -r '.cwd // ""' <<<"$input")"
+hook_event="$(jq -r '.hook_event_name // "SessionStart"' <<<"$input")"
+[[ -n "$cwd" ]] || cwd="$PWD"
+
+handoff="$cwd/.claude/handoff.md"
+log="$cwd/.claude/handoff-error.log"
+
+[[ -s "$handoff" ]] || exit 0
+
+if ! content="$(cat "$handoff" 2>"$log")"; then
+    tail=$(tail -c 400 "$log" 2>/dev/null | tr '\n' ' ')
+    jq -nc --arg log "$log" --arg tail "$tail" \
+        '{systemMessage: ("handoff load failed (see " + $log + "): " + $tail)}'
+    exit 0
+fi
+rm -f "$log"
+
+bytes=$(wc -c < "$handoff" | tr -d ' ')
+if (( bytes < 1024 )); then
+    size="${bytes} B"
+else
+    size=$(awk -v b="$bytes" 'BEGIN { printf "%.1f KiB", b/1024 }')
+fi
+
+# GNU `stat -c %Y` on Linux; fall back to BSD `stat -f %m` on macOS.
+mtime=$(stat -c '%Y' "$handoff" 2>/dev/null || stat -f '%m' "$handoff")
+now=$(date +%s)
+delta=$(( now - mtime ))
+if (( delta < 60 )); then
+    age="just now"
+elif (( delta < 3600 )); then
+    age="$((delta / 60))m ago"
+elif (( delta < 86400 )); then
+    age="$((delta / 3600))h ago"
+else
+    age="$((delta / 86400))d ago"
+fi
+
+msg="handoff loaded — ${size}, saved ${age}"
+
+jq -nc \
+    --arg m "$msg" \
+    --arg c "$content" \
+    --arg e "$hook_event" \
+    '{systemMessage: $m, hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
