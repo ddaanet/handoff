@@ -24,6 +24,8 @@ hook smoke test
 - none
 TASK
 
+# Session JSONLs are UUID-named so ls -t is safe here; no non-alphanumeric names.
+# shellcheck disable=SC2012
 transcript="$(ls -t "$HOME/.claude/projects/-Users-david-code-handoff"/*.jsonl 2>/dev/null | head -1 || echo "")"
 
 failures=0
