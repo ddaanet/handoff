@@ -5,6 +5,11 @@ to edit the plugin's skill, hook, or script.
 
 ## Layout
 
+High-level flow: skill writes `.claude/handoff-task.md` →
+`PostToolUse(Write|Edit)` regenerates `.claude/handoff.md` →
+next session's `SessionStart(startup|clear)` injects it. `README.md`
+has the user-facing version of this.
+
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
   contains the markdown template for `handoff-task.md`
@@ -76,11 +81,6 @@ to edit the plugin's skill, hook, or script.
   toolkit's `version-guard.sh` as a PreToolUse(Write|Edit) hook.
   Tracked in git so the guard applies to every clone.
 - `DESIGN.md` — living design document, research, and decisions
-
-Loading is handled by the `SessionStart(startup|clear)` hook —
-`load-handoff.sh` reads `.claude/handoff.md` and injects its contents
-directly into the fresh agent's input. No user setup, no CLAUDE.md
-mutation required.
 
 ## Conventions
 
