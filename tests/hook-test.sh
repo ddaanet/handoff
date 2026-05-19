@@ -44,8 +44,11 @@ jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/.claude/handoff-tas
     '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
     | bash scripts/write-extract.sh
 [[ -f "$tmp/.claude/handoff.md" ]] || fail "write-extract did not create handoff.md"
-grep -q '^@handoff-task.md$' "$tmp/.claude/handoff.md" \
-    || fail "handoff.md missing @handoff-task.md ref"
+grep -q 'hook smoke test' "$tmp/.claude/handoff.md" \
+    || fail "handoff.md missing inlined task content"
+if grep -q '^@handoff-task.md$' "$tmp/.claude/handoff.md"; then
+    fail "handoff.md should not contain @handoff-task.md ref"
+fi
 
 # write-extract on an unrelated path is a no-op.
 echo "=== write-extract (unrelated path: no-op) ==="

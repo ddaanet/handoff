@@ -42,14 +42,30 @@ assert_eq() {
 #   tool_result-only filter, non-text placeholder
 # - Anchors: (session start), text fallback, file_path, command fallback
 # - format_quote: multi-line with blank line renders bare `>` (no trailing space)
+# - Task inlining: when handoff-task.md exists next to handoff.md, its
+#   contents are inlined into handoff.md (no `@` ref).
 echo "=== extract-basic (full-coverage fixture) ==="
-out="$tmp/basic.md"
+out_dir="$tmp/basic"
+mkdir -p "$out_dir"
+out="$out_dir/handoff.md"
+cat > "$out_dir/handoff-task.md" <<'TASK'
+## Current task
+
+inlining test sentinel value 7f3a1b9c
+
+## Open decisions
+
+- none
+TASK
 python3 scripts/extract.py tests/fixtures/extract-basic.jsonl "$out" > /dev/null
 
-# Header + @ ref are always present.
+# Header is always present.
 assert_contains "$out" "# Handoff — " "basic: header"
 assert_contains "$out" "Session: \`extract-basic\`" "basic: session line"
-assert_contains "$out" "@handoff-task.md" "basic: @ ref"
+
+# Task file inlined (no @ ref anywhere).
+assert_contains "$out" "inlining test sentinel value 7f3a1b9c" "basic: task content inlined"
+assert_not_contains "$out" "@handoff-task.md" "basic: @ ref gone"
 
 # Files touched: Write + Edit, dedup, order = first-appearance.
 assert_contains "$out" "- \`/handoff-test/file1.py\`" "basic: file1 listed"
@@ -58,7 +74,6 @@ assert_not_contains "$out" "/handoff-test/file3.py" "basic: Read excluded"
 assert_not_contains "$out" "/handoff-test/sidechain.py" "basic: sidechain stripped"
 
 # File order: file1 before file2 (first-appearance ordering).
-order="$(grep -n '/handoff-test/file' "$out" | head -2 | cut -d: -f1 | paste -sd, -)"
 f1_line="$(grep -n '/handoff-test/file1.py' "$out" | head -1 | cut -d: -f1)"
 f2_line="$(grep -n '/handoff-test/file2.py' "$out" | head -1 | cut -d: -f1)"
 [[ -n "$f1_line" && -n "$f2_line" && $f1_line -lt $f2_line ]] \
@@ -88,21 +103,49 @@ assert_not_contains "$out" "sidechain prompt" "basic: sidechain user prompt stri
 grep -q '^>$' "$out" || fail "basic: expected bare '>' line for blank line in multi-line prompt"
 
 # Empty transcript path: extract.py still writes a valid file with the
-# @ ref and empty-section notes. This is the "no session data" path
-# documented at the top of extract.py.
+# inlined task content and empty-section notes. The "no session data"
+# path documented at the top of extract.py.
 echo "=== empty-transcript (no session data) ==="
-out="$tmp/empty.md"
+out_dir="$tmp/empty"
+mkdir -p "$out_dir"
+out="$out_dir/handoff.md"
+cat > "$out_dir/handoff-task.md" <<'TASK'
+## Current task
+
+empty-transcript sentinel 4c8d2e1f
+TASK
 python3 scripts/extract.py "" "$out" > /dev/null
-assert_contains "$out" "@handoff-task.md" "empty: @ ref present"
+assert_contains "$out" "empty-transcript sentinel 4c8d2e1f" "empty: task content inlined"
+assert_not_contains "$out" "@handoff-task.md" "empty: @ ref gone"
 assert_contains "$out" "Session: \`(no transcript)\`" "empty: no-transcript session id"
 assert_contains "$out" "(none extracted)" "empty: empty-section note"
 
 # Missing transcript file: same fallback (treated as no session data).
 echo "=== missing-transcript (path doesn't exist) ==="
-out="$tmp/missing.md"
+out_dir="$tmp/missing"
+mkdir -p "$out_dir"
+out="$out_dir/handoff.md"
+cat > "$out_dir/handoff-task.md" <<'TASK'
+## Current task
+
+missing-transcript sentinel 9b6e3f0a
+TASK
 python3 scripts/extract.py "$tmp/does-not-exist.jsonl" "$out" > /dev/null
-assert_contains "$out" "@handoff-task.md" "missing: @ ref present"
+assert_contains "$out" "missing-transcript sentinel 9b6e3f0a" "missing: task content inlined"
+assert_not_contains "$out" "@handoff-task.md" "missing: @ ref gone"
 assert_contains "$out" "(none extracted)" "missing: empty-section note"
+
+# Missing task file: the inlined block is absent. No placeholder text,
+# no orphan heading. The surrounding sections still render.
+echo "=== missing-task (no handoff-task.md in output dir) ==="
+out_dir="$tmp/missing-task"
+mkdir -p "$out_dir"
+out="$out_dir/handoff.md"
+python3 scripts/extract.py "" "$out" > /dev/null
+assert_not_contains "$out" "@handoff-task.md" "missing-task: no @ ref"
+assert_not_contains "$out" "## Current task" "missing-task: no task heading"
+assert_contains "$out" "## Files touched" "missing-task: files section still present"
+assert_contains "$out" "## Last user prompts" "missing-task: prompts section still present"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
