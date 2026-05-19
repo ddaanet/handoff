@@ -32,9 +32,11 @@ That leaves two fields only the agent can fill:
 
 These are the irreducible residual. They live in `handoff-task.md`
 (agent-authored from the template in `SKILL.md`). A
-`PostToolUse(Write|Edit)` hook adds the mechanical extras (files
-touched, last user prompts) into `handoff.md`, which `@`-refs the
-task file.
+`PostToolUse(Write|Edit)` hook inlines the task content into
+`handoff.md` and adds the mechanical extras (files touched, last
+user prompts). A `SessionStart(startup|clear)` hook injects
+`handoff.md` into the next session's context — no `@`-ref or
+project-CLAUDE.md setup required.
 
 ## Why user prompts verbatim instead of summarised
 
@@ -63,8 +65,8 @@ content into the final markdown. It worked, but required:
 
 Replaced by a markdown template in `SKILL.md`. The agent writes prose
 directly in its own voice. No schema, no validator, no translation —
-the extract script just appends its sections after an `@` ref to the
-task file.
+the extract script just inlines the task file's contents and appends
+its sections below.
 
 Trade-off: markdown is softer than JSON, but the template is fixed and
 the skill's anti-patterns section guards against drift. The agent's
