@@ -49,6 +49,11 @@ has the user-facing version of this.
   `systemMessage` (user-facing) and
   `hookSpecificOutput.additionalContext` (agent-facing, so the agent
   knows the wipe happened and doesn't redundantly verify).
+- `scripts/_lib.sh` — sourced helper for the write hooks. Defines the
+  `HANDOFF_REL_*` path constants and `handoff_resolve()`, which
+  canonicalizes multiple paths in one `python3` subprocess (GNU/BSD
+  `realpath` are incompatible; python is portable and amortizes
+  startup).
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Refuses
   with a helpful agent-facing message when `basename` is
   `handoff-task.md` but `realpath` differs from
