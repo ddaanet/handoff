@@ -1,5 +1,5 @@
 {
-  "description": "SessionStart(startup|clear): inject handoff.md content via additionalContext. PreToolUse(Skill) and UserPromptSubmit: wipe prior handoff files when handoff:handoff activates (covers both the Skill-tool and slash-command invocation paths). PreToolUse(Write|Edit): deny handoff-task.md writes outside this project's .claude/. PostToolUse(Write|Edit): regenerate .claude/handoff.md when handoff-task.md is written.",
+  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, and post-write extract. See CLAUDE.md for details.",
   "hooks": {
     "UserPromptSubmit": [
       {

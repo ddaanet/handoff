@@ -6,14 +6,8 @@ description: This skill should be used when the user asks to "save handoff", "sa
 # handoff — Pre-Clear Task Snapshot
 
 Preserve the irreducible residual across `/clear`: what was in
-progress and what's still undecided. A `PreToolUse(Skill)` hook wipes
-any prior handoff files before this skill runs, so every invocation
-starts clean. A `PostToolUse(Write|Edit)` hook regenerates
-`.claude/handoff.md` (inlining the task content, plus last user
-prompts and files touched) the moment the task file is written, so
-extraction is visible in the same turn. A
-`SessionStart(startup|clear)` hook injects that file into the next
-session.
+progress and what's still undecided. Hooks handle wipe-before-write
+and extract-after-write — your job is the task file.
 
 ## Protocol
 
@@ -60,8 +54,6 @@ Rules:
   memory or git.
 - Durable lessons in `## Open decisions`. Those go to feedback memory.
 - Extra sections in `handoff-task.md`. The template is fixed.
-- Running `rm`/`ls` to verify prior cleanup. The activation hook
-  already wiped any prior files before this skill loaded.
 
 ## Additional resources
 

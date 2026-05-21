@@ -24,9 +24,11 @@ hook smoke test
 - none
 TASK
 
-# Session JSONLs are UUID-named so ls -t is safe here; no non-alphanumeric names.
-# shellcheck disable=SC2012
-transcript="$(ls -t "$HOME/.claude/projects/-Users-david-code-handoff"/*.jsonl 2>/dev/null | head -1 || echo "")"
+# Use the shared synthetic fixture: hermetic across machines and forks,
+# and lets the test assert that the transcript path is actually exercised
+# (not just that the inlined task content survives).
+transcript="$repo_root/tests/fixtures/extract-basic.jsonl"
+[[ -f "$transcript" ]] || { printf 'FAIL: fixture missing: %s\n' "$transcript" >&2; exit 1; }
 
 failures=0
 fail() {
@@ -48,6 +50,8 @@ jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/.claude/handoff-tas
 [[ -f "$tmp/.claude/handoff.md" ]] || fail "write-extract did not create handoff.md"
 grep -q 'hook smoke test' "$tmp/.claude/handoff.md" \
     || fail "handoff.md missing inlined task content"
+grep -q 'fifth prompt' "$tmp/.claude/handoff.md" \
+    || fail "handoff.md missing transcript-derived content (fixture not exercised)"
 if grep -q '^@handoff-task.md$' "$tmp/.claude/handoff.md"; then
     fail "handoff.md should not contain @handoff-task.md ref"
 fi

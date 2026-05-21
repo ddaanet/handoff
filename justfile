@@ -13,15 +13,7 @@ precommit:
     jq . hooks/hooks.json > /dev/null
     jq . .claude/settings.json > /dev/null
     python3 -c "import ast; ast.parse(open('scripts/extract.py').read())"
-    shellcheck scripts/skill-pre-hook.sh
-    shellcheck scripts/prompt-pre-hook.sh
-    shellcheck scripts/write-guard.sh
-    shellcheck scripts/write-extract.sh
-    shellcheck scripts/load-handoff.sh
-    shellcheck scripts/_wipe-emit.sh
-    shellcheck tests/hook-test.sh
-    shellcheck tests/extract-test.sh
-    shellcheck tests/smoke.sh
+    shellcheck -x scripts/*.sh tests/*.sh
     bash tests/hook-test.sh
     bash tests/extract-test.sh
     @echo "ok"

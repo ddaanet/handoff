@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # PreToolUse hook for Write|Edit.
 # Deny writes/edits whose target basename is handoff-task.md but whose
-# resolved absolute path is not $cwd/.claude/handoff-task.md. Catches
-# cross-project misfires and absolute-path mistakes; the message tells
-# the agent the right path.
+# resolved absolute path is not $cwd/.claude/handoff-task.md.
 set -euo pipefail
+
+# shellcheck source-path=SCRIPTDIR source=_lib.sh
+source "$(dirname "$0")/_lib.sh"
 
 input="$(cat)"
 file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
@@ -14,25 +15,10 @@ file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
 cwd="$(jq -r '.cwd // ""' <<<"$input")"
 [[ -n "$cwd" ]] || cwd="$PWD"
 
-# `realpath -m` is GNU-only; use python3 for portability (BSD realpath
-# rejects -m). Equivalent: returns an absolute path even when components
-# don't exist yet.
-resolve() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
-target="$(resolve "$file_path")"
-expected="$(resolve "$cwd/.claude/handoff-task.md")"
+{ read -r target; read -r expected; } < <(handoff_resolve "$file_path" "$cwd/$HANDOFF_REL_TASK")
 [[ "$target" == "$expected" ]] && exit 0
 
-read -r -d '' agent_reason <<EOF || true
-Refusing to write 'handoff-task.md' outside this project's '.claude/' directory.
-Resolved target: $target
-Expected:        $expected
-
-The handoff plugin is per-project. The intended path is
-'./.claude/handoff-task.md' relative to the current working directory
-($cwd). If a different file with the same name was intended, choose a
-different filename.
-EOF
-
+agent_reason="write blocked: handoff-task.md outside this project's .claude/. resolved: $target; expected: $expected."
 human_msg="write-guard: blocked handoff-task.md write outside $cwd/.claude/"
 
 # Modern PreToolUse deny: structured JSON on stdout, exit 0. Matches the

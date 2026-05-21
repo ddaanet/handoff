@@ -35,8 +35,8 @@ else
     size=$(awk -v b="$bytes" 'BEGIN { printf "%.1f KiB", b/1024 }')
 fi
 
-# GNU `stat -c %Y` on Linux; fall back to BSD `stat -f %m` on macOS.
-mtime=$(stat -c '%Y' "$handoff" 2>/dev/null || stat -f '%m' "$handoff")
+# GNU/BSD stat are incompatible; use python3 like the sibling write hooks.
+mtime=$(python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$handoff")
 now=$(date +%s)
 delta=$(( now - mtime ))
 if (( delta < 60 )); then
