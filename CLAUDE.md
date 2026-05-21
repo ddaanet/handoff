@@ -55,9 +55,9 @@ has the user-facing version of this.
   `realpath` are incompatible; python is portable and amortizes
   startup).
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Refuses
-  with a helpful agent-facing message when `basename` is
-  `handoff-task.md` but `realpath` differs from
-  `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
+  with a curt factual deny when `basename` is `handoff-task.md` but
+  `realpath` differs from `$cwd/.claude/handoff-task.md` (catches
+  cross-project misfires).
 - `scripts/write-extract.sh` — PostToolUse(Write|Edit) entry point:
   matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`
   and runs `extract.py` to (re)generate `$cwd/.claude/handoff.md`.
@@ -106,6 +106,11 @@ has the user-facing version of this.
 - The markdown template lives in `SKILL.md` (single source of truth).
   The script does not re-state the template — it just inlines whatever
   the agent wrote.
+- Sourced helpers (`_lib.sh`, `_wipe-emit.sh`) need
+  `# shellcheck source-path=SCRIPTDIR source=<file>.sh` above the
+  `source` line so `shellcheck -x` follows them. Add
+  `# shellcheck disable=SC2034` to vars consumed only by sourcing
+  scripts.
 
 ## Testing
 
