@@ -108,15 +108,46 @@ jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/README.md" \
     | bash scripts/write-extract.sh
 [[ ! -e "$tmp/.claude/handoff.md" ]] || fail "write-extract regenerated on unrelated path"
 
-# write-guard allows the canonical path.
-echo "=== write-guard (matching path: allow) ==="
+# write-guard: canonical handoff-task.md path is DENIED before activation.
+echo "=== write-guard (handoff-task.md, not activated: deny) ==="
 set +e
-jq -nc --arg cwd "$tmp" --arg fp "$tmp/.claude/handoff-task.md" \
-    '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$fp}}' \
-    | bash scripts/write-guard.sh
+out="$(
+    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/extract-basic.jsonl" --arg fp "$tmp/.claude/handoff-task.md" \
+        '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
+        | bash scripts/write-guard.sh
+)"
 rc=$?
 set -e
-assert_eq "$rc" "0" "write-guard same-project exit code"
+assert_eq "$rc" "0" "write-guard not-activated exit code"
+echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
+    || fail "write-guard did not deny handoff-task.md before activation"
+
+# write-guard: canonical handoff-task.md path is ALLOWED after activation.
+echo "=== write-guard (handoff-task.md, activated: allow) ==="
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/activated-skill.jsonl" --arg fp "$tmp/.claude/handoff-task.md" \
+        '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
+        | bash scripts/write-guard.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "write-guard activated exit code"
+assert_eq "$out" "" "write-guard activated produced no deny output"
+
+# write-guard: handoff.md is hook-owned — denied even when activated.
+echo "=== write-guard (handoff.md: deny) ==="
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/activated-skill.jsonl" --arg fp "$tmp/.claude/handoff.md" \
+        '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
+        | bash scripts/write-guard.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "write-guard handoff.md exit code"
+echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
+    || fail "write-guard did not deny write to hook-owned handoff.md"
 
 # write-guard denies cross-project writes via structured JSON on stdout
 # (exit 0). Modern PreToolUse deny path; matches the wipe scripts.
