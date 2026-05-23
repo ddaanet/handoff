@@ -1,0 +1,7 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "real prompt KEEPME_ONE"}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "sk1", "name": "Skill", "input": {"skill": "update-config"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "sk1", "content": "Launching skill: update-config"}]}}
+{"type": "user", "isSidechain": false, "isMeta": true, "sourceToolUseID": "sk1", "message": {"role": "user", "content": [{"type": "text", "text": "# Update Config Skill\n\nDROPME_SKILL_TOOL injected as the full skill body via the Skill tool. This block can be 100+ KB in real transcripts."}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "real prompt KEEPME_TWO"}}
+{"type": "user", "isSidechain": false, "isMeta": true, "message": {"role": "user", "content": [{"type": "text", "text": "# Plugin Creation Workflow\n\nDROPME_SKILL_SLASH injected as the full skill body via the /slash-command path (no sourceToolUseID)."}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "real prompt KEEPME_THREE"}}

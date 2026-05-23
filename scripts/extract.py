@@ -73,6 +73,16 @@ def load_entries(transcript: pathlib.Path) -> list[dict]:
             continue
         if entry.get("isSidechain"):
             continue
+        # Drop `isMeta` entries: the harness injects skill bodies as
+        # isMeta user entries on BOTH activation paths (Skill tool —
+        # carries sourceToolUseID — and the /slash-command path). A
+        # native skill body can be 100+ KB and does not start with any
+        # known wrapper prefix, so the text-based WRAPPER_PREFIXES filter
+        # misses it; dropping on the structural flag here keeps skill
+        # content out of every section (this bloat once produced a
+        # 140 KB handoff that overran jq's argv limit in load-handoff).
+        if entry.get("isMeta"):
+            continue
         entries.append(entry)
     return entries
 

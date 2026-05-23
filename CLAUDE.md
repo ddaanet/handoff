@@ -164,6 +164,13 @@ to use synthetic JSONL, but the fixture must mirror the real format
   `<bash-*>`, `<command-*>`, `<system-reminder>`) are filtered via
   `WRAPPER_PREFIXES`; `[Request interrupted by user]` via
   `WRAPPER_EXACT`.
+- **isMeta entries**: harness-injected entries (`isMeta == true`) are
+  dropped in `load_entries`, alongside `isSidechain`. This is how skill
+  bodies are kept out of the handoff: a skill activation injects its
+  full body as an `isMeta` user entry on both paths (the `Skill` tool
+  and the `/slash-command`), and a native skill body can be 100+ KB and
+  starts with its own heading, not a known wrapper prefix — so
+  `WRAPPER_PREFIXES` alone misses it. Drop on the structural flag.
 - **Anchor**: walk backwards from each kept user prompt to the nearest
   assistant turn. Prefer `tool_use` name + target; fall back to first
   line of assistant text.

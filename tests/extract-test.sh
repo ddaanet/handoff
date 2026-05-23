@@ -147,6 +147,27 @@ assert_not_contains "$out" "## Current task" "missing-task: no task heading"
 assert_contains "$out" "## Files touched" "missing-task: files section still present"
 assert_contains "$out" "## Last user prompts" "missing-task: prompts section still present"
 
+# extract-skill-meta.jsonl: skill bodies arrive as `isMeta` user entries
+# (both the Skill-tool path, with sourceToolUseID, and the slash-command
+# path, without). A native skill body can be 100+ KB and does NOT start
+# with a known wrapper prefix, so it must be dropped structurally on the
+# isMeta flag — never surfaced as a "last user prompt". Real prompts
+# (no isMeta) around it must still be retained.
+echo "=== extract-skill-meta (isMeta skill bodies dropped) ==="
+out_dir="$tmp/skill-meta"
+mkdir -p "$out_dir"
+out="$out_dir/handoff.md"
+python3 scripts/extract.py tests/fixtures/extract-skill-meta.jsonl "$out" > /dev/null
+# Real user prompts on either side of the skill bodies are kept.
+assert_contains "$out" "real prompt KEEPME_ONE" "skill-meta: real prompt before skill kept"
+assert_contains "$out" "real prompt KEEPME_TWO" "skill-meta: real prompt between skills kept"
+assert_contains "$out" "real prompt KEEPME_THREE" "skill-meta: real prompt after skill kept"
+# Skill bodies (both modes) must not leak into the prompts section.
+assert_not_contains "$out" "DROPME_SKILL_TOOL" "skill-meta: Skill-tool body dropped"
+assert_not_contains "$out" "DROPME_SKILL_SLASH" "skill-meta: slash-command body dropped"
+assert_not_contains "$out" "# Update Config Skill" "skill-meta: tool skill heading dropped"
+assert_not_contains "$out" "# Plugin Creation Workflow" "skill-meta: slash skill heading dropped"
+
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
     exit 1
