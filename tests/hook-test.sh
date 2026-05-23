@@ -266,6 +266,30 @@ msg="$(echo "$out" | jq -r '.systemMessage // ""')"
 echo "$msg" | grep -Eq '^handoff loaded — 2\.0 KiB, saved' \
     || fail "load-handoff KiB formatting: '$msg'"
 
+# load-handoff must survive handoffs larger than the per-argument execve
+# limit (MAX_ARG_STRLEN = 128 KiB on Linux). Regression: passing the body
+# via `jq --arg` crashed with "Argument list too long" and dropped the
+# context; reading the file with `jq --rawfile` bypasses the limit.
+echo "=== load-handoff (>128 KiB handoff: no arg-limit crash) ==="
+set +o pipefail
+yes "padding line to bulk up the handoff body well past the 128 KiB limit" \
+    | head -c 153600 > "$tmp/.claude/handoff.md"
+set -o pipefail
+printf '\nbig-handoff sentinel deadbeef\n' >> "$tmp/.claude/handoff.md"
+touch "$tmp/.claude/handoff.md"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" \
+        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
+        | bash scripts/load-handoff.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "load-handoff exit code (>128 KiB)"
+ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+echo "$ctx" | grep -q 'big-handoff sentinel deadbeef' \
+    || fail "load-handoff dropped body of >128 KiB handoff (arg-limit crash)"
+
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
     exit 1

@@ -20,7 +20,7 @@ log="$cwd/.claude/handoff-error.log"
 
 [[ -s "$handoff" ]] || exit 0
 
-if ! content="$(cat "$handoff" 2>"$log")"; then
+if ! cat "$handoff" >/dev/null 2>"$log"; then
     tail=$(tail -c 400 "$log" 2>/dev/null | tr '\n' ' ')
     jq -nc --arg log "$log" --arg tail "$tail" \
         '{systemMessage: ("handoff load failed (see " + $log + "): " + $tail)}'
@@ -53,6 +53,6 @@ msg="handoff loaded — ${size}, saved ${age}"
 
 jq -nc \
     --arg m "$msg" \
-    --arg c "$content" \
+    --rawfile c "$handoff" \
     --arg e "$hook_event" \
     '{systemMessage: $m, hookSpecificOutput: {hookEventName: $e, additionalContext: $c}}'
