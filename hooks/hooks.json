@@ -1,5 +1,5 @@
 {
-  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, and post-write extract. See CLAUDE.md for details.",
+  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, read guard, and post-write extract. See CLAUDE.md for details.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -29,6 +29,16 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-guard.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/read-guard.sh",
             "timeout": 5
           }
         ]

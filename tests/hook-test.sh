@@ -180,6 +180,60 @@ rc=$?
 set -e
 assert_eq "$rc" "0" "write-guard non-matching filename exit code"
 
+# read-guard: handoff.md is hook-owned — reads refused always.
+echo "=== read-guard (handoff.md: deny) ==="
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/activated-skill.jsonl" --arg fp "$tmp/.claude/handoff.md" \
+        '{cwd:$cwd, transcript_path:$t, tool_name:"Read", tool_input:{file_path:$fp}}' \
+        | bash scripts/read-guard.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "read-guard handoff.md exit code"
+echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
+    || fail "read-guard did not deny read of hook-owned handoff.md"
+
+# read-guard: handoff-task.md read refused before activation.
+echo "=== read-guard (handoff-task.md, not activated: deny) ==="
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/extract-basic.jsonl" --arg fp "$tmp/.claude/handoff-task.md" \
+        '{cwd:$cwd, transcript_path:$t, tool_name:"Read", tool_input:{file_path:$fp}}' \
+        | bash scripts/read-guard.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "read-guard not-activated exit code"
+echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
+    || fail "read-guard did not deny handoff-task.md read before activation"
+
+# read-guard: handoff-task.md read allowed after activation.
+echo "=== read-guard (handoff-task.md, activated: allow) ==="
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/activated-slash.jsonl" --arg fp "$tmp/.claude/handoff-task.md" \
+        '{cwd:$cwd, transcript_path:$t, tool_name:"Read", tool_input:{file_path:$fp}}' \
+        | bash scripts/read-guard.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "read-guard activated exit code"
+assert_eq "$out" "" "read-guard activated produced no deny output"
+
+# read-guard: unrelated file passes through.
+echo "=== read-guard (unrelated file: allow) ==="
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg fp "$tmp/README.md" \
+        '{cwd:$cwd, tool_name:"Read", tool_input:{file_path:$fp}}' \
+        | bash scripts/read-guard.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "read-guard unrelated exit code"
+assert_eq "$out" "" "read-guard unrelated produced no output"
+
 # skill-pre-hook on handoff:handoff wipes both files and notifies both
 # audiences (systemMessage for the user, additionalContext for the agent).
 echo "=== skill-pre-hook (handoff:handoff: wipe) ==="
