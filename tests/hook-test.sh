@@ -42,6 +42,50 @@ assert_eq() {
     fi
 }
 
+# --- _lib.sh: handoff_activated detector ---
+echo "=== handoff_activated (detector) ==="
+# shellcheck source-path=SCRIPTDIR source=../scripts/_lib.sh
+source "$repo_root/scripts/_lib.sh"
+
+set +e
+handoff_activated "$repo_root/tests/fixtures/activated-skill.jsonl"; rc=$?
+set -e
+assert_eq "$rc" "0" "handoff_activated: Skill tool_use → activated"
+
+set +e
+handoff_activated "$repo_root/tests/fixtures/activated-slash.jsonl"; rc=$?
+set -e
+assert_eq "$rc" "0" "handoff_activated: slash command → activated"
+
+set +e
+handoff_activated "$repo_root/tests/fixtures/extract-basic.jsonl"; rc=$?
+set -e
+assert_eq "$rc" "1" "handoff_activated: no signal → not activated"
+
+set +e
+handoff_activated ""; rc=$?
+set -e
+assert_eq "$rc" "1" "handoff_activated: empty path → not activated"
+
+set +e
+handoff_activated "$tmp/.claude/does-not-exist.jsonl"; rc=$?
+set -e
+assert_eq "$rc" "1" "handoff_activated: missing file → not activated"
+
+# --- _lib.sh: handoff_deny emitter ---
+echo "=== handoff_deny (emitter) ==="
+# Runs in a subshell via command substitution, so handoff_deny's exit 0
+# terminates only the subshell, not the test harness.
+out="$(handoff_deny "reason text" "system text")"
+echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
+    || fail "handoff_deny: permissionDecision != deny"
+echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null \
+    || fail "handoff_deny: hookEventName != PreToolUse"
+assert_eq "$(echo "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')" "reason text" \
+    "handoff_deny: reason passthrough"
+assert_eq "$(echo "$out" | jq -r '.systemMessage')" "system text" \
+    "handoff_deny: systemMessage passthrough"
+
 # write-extract on the matching path produces handoff.md.
 echo "=== write-extract (matching path) ==="
 jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/.claude/handoff-task.md" \
