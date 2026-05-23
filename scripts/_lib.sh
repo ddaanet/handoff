@@ -72,8 +72,8 @@ PY
 # Emit a PreToolUse deny on stdout, then `exit 0` (not `return`) —
 # terminates the calling process, so only safe from a standalone hook
 # script, not a general sourced context (subshell/interactive/setup).
-# Modern permissionDecision channel, identical envelope to the wipe
-# scripts. $1 = agent-facing reason (factual, no actionable phrasing);
+# Modern PreToolUse permissionDecision deny channel. $1 = agent-facing
+# reason (factual, no actionable phrasing);
 # $2 = user-facing systemMessage.
 handoff_deny() {
     jq -nc --arg r "$1" --arg s "$2" \

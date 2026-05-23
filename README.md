@@ -46,10 +46,11 @@ clean. The instant the task file is written, a
 `PostToolUse(Write|Edit)` hook produces `./.claude/handoff.md`
 combining the task file with auto-extracted session data (last few
 user prompts verbatim, files edited this session) — the agent sees
-the result in the same turn. A `PreToolUse(Write|Edit)` guard refuses
-`handoff-task.md` writes that resolve outside the current project's
-`.claude/`. After `/clear` (or in a fresh session), the `SessionStart` hook
-injects `handoff.md` into the new agent's context automatically. Auto-memory restores independently.
+the result in the same turn. Guards prevent the agent from reading or writing `.claude/handoff.md`
+and `.claude/handoff-task.md` outside the handoff flow — both files
+are managed exclusively by the skill and its hooks. After `/clear` (or
+in a fresh session), the `SessionStart` hook injects `handoff.md` into
+the new agent's context automatically. Auto-memory restores independently.
 
 ## Staleness and cleanup
 

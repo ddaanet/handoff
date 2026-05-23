@@ -15,7 +15,7 @@ has the user-facing version of this.
   contains the markdown template for `handoff-task.md`
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
-- `hooks/hooks.json` — declares five hooks.
+- `hooks/hooks.json` — declares six hooks.
   `SessionStart(startup|clear)`: inject handoff.md content into the
   fresh agent's context via additionalContext.
   `PreToolUse(Skill)` and `UserPromptSubmit`: wipe prior handoff files
@@ -23,8 +23,13 @@ has the user-facing version of this.
   invocation paths — the `Skill` tool (agent-driven) and the slash
   command `/handoff:handoff` (user-driven, which loads the skill body
   directly without going through the `Skill` tool).
-  `PreToolUse(Write|Edit)`: deny `handoff-task.md` writes whose
-  resolved path is not `$cwd/.claude/handoff-task.md`.
+  `PreToolUse(Read)`: deny reads of this project's `handoff.md`
+  (hook-owned) always, and its `handoff-task.md` until
+  `handoff:handoff` has activated this session.
+  `PreToolUse(Write|Edit)`: deny `handoff.md` writes (hook-owned
+  output); deny `handoff-task.md` writes before activation; deny
+  `handoff-task.md` writes whose resolved path is not
+  `$cwd/.claude/handoff-task.md` (cross-project guard).
   `PostToolUse(Write|Edit)`: regenerate `.claude/handoff.md` whenever
   `handoff-task.md` is written, so extraction is visible in the same
   agent turn.
@@ -49,15 +54,25 @@ has the user-facing version of this.
   `systemMessage` (user-facing) and
   `hookSpecificOutput.additionalContext` (agent-facing, so the agent
   knows the wipe happened and doesn't redundantly verify).
-- `scripts/_lib.sh` — sourced helper for the write hooks. Defines the
-  `HANDOFF_REL_*` path constants and `handoff_resolve()`, which
-  canonicalizes multiple paths in one `python3` subprocess (GNU/BSD
-  `realpath` are incompatible; python is portable and amortizes
-  startup).
-- `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Refuses
-  with a curt factual deny when `basename` is `handoff-task.md` but
-  `realpath` differs from `$cwd/.claude/handoff-task.md` (catches
-  cross-project misfires).
+- `scripts/_lib.sh` — sourced helper for the write and read hooks.
+  Defines the `HANDOFF_REL_*` path constants and `handoff_resolve()`,
+  which canonicalizes multiple paths in one `python3` subprocess
+  (GNU/BSD `realpath` are incompatible; python is portable and
+  amortizes startup). Also defines `handoff_activated()` (stateless
+  transcript scraper — checks whether the handoff skill has activated
+  this session by scanning for either invocation signal) and
+  `handoff_deny()` (shared PreToolUse deny emitter; calls `exit 0`
+  after printing the deny JSON, so only safe from a standalone hook
+  script).
+- `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
+  this project's `handoff.md` (hook-owned) always, and its
+  `handoff-task.md` until `handoff:handoff` has activated this session.
+- `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies
+  writes to this project's `handoff.md` (hook-owned output) always.
+  Denies `handoff-task.md` writes whose resolved path is not
+  `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
+  Denies `handoff-task.md` writes before `handoff:handoff` has
+  activated this session.
 - `scripts/write-extract.sh` — PostToolUse(Write|Edit) entry point:
   matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`
   and runs `extract.py` to (re)generate `$cwd/.claude/handoff.md`.
