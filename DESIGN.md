@@ -3,7 +3,7 @@
 Living document. Captures the research, analysis, and decisions behind
 this plugin. Updated as the design evolves.
 
-Last updated: 2026-05-23.
+Last updated: 2026-05-24.
 
 ## Problem
 
@@ -189,8 +189,11 @@ then loaded against a guaranteed-clean slate.
 Two hooks are needed because the skill has two activation paths:
 
 - **Agent invocation (`Skill` tool).** A `PreToolUse` hook matched
-  on `Skill` and filtered to `tool_input.skill == "handoff:handoff"`
-  fires before the tool runs.
+  on `Skill` and filtered to `tool_input.skill` being either
+  `handoff` or `handoff:handoff` fires before the tool runs. The Skill
+  tool accepts both the bare and qualified name as launches of the
+  same skill, so the filter is an explicit two-form allowlist — a
+  bare-name launch must reset just like the qualified one.
 - **User invocation (`/handoff:handoff` slash command).** This path
   loads the skill body directly into context without going through
   the `Skill` tool, so `PreToolUse(Skill)` does not fire. A
@@ -288,8 +291,10 @@ without stored state. Three mechanisms were weighed:
   only on the rare guarded call (the cheap basename check
   short-circuits first). A `handoff_activated()` helper in `_lib.sh`
   scans for either activation signal the wipe hooks already key on: a
-  `Skill` tool_use with `skill == "handoff:handoff"`, or the
-  `/handoff:handoff` slash invocation. The slash form's exact JSONL
+  `Skill` tool_use with `skill` equal to `handoff` or `handoff:handoff`
+  (same two-form allowlist as the wipe hook — the guard must recognise a
+  bare-name launch as activation, or it would deny the writes the skill
+  is about to make), or the `/handoff:handoff` slash invocation. The slash form's exact JSONL
   shape must be verified against a real transcript (it may be stored
   as a `<command-name>` wrapper, not literal text) — the `Skill`
   signal is the dependable one.

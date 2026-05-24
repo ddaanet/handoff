@@ -22,10 +22,11 @@ handoff_resolve() {
 for p in sys.argv[1:]: print(os.path.realpath(p))' "$@"
 }
 
-# Has the handoff:handoff skill activated in this session? Stateless:
-# derive the answer from the transcript JSONL each call (no marker, no
-# env). Scans for either activation signal the wipe hooks key on — a
-# Skill tool_use (agent path) or the /handoff:handoff slash command
+# Has the handoff skill activated in this session? Stateless: derive the
+# answer from the transcript JSONL each call (no marker, no env). Scans
+# for either activation signal the wipe hooks key on — a Skill tool_use
+# (agent path; the bare `handoff` and qualified `handoff:handoff` arg are
+# both launches of the same skill) or the /handoff:handoff slash command
 # (user path, stored as a <command-name> wrapper). Verified against real
 # transcripts 2026-05-23. Exit 0 if activated, 1 otherwise (incl.
 # empty/missing/unreadable transcript).
@@ -52,13 +53,13 @@ with fh:
         if entry.get("isSidechain"):
             continue
         msg = entry.get("message") or {}
-        # Agent path: Skill tool_use with skill == handoff:handoff.
+        # Agent path: Skill tool_use with skill == handoff[:handoff].
         if msg.get("role") == "assistant":
             for block in msg.get("content") or []:
                 if (isinstance(block, dict)
                         and block.get("type") == "tool_use"
                         and block.get("name") == "Skill"
-                        and (block.get("input") or {}).get("skill") == "handoff:handoff"):
+                        and (block.get("input") or {}).get("skill") in ("handoff", "handoff:handoff")):
                     sys.exit(0)
         # User path: slash command stored as a <command-name> wrapper.
         if entry.get("type") == "user":

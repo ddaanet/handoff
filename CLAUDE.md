@@ -34,7 +34,8 @@ has the user-facing version of this.
   `handoff-task.md` is written, so extraction is visible in the same
   agent turn.
 - `scripts/skill-pre-hook.sh` — PreToolUse(Skill) entry point:
-  matches `tool_input.skill == "handoff:handoff"`, then `exec`s
+  matches `tool_input.skill` being `handoff` or `handoff:handoff` (the
+  Skill tool accepts both as launches of the same skill), then `exec`s
   `_wipe-emit.sh` with `hookEventName=PreToolUse`. Mechanical reset
   before the skill body is loaded — keeps the agent out of the
   cleanup path.

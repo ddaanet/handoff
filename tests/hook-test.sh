@@ -50,7 +50,12 @@ source "$repo_root/scripts/_lib.sh"
 set +e
 handoff_activated "$repo_root/tests/fixtures/activated-skill.jsonl"; rc=$?
 set -e
-assert_eq "$rc" "0" "handoff_activated: Skill tool_use → activated"
+assert_eq "$rc" "0" "handoff_activated: Skill tool_use (qualified) → activated"
+
+set +e
+handoff_activated "$repo_root/tests/fixtures/activated-skill-bare.jsonl"; rc=$?
+set -e
+assert_eq "$rc" "0" "handoff_activated: Skill tool_use (bare name) → activated"
 
 set +e
 handoff_activated "$repo_root/tests/fixtures/activated-slash.jsonl"; rc=$?
@@ -255,6 +260,17 @@ assert_eq "$ctx" \
     "skill-pre-hook additionalContext format"
 echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null \
     || fail "skill-pre-hook hookEventName != PreToolUse"
+
+# skill-pre-hook on the bare `handoff` arg wipes too — the Skill tool
+# accepts both forms as launches of the same skill.
+echo "=== skill-pre-hook (bare handoff: wipe) ==="
+: > "$tmp/.claude/handoff-task.md"
+: > "$tmp/.claude/handoff.md"
+jq -nc --arg cwd "$tmp" \
+    '{cwd:$cwd, tool_name:"Skill", tool_input:{skill:"handoff"}}' \
+    | bash scripts/skill-pre-hook.sh >/dev/null
+[[ ! -e "$tmp/.claude/handoff-task.md" ]] || fail "skill-pre-hook (bare) left handoff-task.md"
+[[ ! -e "$tmp/.claude/handoff.md" ]] || fail "skill-pre-hook (bare) left handoff.md"
 
 # skill-pre-hook on a different skill is a no-op.
 echo "=== skill-pre-hook (other skill: no-op) ==="
