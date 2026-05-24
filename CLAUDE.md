@@ -161,9 +161,9 @@ to use synthetic JSONL, but the fixture must mirror the real format
 - **User prompts**: entries with `type == "user"`. Messages whose
   `content` is entirely `tool_result` blocks are filtered out
   (internal wrappers). CLI-injected wrappers (`<local-command-*>`,
-  `<bash-*>`, `<command-*>`, `<system-reminder>`) are filtered via
-  `WRAPPER_PREFIXES`; `[Request interrupted by user]` via
-  `WRAPPER_EXACT`.
+  `<bash-*>`, `<command-*>`, `<system-reminder>`, `<task-notification>`)
+  are filtered via `WRAPPER_PREFIXES`; `[Request interrupted by user]`
+  via `WRAPPER_EXACT`.
 - **isMeta entries**: harness-injected entries (`isMeta == true`) are
   dropped in `load_entries`, alongside `isSidechain`. This is how skill
   bodies are kept out of the handoff: a skill activation injects its

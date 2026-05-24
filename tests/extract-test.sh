@@ -167,6 +167,10 @@ assert_not_contains "$out" "DROPME_SKILL_TOOL" "skill-meta: Skill-tool body drop
 assert_not_contains "$out" "DROPME_SKILL_SLASH" "skill-meta: slash-command body dropped"
 assert_not_contains "$out" "# Update Config Skill" "skill-meta: tool skill heading dropped"
 assert_not_contains "$out" "# Plugin Creation Workflow" "skill-meta: slash skill heading dropped"
+# Background-job <task-notification> wrappers are harness-injected, not
+# user prompts — filtered via WRAPPER_PREFIXES like <system-reminder>.
+assert_not_contains "$out" "TASKNOTIF_DROP" "skill-meta: task-notification body dropped"
+assert_not_contains "$out" "<task-notification>" "skill-meta: task-notification wrapper dropped"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2

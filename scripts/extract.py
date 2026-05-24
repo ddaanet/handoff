@@ -51,6 +51,7 @@ WRAPPER_PREFIXES = (
     "<command-message>",
     "<command-args>",
     "<system-reminder>",
+    "<task-notification>",
     "Base directory for this skill:",
 )
 
