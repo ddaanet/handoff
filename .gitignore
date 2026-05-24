@@ -5,3 +5,7 @@
 
 # Local-only Claude Code settings
 .claude/settings.local.json
+
+# Python bytecode (extract.py)
+__pycache__/
+*.pyc
