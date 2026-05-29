@@ -13,6 +13,14 @@
     ]
   },
   "enabledPlugins": {
-    "revdiff@revdiff": true
+    "revdiff@revdiff": true,
+    "superpowers@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "gitlore@ddaanet": true,
+    "plugin-dev@claude-plugins-official": true
+  },
+  "gitlore": {
+    "enabled": true,
+    "precommitCommand": "just precommit"
   }
 }

@@ -13,6 +13,7 @@ tmp="$(mktemp -d)"
 other="$(mktemp -d)"
 mkdir -p "$tmp/.claude" "$other/.claude"
 trap 'rm -rf "$tmp" "$other"' EXIT
+export CLAUDE_PROJECT_DIR="$tmp"
 
 cat > "$tmp/.claude/handoff-task.md" <<'TASK'
 ## Current task
@@ -175,6 +176,21 @@ echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/nu
 echo "$out" | jq -e '.systemMessage' >/dev/null \
     || fail "write-guard missing systemMessage"
 
+# write-guard: CLAUDE_PROJECT_DIR overrides payload cwd for cross-project check.
+# Simulates shell cwd drifting to another directory (e.g. via /add-dir + cd)
+# while the project root stays $tmp. Write to $tmp should be allowed.
+echo "=== write-guard (CLAUDE_PROJECT_DIR overrides cwd drift: allow) ==="
+set +e
+out="$(
+    jq -nc --arg cwd "$other" --arg t "$repo_root/tests/fixtures/activated-skill.jsonl" --arg fp "$tmp/.claude/handoff-task.md" \
+        '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
+        | CLAUDE_PROJECT_DIR="$tmp" bash scripts/write-guard.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "write-guard CLAUDE_PROJECT_DIR override exit code"
+assert_eq "$out" "" "write-guard CLAUDE_PROJECT_DIR override produced no deny output"
+
 # write-guard ignores writes to other filenames.
 echo "=== write-guard (unrelated filename: allow) ==="
 set +e
@@ -283,9 +299,8 @@ jq -nc --arg cwd "$tmp" \
 # skill-pre-hook creates .claude/ when missing.
 echo "=== skill-pre-hook (missing .claude: create) ==="
 fresh="$(mktemp -d)"
-jq -nc --arg cwd "$fresh" \
-    '{cwd:$cwd, tool_name:"Skill", tool_input:{skill:"handoff:handoff"}}' \
-    | bash scripts/skill-pre-hook.sh
+jq -nc '{tool_name:"Skill", tool_input:{skill:"handoff:handoff"}}' \
+    | CLAUDE_PROJECT_DIR="$fresh" bash scripts/skill-pre-hook.sh
 [[ -d "$fresh/.claude" ]] || fail "skill-pre-hook did not create .claude/"
 rm -rf "$fresh"
 

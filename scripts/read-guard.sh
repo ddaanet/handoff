@@ -17,8 +17,7 @@ file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
 base="$(basename "$file_path")"
 [[ "$base" == "handoff.md" || "$base" == "handoff-task.md" ]] || exit 0
 
-cwd="$(jq -r '.cwd // ""' <<<"$input")"
-[[ -n "$cwd" ]] || cwd="$PWD"
+cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
 
 { read -r target; read -r exp_task; read -r exp_out; } \

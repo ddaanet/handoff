@@ -3,7 +3,7 @@
 Living document. Captures the research, analysis, and decisions behind
 this plugin. Updated as the design evolves.
 
-Last updated: 2026-05-24.
+Last updated: 2026-05-29.
 
 ## Problem
 
@@ -243,10 +243,20 @@ with the deny-message convention elsewhere in the plugin.
 Per-project scope is enforced at write time. A
 `PreToolUse(Write|Edit)` hook denies any Write/Edit whose target
 basename is `handoff-task.md` and whose `realpath` differs from
-`$cwd/.claude/handoff-task.md`. Catches absolute-path mistakes and
-multi-checkout confusion (agent operating in project A but resolving
-a path that lands in project B). The denial message tells the agent
-the expected path so it can retry.
+`$PROJECT_ROOT/.claude/handoff-task.md`. Catches absolute-path
+mistakes and multi-checkout confusion (agent operating in project A
+but resolving a path that lands in project B). The denial message
+tells the agent the expected path so it can retry.
+
+**Project root resolution.** Hook payloads include a `cwd` field,
+but `cwd` tracks the Bash tool's *persistent shell working directory*,
+not the project's configured directory. If the shell cwd drifts — for
+example, via `/add-dir` adding a second repo and a subsequent `cd` to
+it — `cwd` in the payload points to the wrong project. The guard
+therefore uses `CLAUDE_PROJECT_DIR` (the project's configured root,
+stable for the lifetime of the session) with a fallback to payload
+`cwd` for contexts where the env var is absent. All six hooks in the
+plugin follow this pattern.
 
 ### Pre-activation file guards: gating *when*, not just *where*
 
@@ -362,8 +372,10 @@ Matcher choice: `startup` covers fresh `claude` invocations; `clear`
 covers in-session `/clear`. `resume` is omitted — the prior JSONL
 already contains the injection from when this hook fired earlier.
 
-The hook (`scripts/load-handoff.sh`) reads `$cwd/.claude/handoff.md`
-and emits its contents via `hookSpecificOutput.additionalContext`. A
+The hook (`scripts/load-handoff.sh`) reads
+`$CLAUDE_PROJECT_DIR/.claude/handoff.md` (falling back to payload
+`cwd` — see Cross-project guard) and emits its contents via
+`hookSpecificOutput.additionalContext`. A
 curt `systemMessage` ("handoff loaded — 3.2 KiB, saved 8m ago") is
 emitted alongside for the user. Errors log to `handoff-error.log`
 and exit 0 so a hook failure never blocks session startup.

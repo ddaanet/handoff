@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+# gitlore launcher shim. Injects --settings '{"autoMemoryDirectory":…}' so CC's
+# native auto-memory lands in the gitlore submodule. Identical in both placements;
+# see docs/design.md "Memory Redirect Launcher" (D10).
+
+# real claude = next `claude` on PATH after stripping my own dir
+self=$(cd "$(dirname "$0")" && pwd)
+newpath=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$self" | paste -sd:)
+real=$(PATH="$newpath" command -v claude) || { echo "gitlore: real claude not found" >&2; exit 127; }
+
+# already injected upstream? pass through (composability, anti-double-inject, anti-recursion)
+[ -n "$GITLORE_LAUNCHED" ] && exec "$real" "$@"
+
+# in a gitlore-enabled repo? cheap git checks first, so jq only runs for actual gitlore repos
+root=$(git rev-parse --show-toplevel 2>/dev/null)
+mempath=$(git config --file "$root/.gitmodules" submodule.gitlore-memory.path 2>/dev/null)
+[ -n "$root" ] && [ -n "$mempath" ] || exec "$real" "$@"          # no gitlore submodule → passthrough
+[ "$(jq -r '.gitlore.enabled // false' "$root/.claude/settings.json" 2>/dev/null)" = true ] \
+  || exec "$real" "$@"                                            # submodule present but disabled → passthrough
+
+json=$(jq -nc --arg p "$root/$mempath" '{autoMemoryDirectory:$p}')
+export GITLORE_LAUNCHED=1
+exec "$real" --settings "$json" "$@"

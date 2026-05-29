@@ -11,9 +11,8 @@
 set -euo pipefail
 
 input="$(cat)"
-cwd="$(jq -r '.cwd // ""' <<<"$input")"
+cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 hook_event="$(jq -r '.hook_event_name // "SessionStart"' <<<"$input")"
-[[ -n "$cwd" ]] || cwd="$PWD"
 
 handoff="$cwd/.claude/handoff.md"
 log="$cwd/.claude/handoff-error.log"
