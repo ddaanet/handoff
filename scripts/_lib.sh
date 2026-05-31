@@ -12,6 +12,8 @@ HANDOFF_REL_TASK=".claude/handoff-task.md"
 HANDOFF_REL_OUT=".claude/handoff.md"
 # shellcheck disable=SC2034
 HANDOFF_REL_ERR=".claude/handoff-error.log"
+# shellcheck disable=SC2034
+HANDOFF_REL_RENAME=".claude/autorename"
 
 # Portable path canonicalization. `realpath -m` is GNU-only; BSD
 # `realpath` rejects non-existent components. Python handles both and

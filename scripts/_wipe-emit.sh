@@ -18,7 +18,7 @@ hook_event="${2:?hook_event_name required}"
 mkdir -p "$cwd/.claude"
 
 removed=()
-for f in "$cwd/.claude/handoff-task.md" "$cwd/.claude/handoff.md"; do
+for f in "$cwd/.claude/handoff-task.md" "$cwd/.claude/handoff.md" "$cwd/.claude/autorename"; do
     if [[ -f "$f" ]]; then
         rm -f "$f"
         removed+=("$(basename "$f")")

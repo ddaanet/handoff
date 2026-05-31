@@ -450,6 +450,66 @@ ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // ""')"
 echo "$ctx" | grep -q 'big-handoff sentinel deadbeef' \
     || fail "load-handoff dropped body of >128 KiB handoff (arg-limit crash)"
 
+# write-rename: matching path, in tmux → deletes file, systemMessage confirms rename.
+echo "=== write-rename (matching path, in tmux) ==="
+echo "the title" > "$tmp/.claude/autorename"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg fp "$tmp/.claude/autorename" \
+        '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$fp}}' \
+        | TMUX=fake TMUX_PANE='%0' bash scripts/write-rename.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "write-rename in-tmux exit code"
+[[ ! -e "$tmp/.claude/autorename" ]] || fail "write-rename in-tmux: autorename not deleted"
+echo "$out" | jq -e '.systemMessage | test("will rename")' >/dev/null \
+    || fail "write-rename in-tmux: systemMessage missing 'will rename'"
+echo "$out" | jq -e '.systemMessage | test("the title")' >/dev/null \
+    || fail "write-rename in-tmux: systemMessage missing title"
+
+# write-rename: matching path, not in tmux → deletes file, systemMessage has /rename line.
+echo "=== write-rename (matching path, not in tmux) ==="
+echo "the title" > "$tmp/.claude/autorename"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg fp "$tmp/.claude/autorename" \
+        '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$fp}}' \
+        | env -u TMUX -u TMUX_PANE bash scripts/write-rename.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "write-rename not-in-tmux exit code"
+[[ ! -e "$tmp/.claude/autorename" ]] || fail "write-rename not-in-tmux: autorename not deleted"
+echo "$out" | jq -e '.systemMessage | test("/rename the title")' >/dev/null \
+    || fail "write-rename not-in-tmux: systemMessage missing /rename line"
+
+# write-rename: unrelated path → no-op.
+echo "=== write-rename (unrelated path: no-op) ==="
+set +e
+jq -nc --arg cwd "$tmp" --arg fp "$tmp/README.md" \
+    '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$fp}}' \
+    | bash scripts/write-rename.sh
+rc=$?
+set -e
+assert_eq "$rc" "0" "write-rename unrelated exit code"
+
+# write-rename: empty autorename file → error message, file deleted.
+echo "=== write-rename (empty file: error message) ==="
+: > "$tmp/.claude/autorename"
+set +e
+out="$(
+    jq -nc --arg cwd "$tmp" --arg fp "$tmp/.claude/autorename" \
+        '{cwd:$cwd, tool_name:"Write", tool_input:{file_path:$fp}}' \
+        | bash scripts/write-rename.sh
+)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "write-rename empty exit code"
+[[ ! -e "$tmp/.claude/autorename" ]] || fail "write-rename empty: autorename not deleted"
+echo "$out" | jq -e '.systemMessage | test("empty")' >/dev/null \
+    || fail "write-rename empty: systemMessage missing 'empty'"
+
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
     exit 1

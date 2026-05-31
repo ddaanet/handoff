@@ -40,13 +40,15 @@ Or invoke explicitly with `/handoff:handoff`.
 A `PreToolUse(Skill)` hook wipes any prior handoff files the moment
 the skill activates, so the slate is always clean — and tells the
 agent so it doesn't redundantly verify. The agent then updates
-auto-memory with any durable learnings, and either writes a short
-task file or — if there's nothing outstanding — leaves the slate
-clean. The instant the task file is written, a
-`PostToolUse(Write|Edit)` hook produces `./.claude/handoff.md`
-combining the task file with auto-extracted session data (last few
-user prompts verbatim, files edited this session) — the agent sees
-the result in the same turn. Guards prevent the agent from reading or writing `.claude/handoff.md`
+auto-memory with any durable learnings, and in a single turn writes
+both files: a short task snapshot (if anything is outstanding) and a
+session title to `.claude/autorename`. A `PostToolUse(Write|Edit)`
+hook picks up the task snapshot and produces `./.claude/handoff.md`
+combining it with auto-extracted session data (last few user prompts
+verbatim, files edited this session). A second hook picks up
+`autorename` and renames the session via tmux `send-keys` once the
+prompt goes idle (or emits a `/rename` line to paste if not in tmux).
+Guards prevent the agent from reading or writing `.claude/handoff.md`
 and `.claude/handoff-task.md` outside the handoff flow — both files
 are managed exclusively by the skill and its hooks. After `/clear` (or
 in a fresh session), the `SessionStart` hook injects `handoff.md` into
@@ -89,11 +91,14 @@ Per project, under `./.claude/`:
 - `handoff.md` — hook-generated, self-contained file with the inlined
   task content plus extracted session data (last user prompts, files
   edited).
+- `autorename` — transient trigger file; written by the agent with the
+  session title, consumed and deleted immediately by the PostToolUse
+  hook.
 - `handoff-error.log` — written only if extraction fails.
 
-The two files are paired: invoke the skill again with nothing
-outstanding and both get wiped at activation (the "finalize" case).
-Nothing outside the current project is modified.
+The task and handoff files are paired: invoke the skill again with
+nothing outstanding and both get wiped at activation (the "finalize"
+case). Nothing outside the current project is modified.
 
 ## Uninstall
 

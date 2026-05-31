@@ -16,6 +16,7 @@ precommit:
     shellcheck -x scripts/*.sh tests/*.sh
     bash tests/hook-test.sh
     bash tests/extract-test.sh
+    bash tests/rename-test.sh
     @echo "ok"
 
 # Extract handoff.md from an explicit transcript (testing)
