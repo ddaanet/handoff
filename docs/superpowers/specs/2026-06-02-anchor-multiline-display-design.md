@@ -19,9 +19,9 @@ in scope for this change.
 
 Fix both sins in the **text-type branch of `anchor_for`** only:
 
-- If the assistant text is **≤ 5 lines**: show all lines.
-- If the assistant text is **≥ 6 lines**: show first 2 lines, then
-  `[…]`, then last 2 lines.
+- If the assistant text is **≤ 7 lines**: show all lines.
+- If the assistant text is **≥ 8 lines**: show first 3 lines, then
+  `[…]`, then last 3 lines (always hiding ≥ 2 lines).
 - Remove the `[:ANCHOR_TEXT_LIMIT]` char truncation from this branch.
   Lines are shown in full.
 
@@ -55,9 +55,9 @@ inline text below it. This keeps the anchor visually distinct from the
 Three new constants at the top of `extract.py` (alongside existing ones):
 
 ```python
-ANCHOR_LINE_LIMIT = 5   # show all lines if count <= this
-ANCHOR_HEAD_LINES = 2   # lines to show before [...]
-ANCHOR_TAIL_LINES = 2   # lines to show after [...]
+ANCHOR_LINE_LIMIT = 7   # show all lines if count <= this; truncation hides ≥2 lines
+ANCHOR_HEAD_LINES = 3   # lines to show before [...]
+ANCHOR_TAIL_LINES = 3   # lines to show after [...]
 ```
 
 ## Implementation
@@ -68,11 +68,8 @@ ANCHOR_TAIL_LINES = 2   # lines to show after [...]
 # before
 return text.splitlines()[0][:ANCHOR_TEXT_LIMIT]
 
-# after
-text_lines = text.splitlines()
-if len(text_lines) > ANCHOR_LINE_LIMIT:
-    text_lines = text_lines[:ANCHOR_HEAD_LINES] + ["[…]"] + text_lines[-ANCHOR_TAIL_LINES:]
-return "\n".join(text_lines)
+# after — via clamp_anchor_lines helper
+return "\n".join(clamp_anchor_lines(text.splitlines()))
 ```
 
 `emit`, anchor rendering:
@@ -92,9 +89,10 @@ for al in anchor_lines[1:]:
 
 One new fixture scenario in `tests/extract-test.sh`:
 
-- Assistant turn with ≥ 6 lines of text.
-- Assert: first two lines present, `[…]` present, last two lines
+- Assistant turn with ≥ 8 lines of text.
+- Assert: first three lines present, `[…]` present, last three lines
   present, intermediate lines absent.
+- Assert: 7-line turn shows all 7 lines (boundary, no truncation).
 
 Existing fixtures (short assistant turns) pass unchanged — the
 `splitlines()[0]` path is replaced but the single-line result is
