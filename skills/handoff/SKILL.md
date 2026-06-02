@@ -29,7 +29,9 @@ First, decide both of the following without making any tool calls:
 
 Then issue the Write calls in the **same turn**:
 - `./.claude/autorename` — sole line is the session title (always)
-- `./.claude/handoff-task.md` — only if there's an active task
+- `handoff-task.md` — only if there's an active task. Use the path
+  from the activation context if one was provided (e.g. gitlore memory
+  root); otherwise `./.claude/handoff-task.md`.
 
 If there's no active task, omit `handoff-task.md` — the activation hook
 already finalized the session.
@@ -57,8 +59,9 @@ Task file rules:
   provides one.
 - No file paths or code unless a decision hinges on them. The
   post-write hook adds files-touched.
-- No location other than `./.claude/handoff-task.md` — the hook reads
-  this exact path.
+- No location other than the path named in the activation context
+  (default `./.claude/handoff-task.md`) — the hook reads that exact
+  path.
 
 If the autorename systemMessage contains a `/rename ...` line (not in
 tmux), relay it in a fenced code block so the user can paste it.
