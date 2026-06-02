@@ -136,7 +136,8 @@ has the user-facing version of this.
   missing — a handoff with just the inlined task content (if any) and
   empty extracted sections is still valid.
 - Extraction constants (`LAST_N_PROMPTS`, `MAX_FILES`,
-  `ANCHOR_TEXT_LIMIT`, `WRAPPER_PREFIXES`, `WRAPPER_EXACT`) live at the
+  `ANCHOR_TEXT_LIMIT`, `ANCHOR_LINE_LIMIT`, `ANCHOR_HEAD_LINES`,
+  `ANCHOR_TAIL_LINES`, `WRAPPER_PREFIXES`, `WRAPPER_EXACT`) live at the
   top of `extract.py`; do not inline them.
 - The markdown template lives in `SKILL.md` (single source of truth).
   The script does not re-state the template — it just inlines whatever
