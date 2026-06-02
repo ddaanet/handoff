@@ -66,7 +66,7 @@ WRAPPER_EXACT = frozenset({
 def clamp_anchor_lines(lines: list[str]) -> list[str]:
     if len(lines) <= ANCHOR_LINE_LIMIT:
         return lines
-    return lines[:ANCHOR_HEAD_LINES] + ["[…]"] + lines[-ANCHOR_TAIL_LINES:]
+    return lines[:ANCHOR_HEAD_LINES] + ["[...]"] + lines[-ANCHOR_TAIL_LINES:]
 
 
 def load_entries(transcript: pathlib.Path) -> list[dict]:

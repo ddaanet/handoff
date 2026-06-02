@@ -21,7 +21,7 @@ Fix both sins in the **text-type branch of `anchor_for`** only:
 
 - If the assistant text is **≤ 7 lines**: show all lines.
 - If the assistant text is **≥ 8 lines**: show first 3 lines, then
-  `[…]`, then last 3 lines (always hiding ≥ 2 lines).
+  `[...]`, then last 3 lines (always hiding ≥ 2 lines).
 - Remove the `[:ANCHOR_TEXT_LIMIT]` char truncation from this branch.
   Lines are shown in full.
 
@@ -90,7 +90,7 @@ for al in anchor_lines[1:]:
 One new fixture scenario in `tests/extract-test.sh`:
 
 - Assistant turn with ≥ 8 lines of text.
-- Assert: first three lines present, `[…]` present, last three lines
+- Assert: first three lines present, `[...]` present, last three lines
   present, intermediate lines absent.
 - Assert: 7-line turn shows all 7 lines (boundary, no truncation).
 

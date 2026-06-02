@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Show up to 7 lines of assistant anchor text in full; collapse ≥8-line turns to first 3 + `[…]` + last 3 (always hiding ≥2 lines); remove the stale 120-char line truncation from the text branch.
+**Goal:** Show up to 7 lines of assistant anchor text in full; collapse ≥8-line turns to first 3 + `[...]` + last 3 (always hiding ≥2 lines); remove the stale 120-char line truncation from the text branch.
 
 **Architecture:** All changes are inside `scripts/extract.py` (new constants, new helper, two modified functions) and `tests/extract-test.sh` (one new scenario, five updated assertions). A new fixture `tests/fixtures/anchor-multiline.jsonl` drives the new scenario.
 
@@ -69,7 +69,7 @@ assert_contains "$out" "ANCHOR7_L5" "anchor-multiline: 7-line L5"
 assert_contains "$out" "ANCHOR7_L6" "anchor-multiline: 7-line L6"
 assert_contains "$out" "ANCHOR7_L7" "anchor-multiline: 7-line L7"
 
-# 8-line anchor: 3+[…]+3, two middle lines absent.
+# 8-line anchor: 3+[...]+3, two middle lines absent.
 assert_contains "$out" "**after** ANCHOR8_L1" "anchor-multiline: 8-line L1 (head)"
 assert_contains "$out" "ANCHOR8_L2" "anchor-multiline: 8-line L2 (head)"
 assert_contains "$out" "ANCHOR8_L3" "anchor-multiline: 8-line L3 (head)"
@@ -81,7 +81,7 @@ assert_not_contains "$out" "ANCHOR8_MIDDLE_DROP_5" "anchor-multiline: middle L5 
 
 # [...] appears, and in correct order: L3 < [...] < L6.
 l3_line="$(grep -n 'ANCHOR8_L3' "$out" | head -1 | cut -d: -f1)"
-ellipsis_line="$(grep -nF '[…]' "$out" | head -1 | cut -d: -f1)"
+ellipsis_line="$(grep -nF '[...]' "$out" | head -1 | cut -d: -f1)"
 l6_line="$(grep -n 'ANCHOR8_L6' "$out" | head -1 | cut -d: -f1)"
 [[ -n "$l3_line" && -n "$ellipsis_line" && -n "$l6_line" \
     && $l3_line -lt $ellipsis_line && $ellipsis_line -lt $l6_line ]] \
@@ -142,7 +142,7 @@ Insert after the `WRAPPER_EXACT` block and before `load_entries`:
 def clamp_anchor_lines(lines: list[str]) -> list[str]:
     if len(lines) <= ANCHOR_LINE_LIMIT:
         return lines
-    return lines[:ANCHOR_HEAD_LINES] + ["[…]"] + lines[-ANCHOR_TAIL_LINES:]
+    return lines[:ANCHOR_HEAD_LINES] + ["[...]"] + lines[-ANCHOR_TAIL_LINES:]
 ```
 
 - [ ] **Step 3: Modify `anchor_for` text branch**
@@ -214,7 +214,7 @@ Expected: all checks pass (manifest lint, script syntax, hook tests, extract tes
 
 ```bash
 git add scripts/extract.py tests/fixtures/anchor-multiline.jsonl tests/extract-test.sh
-git commit -m "feat: show multi-line assistant anchor text (3+[…]+3 at ≥8 lines)"
+git commit -m "feat: show multi-line assistant anchor text (3+[...]+3 at ≥8 lines)"
 ```
 
 ---
@@ -223,7 +223,7 @@ git commit -m "feat: show multi-line assistant anchor text (3+[…]+3 at ≥8 li
 
 **Spec coverage:**
 - ✅ ≤7-line text shows in full (ANCHOR_LINE_LIMIT=7; truncation always hides ≥2 lines)
-- ✅ ≥8-line text: first 3 + `[…]` + last 3
+- ✅ ≥8-line text: first 3 + `[...]` + last 3
 - ✅ 120-char truncation removed from text branch (`ANCHOR_TEXT_LIMIT` retained for command path)
 - ✅ Anchor stays inline (not blockquote)
 - ✅ Tool-use anchors (single-line) unaffected — `anchor.splitlines()` on a one-liner returns a one-element list, loop body never executes
