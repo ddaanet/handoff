@@ -1,0 +1,7 @@
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"first prompt no prior assistant"}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"ANCHOR3_L1\nANCHOR3_L2\nANCHOR3_L3"}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"prompt after 3-line anchor"}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"ANCHOR7_L1\nANCHOR7_L2\nANCHOR7_L3\nANCHOR7_L4\nANCHOR7_L5\nANCHOR7_L6\nANCHOR7_L7"}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"prompt after 7-line anchor"}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"ANCHOR8_L1\nANCHOR8_L2\nANCHOR8_L3\nANCHOR8_MIDDLE_DROP_4\nANCHOR8_MIDDLE_DROP_5\nANCHOR8_L6\nANCHOR8_L7\nANCHOR8_L8"}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"prompt after 8-line anchor"}}

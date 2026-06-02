@@ -80,15 +80,15 @@ f2_line="$(grep -n '/handoff-test/file2.py' "$out" | head -1 | cut -d: -f1)"
     || fail "basic: expected file1 before file2 (got file1=$f1_line, file2=$f2_line)"
 
 # Exactly 5 prompts retained (last-N cap with all 5 retained).
-prompt_count="$(grep -c '^\*\*after ' "$out" || true)"
+prompt_count="$(grep -c '^\*\*after\*\* ' "$out" || true)"
 assert_eq "$prompt_count" "5" "basic: prompt count"
 
 # Anchor variants.
-assert_contains "$out" "**after (session start)**" "basic: session-start anchor"
-assert_contains "$out" "**after Wrote file1**" "basic: text anchor"
-assert_contains "$out" "**after Done editing**" "basic: text anchor (image prompt)"
-assert_contains "$out" "**after [Bash] echo hi**" "basic: command anchor"
-assert_contains "$out" "**after [Edit] /handoff-test/file2.py**" "basic: file_path anchor"
+assert_contains "$out" "**after** (session start)" "basic: session-start anchor"
+assert_contains "$out" "**after** Wrote file1" "basic: text anchor"
+assert_contains "$out" "**after** Done editing" "basic: text anchor (image prompt)"
+assert_contains "$out" "**after** [Bash] echo hi" "basic: command anchor"
+assert_contains "$out" "**after** [Edit] /handoff-test/file2.py" "basic: file_path anchor"
 
 # Non-text placeholder for image-only user content.
 assert_contains "$out" "> [image block]" "basic: image placeholder"
@@ -171,6 +171,48 @@ assert_not_contains "$out" "# Plugin Creation Workflow" "skill-meta: slash skill
 # user prompts — filtered via WRAPPER_PREFIXES like <system-reminder>.
 assert_not_contains "$out" "TASKNOTIF_DROP" "skill-meta: task-notification body dropped"
 assert_not_contains "$out" "<task-notification>" "skill-meta: task-notification wrapper dropped"
+
+# anchor-multiline.jsonl: assistant text anchors with 3, 7, and 8 lines.
+# 3-line and 7-line: all lines shown (≤ ANCHOR_LINE_LIMIT=7).
+# 8-line: first 3 + [...] + last 3, two middle lines absent.
+# Format change: **after** text (no closing **).
+echo "=== anchor-multiline (multi-line anchor display) ==="
+out_dir="$tmp/anchor-multiline"
+mkdir -p "$out_dir"
+out="$out_dir/handoff.md"
+python3 scripts/extract.py tests/fixtures/anchor-multiline.jsonl "$out" > /dev/null
+
+# 3-line anchor: all 3 lines shown, no truncation.
+assert_contains "$out" "**after** ANCHOR3_L1" "anchor-multiline: 3-line L1"
+assert_contains "$out" "ANCHOR3_L2" "anchor-multiline: 3-line L2"
+assert_contains "$out" "ANCHOR3_L3" "anchor-multiline: 3-line L3"
+
+# 7-line anchor: all 7 lines shown (boundary — exactly ANCHOR_LINE_LIMIT).
+assert_contains "$out" "**after** ANCHOR7_L1" "anchor-multiline: 7-line L1"
+assert_contains "$out" "ANCHOR7_L2" "anchor-multiline: 7-line L2"
+assert_contains "$out" "ANCHOR7_L3" "anchor-multiline: 7-line L3"
+assert_contains "$out" "ANCHOR7_L4" "anchor-multiline: 7-line L4"
+assert_contains "$out" "ANCHOR7_L5" "anchor-multiline: 7-line L5"
+assert_contains "$out" "ANCHOR7_L6" "anchor-multiline: 7-line L6"
+assert_contains "$out" "ANCHOR7_L7" "anchor-multiline: 7-line L7"
+
+# 8-line anchor: 3+[…]+3, two middle lines absent.
+assert_contains "$out" "**after** ANCHOR8_L1" "anchor-multiline: 8-line L1 (head)"
+assert_contains "$out" "ANCHOR8_L2" "anchor-multiline: 8-line L2 (head)"
+assert_contains "$out" "ANCHOR8_L3" "anchor-multiline: 8-line L3 (head)"
+assert_contains "$out" "ANCHOR8_L6" "anchor-multiline: 8-line L6 (tail)"
+assert_contains "$out" "ANCHOR8_L7" "anchor-multiline: 8-line L7 (tail)"
+assert_contains "$out" "ANCHOR8_L8" "anchor-multiline: 8-line L8 (tail)"
+assert_not_contains "$out" "ANCHOR8_MIDDLE_DROP_4" "anchor-multiline: middle L4 absent"
+assert_not_contains "$out" "ANCHOR8_MIDDLE_DROP_5" "anchor-multiline: middle L5 absent"
+
+# [...] appears, and in correct order: L3 < [...] < L6.
+l3_line="$(grep -n 'ANCHOR8_L3' "$out" | head -1 | cut -d: -f1)"
+ellipsis_line="$(grep -nF '[…]' "$out" | head -1 | cut -d: -f1)"
+l6_line="$(grep -n 'ANCHOR8_L6' "$out" | head -1 | cut -d: -f1)"
+[[ -n "$l3_line" && -n "$ellipsis_line" && -n "$l6_line" \
+    && $l3_line -lt $ellipsis_line && $ellipsis_line -lt $l6_line ]] \
+    || fail "anchor-multiline: expected L3 < [...] < L6 order"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2

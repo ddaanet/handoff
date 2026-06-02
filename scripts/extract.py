@@ -41,6 +41,9 @@ import sys
 LAST_N_PROMPTS = 5
 MAX_FILES = 30
 ANCHOR_TEXT_LIMIT = 120
+ANCHOR_LINE_LIMIT = 7    # show all lines if count <= this; truncation hides ≥2 lines
+ANCHOR_HEAD_LINES = 3    # lines shown before [...]
+ANCHOR_TAIL_LINES = 3    # lines shown after [...]
 
 WRAPPER_PREFIXES = (
     "<local-command-",
@@ -58,6 +61,12 @@ WRAPPER_PREFIXES = (
 WRAPPER_EXACT = frozenset({
     "[Request interrupted by user]",
 })
+
+
+def clamp_anchor_lines(lines: list[str]) -> list[str]:
+    if len(lines) <= ANCHOR_LINE_LIMIT:
+        return lines
+    return lines[:ANCHOR_HEAD_LINES] + ["[…]"] + lines[-ANCHOR_TAIL_LINES:]
 
 
 def load_entries(transcript: pathlib.Path) -> list[dict]:
@@ -168,7 +177,7 @@ def anchor_for(entries: list[dict], user_index: int) -> str:
             if btype == "text":
                 text = (block.get("text") or "").strip()
                 if text:
-                    return text.splitlines()[0][:ANCHOR_TEXT_LIMIT]
+                    return "\n".join(clamp_anchor_lines(text.splitlines()))
         return "(silent agent turn)"
     return "(session start)"
 
@@ -213,7 +222,10 @@ def emit(transcript_path: str, output_path: pathlib.Path) -> None:
     if tail_prompts:
         for idx, text in tail_prompts:
             anchor = anchor_for(entries, idx)
-            lines.append(f"**after {anchor}**")
+            anchor_lines = anchor.splitlines()
+            lines.append(f"**after** {anchor_lines[0]}")
+            for al in anchor_lines[1:]:
+                lines.append(al)
             lines.append("")
             lines.extend(format_quote(text))
             lines.append("")
