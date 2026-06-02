@@ -64,18 +64,14 @@ has the user-facing version of this.
   this session by scanning for either invocation signal) and
   `handoff_deny()` (shared PreToolUse deny emitter; calls `exit 0`
   after printing the deny JSON, so only safe from a standalone hook
-  script). Also defines `handoff_maybe_use_gitlore()` (overrides
-  `HANDOFF_REL_*` path constants to point into the gitlore memory root
-  when gitlore is active in the project; call after cwd is
-  established).
+  script).
 - `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
   this project's `handoff.md` (hook-owned) always, and its
   `handoff-task.md` until `handoff:handoff` has activated this session.
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies
   writes to this project's `handoff.md` (hook-owned output) always.
-  Denies `handoff-task.md` writes whose resolved path is not the
-  active `HANDOFF_REL_TASK` path (catches cross-project misfires; path
-  may be in the gitlore memory root when gitlore is enabled).
+  Denies `handoff-task.md` writes whose resolved path is not
+  `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
   Denies `handoff-task.md` writes before `handoff:handoff` has
   activated this session.
 - `scripts/set-title.sh` — skill entry point for session naming. Takes the
@@ -98,13 +94,15 @@ has the user-facing version of this.
   for the user to paste (outside tmux). Running as a hook rather than via the
   Bash tool means the tmux socket is accessible with no sandbox bypass.
 - `scripts/write-extract.sh` — PostToolUse(Write|Edit) entry point:
-  matches writes/edits that resolve to the active `HANDOFF_REL_TASK`
-  path and runs `extract.py` to (re)generate `HANDOFF_REL_OUT`.
-  Captures stderr to `HANDOFF_REL_ERR` on failure.
+  matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`
+  and runs `extract.py` to (re)generate `$cwd/.claude/handoff.md`.
+  Captures stderr to `.claude/handoff-error.log` on failure. On
+  success, runs `git add -f` on both files so they are staged for the
+  user's next commit.
 - `scripts/extract.py` — parses the session JSONL, writes
-  `HANDOFF_REL_OUT` (`.claude/handoff.md` by default, or the gitlore
-  memory root when active) with the inlined contents of
-  `HANDOFF_REL_TASK` (if it exists) and extracted sections below
+  `.claude/handoff.md` with the inlined contents of
+  `.claude/handoff-task.md` (if it exists) and extracted sections
+  below
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.2.0`). Provides:
@@ -133,10 +131,9 @@ has the user-facing version of this.
   judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
-- Output paths: `.claude/handoff-task.md` (agent-written) and
-  `.claude/handoff.md` (hook-written) by default; relocated to the
-  gitlore memory root when gitlore is active. Changing these is a
-  breaking change and requires a version bump.
+- Output paths are fixed: `.claude/handoff-task.md` (agent-written)
+  and `.claude/handoff.md` (hook-written) in the project root.
+  Changing these is a breaking change and requires a version bump.
 - `extract.py` must succeed even when the transcript path is empty or
   missing — a handoff with just the inlined task content (if any) and
   empty extracted sections is still valid.

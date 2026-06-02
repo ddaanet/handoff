@@ -16,7 +16,6 @@ file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
 [[ "$(basename "$file_path")" == "handoff-task.md" ]] || exit 0
 
 cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-handoff_maybe_use_gitlore "$cwd"
 
 { read -r target; read -r expected; } < <(handoff_resolve "$file_path" "$cwd/$HANDOFF_REL_TASK")
 [[ "$target" == "$expected" ]] || exit 0
@@ -35,3 +34,6 @@ if ! python3 "$script_dir/extract.py" "$transcript" "$output" >/dev/null 2>"$log
     exit 0
 fi
 rm -f "$log"
+if git -C "$cwd" add -f "$cwd/$HANDOFF_REL_TASK" "$cwd/$HANDOFF_REL_OUT" 2>/dev/null; then
+    jq -nc '{systemMessage: "handoff — staged for commit"}'
+fi

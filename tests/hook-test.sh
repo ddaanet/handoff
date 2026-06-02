@@ -106,6 +106,23 @@ if grep -q '^@handoff-task.md$' "$tmp/.claude/handoff.md"; then
     fail "handoff.md should not contain @handoff-task.md ref"
 fi
 
+# write-extract stages both files when project is a git repo.
+echo "=== write-extract (git staging) ==="
+git_tmp="$(mktemp -d)"
+git -C "$git_tmp" init -q
+mkdir -p "$git_tmp/.claude"
+cp "$tmp/.claude/handoff-task.md" "$git_tmp/.claude/handoff-task.md"
+out="$(jq -nc --arg t "$transcript" --arg fp "$git_tmp/.claude/handoff-task.md" \
+        '{transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
+    | CLAUDE_PROJECT_DIR="$git_tmp" bash scripts/write-extract.sh)"
+echo "$out" | jq -e '.systemMessage == "handoff — staged for commit"' >/dev/null \
+    || fail "write-extract (git staging): expected staged message"
+git -C "$git_tmp" status --porcelain | grep -q 'handoff-task.md' \
+    || fail "write-extract (git staging): handoff-task.md not staged"
+git -C "$git_tmp" status --porcelain | grep -q 'handoff\.md' \
+    || fail "write-extract (git staging): handoff.md not staged"
+rm -rf "$git_tmp"
+
 # write-extract on an unrelated path is a no-op.
 echo "=== write-extract (unrelated path: no-op) ==="
 rm -f "$tmp/.claude/handoff.md"

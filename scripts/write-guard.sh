@@ -18,7 +18,6 @@ base="$(basename "$file_path")"
 [[ "$base" == "handoff.md" || "$base" == "handoff-task.md" ]] || exit 0
 
 cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-handoff_maybe_use_gitlore "$cwd"
 transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
 
 { read -r target; read -r exp_task; read -r exp_out; } \
@@ -36,8 +35,8 @@ fi
 if [[ "$base" == "handoff-task.md" ]]; then
     if [[ "$target" != "$exp_task" ]]; then
         handoff_deny \
-            "write blocked: handoff-task.md wrong location. resolved: $target; expected: $exp_task." \
-            "write-guard: blocked handoff-task.md write to unexpected location (expected $exp_task)"
+            "write blocked: handoff-task.md outside this project's .claude/. resolved: $target; expected: $exp_task." \
+            "write-guard: blocked handoff-task.md write outside $cwd/.claude/"
     fi
     if ! handoff_activated "$transcript"; then
         handoff_deny \

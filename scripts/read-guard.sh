@@ -18,7 +18,6 @@ base="$(basename "$file_path")"
 [[ "$base" == "handoff.md" || "$base" == "handoff-task.md" ]] || exit 0
 
 cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-handoff_maybe_use_gitlore "$cwd"
 transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
 
 { read -r target; read -r exp_task; read -r exp_out; } \

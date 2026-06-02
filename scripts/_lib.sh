@@ -72,23 +72,6 @@ sys.exit(1)
 PY
 }
 
-# Override path constants if gitlore is active in this project.
-# Sets HANDOFF_REL_TASK, HANDOFF_REL_OUT, HANDOFF_REL_ERR to point
-# into the gitlore memory root instead of .claude/. No-op when gitlore
-# is absent or disabled. Call after cwd is established.
-handoff_maybe_use_gitlore() {
-    local cwd="$1"
-    local mempath
-    mempath=$(git config --file "$cwd/.gitmodules" submodule.gitlore-memory.path 2>/dev/null) || return 0
-    [[ -n "$mempath" ]] || return 0
-    local enabled
-    enabled=$(jq -r '.gitlore.enabled // false' "$cwd/.claude/settings.json" 2>/dev/null) || return 0
-    [[ "$enabled" == "true" ]] || return 0
-    HANDOFF_REL_TASK="$mempath/handoff-task.md"
-    HANDOFF_REL_OUT="$mempath/handoff.md"
-    HANDOFF_REL_ERR="$mempath/handoff-error.log"
-}
-
 # Emit a PreToolUse deny on stdout, then `exit 0` (not `return`) —
 # terminates the calling process, so only safe from a standalone hook
 # script, not a general sourced context (subshell/interactive/setup).

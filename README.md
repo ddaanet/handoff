@@ -85,11 +85,9 @@ split.
 
 ## Files touched on your system
 
-Per project. `handoff-task.md`, `handoff.md`, and `handoff-error.log`
-live under `./.claude/` by default, or under the gitlore memory root
-when [gitlore](https://github.com/ddaanet/gitlore) is active (so the
-handoff is version-controlled alongside the project). `autorename`
-always stays under `./.claude/`.
+Per project, under `./.claude/`. After generating `handoff.md`, the
+hook runs `git add -f` on both task and output files so they appear
+staged for your next commit.
 
 - `handoff-task.md` — agent-written task + open decisions.
 - `handoff.md` — hook-generated, self-contained file with the inlined

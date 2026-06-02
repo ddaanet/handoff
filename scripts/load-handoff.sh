@@ -10,17 +10,12 @@
 # failure never blocks session startup.
 set -euo pipefail
 
-# shellcheck source-path=SCRIPTDIR source=_lib.sh
-source "$(dirname "$0")/_lib.sh"
-
 input="$(cat)"
 cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 hook_event="$(jq -r '.hook_event_name // "SessionStart"' <<<"$input")"
 
-handoff_maybe_use_gitlore "$cwd"
-
-handoff="$cwd/$HANDOFF_REL_OUT"
-log="$cwd/$HANDOFF_REL_ERR"
+handoff="$cwd/.claude/handoff.md"
+log="$cwd/.claude/handoff-error.log"
 
 [[ -s "$handoff" ]] || exit 0
 
