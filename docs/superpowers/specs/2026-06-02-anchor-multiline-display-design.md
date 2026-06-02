@@ -21,7 +21,7 @@ Fix both sins in the **text-type branch of `anchor_for`** only:
 
 - If the assistant text is **≤ 7 lines**: show all lines.
 - If the assistant text is **≥ 8 lines**: show first 3 lines, then
-  `[...]`, then last 3 lines (always hiding ≥ 2 lines).
+  `[ N lines omitted ]`, then last 3 lines (always hiding ≥ 2 lines).
 - Remove the `[:ANCHOR_TEXT_LIMIT]` char truncation from this branch.
   Lines are shown in full.
 
@@ -56,8 +56,8 @@ Three new constants at the top of `extract.py` (alongside existing ones):
 
 ```python
 ANCHOR_LINE_LIMIT = 7   # show all lines if count <= this; truncation hides ≥2 lines
-ANCHOR_HEAD_LINES = 3   # lines to show before [...]
-ANCHOR_TAIL_LINES = 3   # lines to show after [...]
+ANCHOR_HEAD_LINES = 3   # lines to show before [ N lines omitted ]
+ANCHOR_TAIL_LINES = 3   # lines to show after [ N lines omitted ]
 ```
 
 ## Implementation
@@ -90,7 +90,7 @@ for al in anchor_lines[1:]:
 One new fixture scenario in `tests/extract-test.sh`:
 
 - Assistant turn with ≥ 8 lines of text.
-- Assert: first three lines present, `[...]` present, last three lines
+- Assert: first three lines present, `[ N lines omitted ]` present, last three lines
   present, intermediate lines absent.
 - Assert: 7-line turn shows all 7 lines (boundary, no truncation).
 

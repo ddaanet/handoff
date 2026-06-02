@@ -196,7 +196,7 @@ assert_contains "$out" "ANCHOR7_L5" "anchor-multiline: 7-line L5"
 assert_contains "$out" "ANCHOR7_L6" "anchor-multiline: 7-line L6"
 assert_contains "$out" "ANCHOR7_L7" "anchor-multiline: 7-line L7"
 
-# 8-line anchor: 3+[...]+3, two middle lines absent.
+# 8-line anchor: head 3 + "[ 2 lines omitted ]" + tail 3.
 assert_contains "$out" "**after** ANCHOR8_L1" "anchor-multiline: 8-line L1 (head)"
 assert_contains "$out" "ANCHOR8_L2" "anchor-multiline: 8-line L2 (head)"
 assert_contains "$out" "ANCHOR8_L3" "anchor-multiline: 8-line L3 (head)"
@@ -206,13 +206,13 @@ assert_contains "$out" "ANCHOR8_L8" "anchor-multiline: 8-line L8 (tail)"
 assert_not_contains "$out" "ANCHOR8_MIDDLE_DROP_4" "anchor-multiline: middle L4 absent"
 assert_not_contains "$out" "ANCHOR8_MIDDLE_DROP_5" "anchor-multiline: middle L5 absent"
 
-# [...] appears, and in correct order: L3 < [...] < L6.
+# omission marker appears, and in correct order: L3 < marker < L6.
 l3_line="$(grep -n 'ANCHOR8_L3' "$out" | head -1 | cut -d: -f1)"
-ellipsis_line="$(grep -nF '[...]' "$out" | head -1 | cut -d: -f1)"
+marker_line="$(grep -nF '[ 2 lines omitted ]' "$out" | head -1 | cut -d: -f1)"
 l6_line="$(grep -n 'ANCHOR8_L6' "$out" | head -1 | cut -d: -f1)"
-[[ -n "$l3_line" && -n "$ellipsis_line" && -n "$l6_line" \
-    && $l3_line -lt $ellipsis_line && $ellipsis_line -lt $l6_line ]] \
-    || fail "anchor-multiline: expected L3 < [...] < L6 order"
+[[ -n "$l3_line" && -n "$marker_line" && -n "$l6_line" \
+    && $l3_line -lt $marker_line && $marker_line -lt $l6_line ]] \
+    || fail "anchor-multiline: expected L3 < marker < L6 order"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
