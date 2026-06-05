@@ -248,7 +248,7 @@ def emit(transcript_path: str, task_path: str) -> None:
     else:
         lines.append("(none extracted)")
         lines.append("")
-    sys.stdout.write("\n".join(lines) + "\n")
+    sys.stdout.write("\n".join(lines))
 
 
 def main(argv: list[str]) -> int:
