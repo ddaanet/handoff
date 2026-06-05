@@ -9,13 +9,24 @@
 # verify with ls/cat). hookEventName in the output must match the
 # event of the calling hook.
 #
-# Usage: _wipe-emit.sh <cwd> <hook_event_name>
+# Usage: _wipe-emit.sh <cwd> <hook_event_name> <transcript_path>
 set -euo pipefail
+
+# shellcheck source-path=SCRIPTDIR source=_lib.sh
+source "$(dirname "$0")/_lib.sh"
 
 cwd="${1:?cwd required}"
 hook_event="${2:?hook_event_name required}"
+transcript="${3:-}"
 
 mkdir -p "$cwd/.claude"
+
+# Pointer to this session's JSONL — read at the next SessionStart to
+# assemble the frame. Written unconditionally (even on a first, nothing-to-
+# wipe activation). Skipped only if the payload carried no transcript path.
+if [[ -n "$transcript" ]]; then
+    printf '%s\n' "$transcript" > "$cwd/$HANDOFF_REL_SESSION"
+fi
 
 removed=()
 for f in "$cwd/.claude/handoff-task.md" "$cwd/.claude/handoff.md" "$cwd/.claude/autorename"; do

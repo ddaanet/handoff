@@ -92,6 +92,17 @@ assert_eq "$(echo "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')
 assert_eq "$(echo "$out" | jq -r '.systemMessage')" "system text" \
     "handoff_deny: systemMessage passthrough"
 
+# Activation writes the session pointer (current transcript_path) so the
+# next session knows which JSONL to scrape.
+echo "=== activation pointer (skill path) ==="
+ptr_tmp="$(mktemp -d)"; mkdir -p "$ptr_tmp/.claude"
+jq -nc --arg t "$transcript" \
+    '{tool_name:"Skill", tool_input:{skill:"handoff:handoff"}, transcript_path:$t}' \
+    | CLAUDE_PROJECT_DIR="$ptr_tmp" bash scripts/skill-pre-hook.sh >/dev/null
+assert_eq "$(cat "$ptr_tmp/.claude/handoff-session" 2>/dev/null)" "$transcript" \
+    "activation: pointer holds transcript_path"
+rm -rf "$ptr_tmp"
+
 # write-extract on the matching path produces handoff.md.
 echo "=== write-extract (matching path) ==="
 jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/.claude/handoff-task.md" \
