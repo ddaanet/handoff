@@ -25,15 +25,15 @@ cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
 [[ -n "$transcript" && -f "$transcript" ]] || transcript=""
 
-output="$cwd/$HANDOFF_REL_OUT"
+output="$cwd/.claude/handoff.md"
 log="$cwd/$HANDOFF_REL_ERR"
-if ! python3 "$script_dir/extract.py" "$transcript" "$output" >/dev/null 2>"$log"; then
+if ! python3 "$script_dir/extract.py" "$transcript" "$cwd/$HANDOFF_REL_TASK" > "$output" 2>"$log"; then
     tail=$(tail -c 400 "$log" 2>/dev/null | tr '\n' ' ')
     jq -nc --arg log "$log" --arg tail "$tail" \
         '{systemMessage: ("handoff extract failed (see " + $log + "): " + $tail)}'
     exit 0
 fi
 rm -f "$log"
-if git -C "$cwd" add -f "$cwd/$HANDOFF_REL_TASK" "$cwd/$HANDOFF_REL_OUT" 2>/dev/null; then
+if git -C "$cwd" add -f "$cwd/$HANDOFF_REL_TASK" "$output" 2>/dev/null; then
     jq -nc '{systemMessage: "handoff — staged for commit"}'
 fi

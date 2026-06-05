@@ -21,7 +21,7 @@ cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
 
 { read -r target; read -r exp_task; read -r exp_out; } \
-    < <(handoff_resolve "$file_path" "$cwd/$HANDOFF_REL_TASK" "$cwd/$HANDOFF_REL_OUT")
+    < <(handoff_resolve "$file_path" "$cwd/$HANDOFF_REL_TASK" "$cwd/.claude/handoff.md")
 
 # This project's handoff.md: hook-owned output, never agent-written.
 if [[ "$target" == "$exp_out" ]]; then
