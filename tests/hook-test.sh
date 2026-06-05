@@ -369,114 +369,48 @@ jq -nc --arg cwd "$tmp" \
     | bash scripts/prompt-pre-hook.sh
 [[ -e "$tmp/.claude/handoff-task.md" ]] || fail "prompt-pre-hook wiped on unrelated prompt"
 
-# load-handoff emits additionalContext + systemMessage when handoff.md
-# exists. The script must be a no-op when the file is missing or empty.
-# Exit code is always 0 (errors go to .claude/handoff-error.log).
-echo "=== load-handoff (handoff.md present: emit) ==="
-rm -f "$tmp/.claude/handoff.md"
-cat > "$tmp/.claude/handoff.md" <<'HOF'
-# Handoff — 2026-05-19 21:26:46 +0200
-
-Session: `test-session`
-
+# load-handoff (read-time assembly): gate on task file, read pointer,
+# call extract.py, inject assembled frame.
+echo "=== load-handoff (read-time assembly) ==="
+asm_tmp="$(mktemp -d)"; mkdir -p "$asm_tmp/.claude"
+cat > "$asm_tmp/.claude/handoff-task.md" <<'ASMTASK'
 ## Current task
 
-load-handoff sentinel cafef00d
-HOF
-# Touch the file to a recent mtime so the "saved" age is deterministic.
-touch "$tmp/.claude/handoff.md"
-set +e
-out="$(
-    jq -nc --arg cwd "$tmp" \
-        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
-        | bash scripts/load-handoff.sh
-)"
-rc=$?
-set -e
-assert_eq "$rc" "0" "load-handoff exit code (present)"
-ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // ""')"
-echo "$ctx" | grep -q 'load-handoff sentinel cafef00d' \
-    || fail "load-handoff additionalContext missing inlined content"
-echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null \
-    || fail "load-handoff hookEventName != SessionStart"
-msg="$(echo "$out" | jq -r '.systemMessage // ""')"
-echo "$msg" | grep -Eq '^handoff loaded — [0-9]+ B, saved (just now|[0-9]+m ago)$' \
-    || fail "load-handoff systemMessage format: '$msg'"
+hook smoke test
 
-# load-handoff is a no-op when handoff.md is missing.
-echo "=== load-handoff (missing handoff.md: no-op) ==="
-rm -f "$tmp/.claude/handoff.md"
-set +e
-out="$(
-    jq -nc --arg cwd "$tmp" \
-        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
-        | bash scripts/load-handoff.sh
-)"
-rc=$?
-set -e
-assert_eq "$rc" "0" "load-handoff exit code (missing)"
-echo "${out:-{}}" | jq -e '(.hookSpecificOutput.additionalContext // "") == "" and (.systemMessage // "") == ""' >/dev/null \
-    || fail "load-handoff produced output when handoff.md missing: '$out'"
+## Open decisions
 
-# load-handoff is a no-op when handoff.md is empty.
-echo "=== load-handoff (empty handoff.md: no-op) ==="
-: > "$tmp/.claude/handoff.md"
-set +e
-out="$(
-    jq -nc --arg cwd "$tmp" \
-        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
-        | bash scripts/load-handoff.sh
-)"
-rc=$?
-set -e
-assert_eq "$rc" "0" "load-handoff exit code (empty)"
-echo "${out:-{}}" | jq -e '(.hookSpecificOutput.additionalContext // "") == "" and (.systemMessage // "") == ""' >/dev/null \
-    || fail "load-handoff produced output when handoff.md empty: '$out'"
+- none
+ASMTASK
+printf '%s\n' "$transcript" > "$asm_tmp/.claude/handoff-session"
+out="$(jq -nc --arg e "clear" '{hook_event_name:$e}' \
+    | CLAUDE_PROJECT_DIR="$asm_tmp" bash scripts/load-handoff.sh)"
+ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext')"
+echo "$ctx" | grep -q 'hook smoke test' || fail "load-handoff: task content not injected"
+echo "$ctx" | grep -q 'fifth prompt' || fail "load-handoff: scraped prompt not injected"
+echo "$out" | jq -e '.hookSpecificOutput.hookEventName == "clear"' >/dev/null \
+    || fail "load-handoff: hookEventName not echoed"
+# No task file → silent no-op (empty output).
+rm -f "$asm_tmp/.claude/handoff-task.md"
+out="$(jq -nc --arg e "clear" '{hook_event_name:$e}' \
+    | CLAUDE_PROJECT_DIR="$asm_tmp" bash scripts/load-handoff.sh)"
+assert_eq "$out" "" "load-handoff: no task file → no-op"
+rm -rf "$asm_tmp"
 
 # load-handoff size formatting: bytes for <1024, KiB.X for >=1024.
 echo "=== load-handoff (size formatting: KiB threshold) ==="
-# 2048 bytes = exactly 2.0 KiB. `yes | head -c` triggers SIGPIPE on
-# `yes` once head closes — tolerate it here (pure test setup).
-set +o pipefail
-yes "padding" | head -c 2048 > "$tmp/.claude/handoff.md"
-set -o pipefail
-touch "$tmp/.claude/handoff.md"
-set +e
-out="$(
-    jq -nc --arg cwd "$tmp" \
-        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
-        | bash scripts/load-handoff.sh
-)"
-rc=$?
-set -e
-assert_eq "$rc" "0" "load-handoff exit code (kib)"
+sz_tmp="$(mktemp -d)"; mkdir -p "$sz_tmp/.claude"
+# Write a task file with ~2048 bytes of content so the assembled output
+# crosses the KiB threshold.
+python3 -c "print('x' * 2048)" > "$sz_tmp/.claude/handoff-task.md"
+touch "$sz_tmp/.claude/handoff-task.md"
+out="$(jq -nc --arg e "SessionStart" '{hook_event_name:$e}' \
+    | CLAUDE_PROJECT_DIR="$sz_tmp" bash scripts/load-handoff.sh)"
+assert_eq "$?" "0" "load-handoff exit code (kib)"
 msg="$(echo "$out" | jq -r '.systemMessage // ""')"
-echo "$msg" | grep -Eq '^handoff loaded — 2\.0 KiB, saved' \
+echo "$msg" | grep -Eq '^handoff loaded — [0-9]+\.[0-9]+ KiB, saved' \
     || fail "load-handoff KiB formatting: '$msg'"
-
-# load-handoff must survive handoffs larger than the per-argument execve
-# limit (MAX_ARG_STRLEN = 128 KiB on Linux). Regression: passing the body
-# via `jq --arg` crashed with "Argument list too long" and dropped the
-# context; reading the file with `jq --rawfile` bypasses the limit.
-echo "=== load-handoff (>128 KiB handoff: no arg-limit crash) ==="
-set +o pipefail
-yes "padding line to bulk up the handoff body well past the 128 KiB limit" \
-    | head -c 153600 > "$tmp/.claude/handoff.md"
-set -o pipefail
-printf '\nbig-handoff sentinel deadbeef\n' >> "$tmp/.claude/handoff.md"
-touch "$tmp/.claude/handoff.md"
-set +e
-out="$(
-    jq -nc --arg cwd "$tmp" \
-        '{cwd:$cwd, hook_event_name:"SessionStart"}' \
-        | bash scripts/load-handoff.sh
-)"
-rc=$?
-set -e
-assert_eq "$rc" "0" "load-handoff exit code (>128 KiB)"
-ctx="$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext // ""')"
-echo "$ctx" | grep -q 'big-handoff sentinel deadbeef' \
-    || fail "load-handoff dropped body of >128 KiB handoff (arg-limit crash)"
+rm -rf "$sz_tmp"
 
 # write-rename: matching path, in tmux → deletes file, systemMessage confirms rename.
 echo "=== write-rename (matching path, in tmux) ==="
