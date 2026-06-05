@@ -8,8 +8,8 @@
 # breaking change (see CLAUDE.md conventions).
 # shellcheck disable=SC2034  # consumed by sourcing scripts
 HANDOFF_REL_TASK=".claude/handoff-task.md"
-# shellcheck disable=SC2034
-HANDOFF_REL_OUT=".claude/handoff.md"
+# shellcheck disable=SC2034  # machine-local pointer to the prior session JSONL
+HANDOFF_REL_SESSION=".claude/handoff-session"
 # shellcheck disable=SC2034
 HANDOFF_REL_ERR=".claude/handoff-error.log"
 # shellcheck disable=SC2034
