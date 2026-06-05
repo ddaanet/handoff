@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract session data into `.claude/handoff.md`.
+"""Extract session data and emit to stdout.
 
 Output format:
 
@@ -18,18 +18,17 @@ Output format:
     > <verbatim prompt>
     ...
 
-The task content is read from `output_path.parent / "handoff-task.md"`
-and inlined verbatim (rstripped, plus one trailing blank line). The
-task file is agent-authored from the SKILL.md template; if missing,
-the inlined block is omitted entirely (no placeholder text, no orphan
-heading).
+The task content is read from the `handoff-task.md` argument and inlined
+verbatim (rstripped, plus one trailing blank line). The task file is
+agent-authored from the SKILL.md template; if missing, the inlined block
+is omitted entirely (no placeholder text, no orphan heading).
 
 Usage:
-    extract.py <transcript.jsonl> <output.md>
+    extract.py <transcript.jsonl> <handoff-task.md>
 
-Missing or empty transcript is treated as "no session data" — the file
-is still written with the extracted sections (or empty-section notes)
-plus whatever the task file contains.
+Missing or empty transcript is treated as "no session data" — output is
+still emitted with the extracted sections (or empty-section notes) plus
+whatever the task file contains.
 """
 from __future__ import annotations
 
@@ -62,6 +61,24 @@ WRAPPER_EXACT = frozenset({
     "[Request interrupted by user]",
 })
 
+SLASH_MARKER = "<command-name>/handoff:handoff</command-name>"
+
+
+def _is_activation(entry: dict) -> bool:
+    msg = entry.get("message") or {}
+    if msg.get("role") == "assistant":
+        for block in msg.get("content") or []:
+            if (isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("name") == "Skill"
+                    and (block.get("input") or {}).get("skill") in ("handoff", "handoff:handoff")):
+                return True
+    if entry.get("type") == "user":
+        content = msg.get("content")
+        if isinstance(content, str) and SLASH_MARKER in content:
+            return True
+    return False
+
 
 def clamp_anchor_lines(lines: list[str]) -> list[str]:
     if len(lines) <= ANCHOR_LINE_LIMIT:
@@ -71,28 +88,26 @@ def clamp_anchor_lines(lines: list[str]) -> list[str]:
 
 
 def load_entries(transcript: pathlib.Path) -> list[dict]:
-    # Strip sidechain entries at load — defence-in-depth against
-    # sub-agent rollups being interleaved into the main JSONL.
-    entries: list[dict] = []
+    raw: list[dict] = []
     for line in transcript.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            entry = json.loads(line)
+            raw.append(json.loads(line))
         except json.JSONDecodeError:
             continue
-        if entry.get("isSidechain"):
-            continue
-        # Drop `isMeta` entries: the harness injects skill bodies as
-        # isMeta user entries on BOTH activation paths (Skill tool —
-        # carries sourceToolUseID — and the /slash-command path). A
-        # native skill body can be 100+ KB and does not start with any
-        # known wrapper prefix, so the text-based WRAPPER_PREFIXES filter
-        # misses it; dropping on the structural flag here keeps skill
-        # content out of every section (this bloat once produced a
-        # 140 KB handoff that overran jq's argv limit in load-handoff).
-        if entry.get("isMeta"):
+    # Bound at the last handoff activation: drop the "save handoff" turn and
+    # everything after it. The marker is found on raw entries so the isMeta
+    # slash entry is still detectable before the isMeta filter below.
+    cut = len(raw)
+    for i in range(len(raw) - 1, -1, -1):
+        if _is_activation(raw[i]):
+            cut = i
+            break
+    entries: list[dict] = []
+    for entry in raw[:cut]:
+        if entry.get("isSidechain") or entry.get("isMeta"):
             continue
         entries.append(entry)
     return entries
@@ -187,7 +202,7 @@ def format_quote(text: str) -> list[str]:
     return [f"> {line}" if line.strip() else ">" for line in text.splitlines()]
 
 
-def emit(transcript_path: str, output_path: pathlib.Path) -> None:
+def emit(transcript_path: str, task_path: str) -> None:
     entries: list[dict] = []
     transcript = pathlib.Path(transcript_path) if transcript_path else None
     if transcript and transcript.exists():
@@ -205,9 +220,9 @@ def emit(transcript_path: str, output_path: pathlib.Path) -> None:
     lines.append("")
     lines.append(f"Session: `{session_id}`")
     lines.append("")
-    task_path = output_path.parent / "handoff-task.md"
-    if task_path.exists():
-        task_content = task_path.read_text(encoding="utf-8", errors="replace").rstrip()
+    task = pathlib.Path(task_path)
+    if task.exists():
+        task_content = task.read_text(encoding="utf-8", errors="replace").rstrip()
         if task_content:
             lines.append(task_content)
             lines.append("")
@@ -233,17 +248,14 @@ def emit(transcript_path: str, output_path: pathlib.Path) -> None:
     else:
         lines.append("(none extracted)")
         lines.append("")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n".join(lines), encoding="utf-8")
+    sys.stdout.write("\n".join(lines) + "\n")
 
 
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
-        print(f"usage: {argv[0]} <transcript.jsonl> <output.md>", file=sys.stderr)
+        print(f"usage: {argv[0]} <transcript.jsonl> <handoff-task.md>", file=sys.stderr)
         return 2
-    emit(argv[1], pathlib.Path(argv[2]))
-    print(argv[2])
+    emit(argv[1], argv[2])
     return 0
 
 

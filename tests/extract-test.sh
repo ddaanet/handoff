@@ -57,7 +57,7 @@ inlining test sentinel value 7f3a1b9c
 
 - none
 TASK
-python3 scripts/extract.py tests/fixtures/extract-basic.jsonl "$out" > /dev/null
+python3 scripts/extract.py tests/fixtures/extract-basic.jsonl "$out_dir/handoff-task.md" > "$out"
 
 # Header is always present.
 assert_contains "$out" "# Handoff — " "basic: header"
@@ -114,7 +114,7 @@ cat > "$out_dir/handoff-task.md" <<'TASK'
 
 empty-transcript sentinel 4c8d2e1f
 TASK
-python3 scripts/extract.py "" "$out" > /dev/null
+python3 scripts/extract.py "" "$out_dir/handoff-task.md" > "$out"
 assert_contains "$out" "empty-transcript sentinel 4c8d2e1f" "empty: task content inlined"
 assert_not_contains "$out" "@handoff-task.md" "empty: @ ref gone"
 assert_contains "$out" "Session: \`(no transcript)\`" "empty: no-transcript session id"
@@ -130,7 +130,7 @@ cat > "$out_dir/handoff-task.md" <<'TASK'
 
 missing-transcript sentinel 9b6e3f0a
 TASK
-python3 scripts/extract.py "$tmp/does-not-exist.jsonl" "$out" > /dev/null
+python3 scripts/extract.py "$tmp/does-not-exist.jsonl" "$out_dir/handoff-task.md" > "$out"
 assert_contains "$out" "missing-transcript sentinel 9b6e3f0a" "missing: task content inlined"
 assert_not_contains "$out" "@handoff-task.md" "missing: @ ref gone"
 assert_contains "$out" "(none extracted)" "missing: empty-section note"
@@ -141,7 +141,7 @@ echo "=== missing-task (no handoff-task.md in output dir) ==="
 out_dir="$tmp/missing-task"
 mkdir -p "$out_dir"
 out="$out_dir/handoff.md"
-python3 scripts/extract.py "" "$out" > /dev/null
+python3 scripts/extract.py "" "$out_dir/handoff-task.md" > "$out"
 assert_not_contains "$out" "@handoff-task.md" "missing-task: no @ ref"
 assert_not_contains "$out" "## Current task" "missing-task: no task heading"
 assert_contains "$out" "## Files touched" "missing-task: files section still present"
@@ -157,7 +157,7 @@ echo "=== extract-skill-meta (isMeta skill bodies dropped) ==="
 out_dir="$tmp/skill-meta"
 mkdir -p "$out_dir"
 out="$out_dir/handoff.md"
-python3 scripts/extract.py tests/fixtures/extract-skill-meta.jsonl "$out" > /dev/null
+python3 scripts/extract.py tests/fixtures/extract-skill-meta.jsonl "$out_dir/handoff-task.md" > "$out"
 # Real user prompts on either side of the skill bodies are kept.
 assert_contains "$out" "real prompt KEEPME_ONE" "skill-meta: real prompt before skill kept"
 assert_contains "$out" "real prompt KEEPME_TWO" "skill-meta: real prompt between skills kept"
@@ -180,7 +180,7 @@ echo "=== anchor-multiline (multi-line anchor display) ==="
 out_dir="$tmp/anchor-multiline"
 mkdir -p "$out_dir"
 out="$out_dir/handoff.md"
-python3 scripts/extract.py tests/fixtures/anchor-multiline.jsonl "$out" > /dev/null
+python3 scripts/extract.py tests/fixtures/anchor-multiline.jsonl "$out_dir/handoff-task.md" > "$out"
 
 # 3-line anchor: all 3 lines shown, no truncation.
 assert_contains "$out" "**after** ANCHOR3_L1" "anchor-multiline: 3-line L1"
@@ -213,6 +213,18 @@ l6_line="$(grep -n 'ANCHOR8_L6' "$out" | head -1 | cut -d: -f1)"
 [[ -n "$l3_line" && -n "$marker_line" && -n "$l6_line" \
     && $l3_line -lt $marker_line && $marker_line -lt $l6_line ]] \
     || fail "anchor-multiline: expected L3 < marker < L6 order"
+
+# extract-bounded.jsonl: prompts after the last handoff activation marker
+# are excluded; prompts before it are kept. The "save handoff" turn and any
+# post-handoff digression must not leak into the next session's frame.
+echo "=== extract-bounded (cut at last activation) ==="
+out_dir="$tmp/bounded"
+mkdir -p "$out_dir"
+out="$out_dir/handoff.md"
+python3 scripts/extract.py tests/fixtures/extract-bounded.jsonl "$out_dir/handoff-task.md" > "$out"
+assert_contains "$out" "BOUNDED_KEEP_ONE" "bounded: pre-activation prompt 1 kept"
+assert_contains "$out" "BOUNDED_KEEP_TWO" "bounded: pre-activation prompt 2 kept"
+assert_not_contains "$out" "BOUNDED_DROP_AFTER" "bounded: post-activation prompt excluded"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2

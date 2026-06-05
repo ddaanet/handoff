@@ -1,0 +1,6 @@
+{"type":"user","message":{"role":"user","content":"BOUNDED_KEEP_ONE first real prompt"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"working on it"}]}}
+{"type":"user","message":{"role":"user","content":"BOUNDED_KEEP_TWO second real prompt"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"handoff:handoff"}}]}}
+{"type":"user","message":{"role":"user","content":"BOUNDED_DROP_AFTER post-handoff digression"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
