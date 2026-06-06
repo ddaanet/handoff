@@ -76,9 +76,8 @@ split.
 
 ## Files touched on your system
 
-Per project, under `./.claude/`. After generating `handoff.md`, the
-hook runs `git add -f` on both task and output files so they appear
-staged for your next commit.
+Per project, under `./.claude/`. The PostToolUse hook runs `git add -f`
+on `handoff-task.md` so it appears staged for your next commit.
 
 - `handoff-task.md` — agent-written task + open decisions; staged for git automatically (track this).
 - `handoff-session` — machine-local pointer to the prior session JSONL; read at the next SessionStart to assemble the frame (gitignore this).

@@ -17,8 +17,9 @@ has the user-facing version of this.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
 - `hooks/hooks.json` — declares six hooks.
-  `SessionStart(startup|clear)`: inject handoff.md content into the
-  fresh agent's context via additionalContext.
+  `SessionStart(startup|clear)`: assemble the frame in memory via
+  `load-handoff.sh` (reads pointer, calls `extract.py`) and inject
+  it via `additionalContext`.
   `PreToolUse(Skill)` and `UserPromptSubmit`: wipe prior handoff files
   when `handoff:handoff` activates. The two together cover both
   invocation paths — the `Skill` tool (agent-driven) and the slash
@@ -50,11 +51,12 @@ has the user-facing version of this.
   `UserPromptSubmit` does not support the `matcher` field, so the
   script does its own prefix check on the `prompt` JSON field.
 - `scripts/_wipe-emit.sh` — shared helper used by both entry scripts.
-  Removes `.claude/handoff-task.md` and `.claude/handoff.md` if
-  present and, if anything was removed, emits dual-channel JSON:
-  `systemMessage` (user-facing) and
-  `hookSpecificOutput.additionalContext` (agent-facing, so the agent
-  knows the wipe happened and doesn't redundantly verify).
+  Writes the session pointer to `.claude/handoff-session`. Removes
+  `.claude/handoff-task.md`, `.claude/autorename`, and (as legacy
+  cleanup for ≤0.4.x upgrades) `.claude/handoff.md` if present.
+  If anything was removed, emits dual-channel JSON: `systemMessage`
+  (user-facing) and `hookSpecificOutput.additionalContext` (agent-facing,
+  so the agent knows the wipe happened and doesn't redundantly verify).
 - `scripts/_lib.sh` — sourced helper for the write and read hooks.
   Defines the `HANDOFF_REL_*` path constants and `handoff_resolve()`,
   which canonicalizes multiple paths in one `python3` subprocess
