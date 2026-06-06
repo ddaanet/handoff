@@ -50,8 +50,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-extract.sh",
-            "timeout": 30
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-stage.sh",
+            "timeout": 5
           },
           {
             "type": "command",

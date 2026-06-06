@@ -103,44 +103,27 @@ assert_eq "$(cat "$ptr_tmp/.claude/handoff-session" 2>/dev/null)" "$transcript" 
     "activation: pointer holds transcript_path"
 rm -rf "$ptr_tmp"
 
-# write-extract on the matching path produces handoff.md.
-echo "=== write-extract (matching path) ==="
-jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/.claude/handoff-task.md" \
-    '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
-    | bash scripts/write-extract.sh
-[[ -f "$tmp/.claude/handoff.md" ]] || fail "write-extract did not create handoff.md"
-grep -q 'hook smoke test' "$tmp/.claude/handoff.md" \
-    || fail "handoff.md missing inlined task content"
-grep -q 'fifth prompt' "$tmp/.claude/handoff.md" \
-    || fail "handoff.md missing transcript-derived content (fixture not exercised)"
-if grep -q '^@handoff-task.md$' "$tmp/.claude/handoff.md"; then
-    fail "handoff.md should not contain @handoff-task.md ref"
-fi
-
-# write-extract stages both files when project is a git repo.
-echo "=== write-extract (git staging) ==="
+# write-stage stages handoff-task.md and does NOT create handoff.md.
+echo "=== write-stage (git staging) ==="
 git_tmp="$(mktemp -d)"
 git -C "$git_tmp" init -q
 mkdir -p "$git_tmp/.claude"
 cp "$tmp/.claude/handoff-task.md" "$git_tmp/.claude/handoff-task.md"
 out="$(jq -nc --arg t "$transcript" --arg fp "$git_tmp/.claude/handoff-task.md" \
         '{transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
-    | CLAUDE_PROJECT_DIR="$git_tmp" bash scripts/write-extract.sh)"
+    | CLAUDE_PROJECT_DIR="$git_tmp" bash scripts/write-stage.sh)"
 echo "$out" | jq -e '.systemMessage == "handoff — staged for commit"' >/dev/null \
-    || fail "write-extract (git staging): expected staged message"
+    || fail "write-stage: expected staged message"
 git -C "$git_tmp" status --porcelain | grep -q 'handoff-task.md' \
-    || fail "write-extract (git staging): handoff-task.md not staged"
-git -C "$git_tmp" status --porcelain | grep -q 'handoff\.md' \
-    || fail "write-extract (git staging): handoff.md not staged"
+    || fail "write-stage: handoff-task.md not staged"
+[[ ! -f "$git_tmp/.claude/handoff.md" ]] || fail "write-stage: must not create handoff.md"
 rm -rf "$git_tmp"
 
-# write-extract on an unrelated path is a no-op.
-echo "=== write-extract (unrelated path: no-op) ==="
-rm -f "$tmp/.claude/handoff.md"
-jq -nc --arg cwd "$tmp" --arg t "$transcript" --arg fp "$tmp/README.md" \
-    '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
-    | bash scripts/write-extract.sh
-[[ ! -e "$tmp/.claude/handoff.md" ]] || fail "write-extract regenerated on unrelated path"
+# write-stage on an unrelated path is a no-op.
+echo "=== write-stage (unrelated path: no-op) ==="
+jq -nc --arg t "$transcript" --arg fp "$tmp/README.md" \
+    '{transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
+    | bash scripts/write-stage.sh
 
 # write-guard: canonical handoff-task.md path is DENIED before activation.
 echo "=== write-guard (handoff-task.md, not activated: deny) ==="
