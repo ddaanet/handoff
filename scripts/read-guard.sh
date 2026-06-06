@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # PreToolUse hook for Read.
 # - handoff-task.md: reads are refused until the handoff:handoff skill
-#   has activated this session.
+#   has activated this session. Only this project's file is gated;
+#   cross-project handoff-task.md reads pass through (contrast:
+#   write-guard.sh denies them).
 # Anything else passes through (the Read matcher cannot filter by path).
 set -euo pipefail
 
