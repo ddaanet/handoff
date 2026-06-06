@@ -1,7 +1,7 @@
 ## Current task
 
-Resume subagent-driven-development execution of `docs/superpowers/plans/2026-06-05-read-time-handoff-assembly.md` on branch `feat/read-time-assembly`: Task 4 (`load-handoff.sh`) is implemented but needs spec + quality review, then Tasks 5–7 (slim staging hook, drop `handoff.md` guards, smoke/version/docs).
+Testing the read-time assembly feature: this frame was assembled at SessionStart from the session pointer, not from a pre-generated handoff.md file.
 
 ## Open decisions
 
-- Task 4 review pending: spec reviewer should check that `load-handoff.sh` gates on task file, reads pointer, calls `extract.py` stdout, uses `${#assembled}` for size, and task file mtime for age. Quality reviewer should check error handling and `--arg` vs `--rawfile` justification.
+- Confirm the assembled frame appears correctly in the next session's context (no handoff.md on disk, content injected via additionalContext).

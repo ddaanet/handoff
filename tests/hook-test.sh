@@ -92,18 +92,9 @@ assert_eq "$(echo "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')
 assert_eq "$(echo "$out" | jq -r '.systemMessage')" "system text" \
     "handoff_deny: systemMessage passthrough"
 
-# Activation writes the session pointer (current transcript_path) so the
-# next session knows which JSONL to scrape.
-echo "=== activation pointer (skill path) ==="
-ptr_tmp="$(mktemp -d)"; mkdir -p "$ptr_tmp/.claude"
-jq -nc --arg t "$transcript" \
-    '{tool_name:"Skill", tool_input:{skill:"handoff:handoff"}, transcript_path:$t}' \
-    | CLAUDE_PROJECT_DIR="$ptr_tmp" bash scripts/skill-pre-hook.sh >/dev/null
-assert_eq "$(cat "$ptr_tmp/.claude/handoff-session" 2>/dev/null)" "$transcript" \
-    "activation: pointer holds transcript_path"
-rm -rf "$ptr_tmp"
-
-# write-stage stages handoff-task.md and does NOT create handoff.md.
+# write-stage stages handoff-task.md, saves the session pointer, and does NOT
+# create handoff.md. The pointer is saved at write time (not activation time)
+# so agents that update the task after later user input point to the right JSONL.
 echo "=== write-stage (git staging) ==="
 git_tmp="$(mktemp -d)"
 git -C "$git_tmp" init -q
@@ -116,6 +107,8 @@ echo "$out" | jq -e '.systemMessage == "handoff — staged for commit"' >/dev/nu
     || fail "write-stage: expected staged message"
 git -C "$git_tmp" status --porcelain | grep -q 'handoff-task.md' \
     || fail "write-stage: handoff-task.md not staged"
+assert_eq "$(cat "$git_tmp/.claude/handoff-session" 2>/dev/null)" "$transcript" \
+    "write-stage: pointer holds transcript_path"
 [[ ! -f "$git_tmp/.claude/handoff.md" ]] || fail "write-stage: must not create handoff.md"
 rm -rf "$git_tmp"
 

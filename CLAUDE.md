@@ -51,12 +51,12 @@ has the user-facing version of this.
   `UserPromptSubmit` does not support the `matcher` field, so the
   script does its own prefix check on the `prompt` JSON field.
 - `scripts/_wipe-emit.sh` — shared helper used by both entry scripts.
-  Writes the session pointer to `.claude/handoff-session`. Removes
-  `.claude/handoff-task.md`, `.claude/autorename`, and (as legacy
+  Removes `.claude/handoff-task.md`, `.claude/autorename`, and (as legacy
   cleanup for ≤0.4.x upgrades) `.claude/handoff.md` if present.
   If anything was removed, emits dual-channel JSON: `systemMessage`
   (user-facing) and `hookSpecificOutput.additionalContext` (agent-facing,
   so the agent knows the wipe happened and doesn't redundantly verify).
+  The session pointer is NOT written here — see `write-stage.sh`.
 - `scripts/_lib.sh` — sourced helper for the write and read hooks.
   Defines the `HANDOFF_REL_*` path constants and `handoff_resolve()`,
   which canonicalizes multiple paths in one `python3` subprocess
@@ -95,8 +95,11 @@ has the user-facing version of this.
   for the user to paste (outside tmux). Running as a hook rather than via the
   Bash tool means the tmux socket is accessible with no sandbox bypass.
 - `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point:
-  matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`
-  and runs `git add -f` to stage it for the user's next commit.
+  matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`,
+  saves the session pointer to `.claude/handoff-session` (at write time,
+  not activation time — agents update the task after later user input, so
+  the pointer must reference the session of the last write), then stages
+  the file with `git add -f`.
 - `scripts/extract.py` — parses the session JSONL (bounded at the
   last handoff activation), inlines `.claude/handoff-task.md` (if it
   exists), and emits the assembled frame to stdout. Called at
@@ -200,6 +203,10 @@ to use synthetic JSONL, but the fixture must mirror the real format
 - **Anchor**: walk backwards from each kept user prompt to the nearest
   assistant turn. Prefer `tool_use` name + target; fall back to first
   line of assistant text.
+- **Cutoff**: the scrape is bounded at the last Write/Edit to
+  `handoff-task.md` (not at skill activation). Agents sometimes update
+  the task after later user input; cutting at the write captures those
+  correction prompts in the last-N window.
 
 ## Non-goals
 

@@ -214,17 +214,19 @@ l6_line="$(grep -n 'ANCHOR8_L6' "$out" | head -1 | cut -d: -f1)"
     && $l3_line -lt $marker_line && $marker_line -lt $l6_line ]] \
     || fail "anchor-multiline: expected L3 < marker < L6 order"
 
-# extract-bounded.jsonl: prompts after the last handoff activation marker
-# are excluded; prompts before it are kept. The "save handoff" turn and any
-# post-handoff digression must not leak into the next session's frame.
-echo "=== extract-bounded (cut at last activation) ==="
+# extract-bounded.jsonl: prompts after the last Write to handoff-task.md are
+# excluded; prompts before it (including those between activation and write)
+# are kept. Agents sometimes update the task after later user input — the
+# write is the definitive cutoff, not skill activation.
+echo "=== extract-bounded (cut at last write to handoff-task.md) ==="
 out_dir="$tmp/bounded"
 mkdir -p "$out_dir"
 out="$out_dir/handoff.md"
 python3 scripts/extract.py tests/fixtures/extract-bounded.jsonl "$out_dir/handoff-task.md" > "$out"
 assert_contains "$out" "BOUNDED_KEEP_ONE" "bounded: pre-activation prompt 1 kept"
 assert_contains "$out" "BOUNDED_KEEP_TWO" "bounded: pre-activation prompt 2 kept"
-assert_not_contains "$out" "BOUNDED_DROP_AFTER" "bounded: post-activation prompt excluded"
+assert_contains "$out" "BOUNDED_KEEP_THREE" "bounded: post-activation pre-write correction kept"
+assert_not_contains "$out" "BOUNDED_DROP_AFTER" "bounded: post-write prompt excluded"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2

@@ -2,6 +2,7 @@
 .claude/handoff.md
 .claude/handoff-task.md
 .claude/handoff-error.log
+.claude/handoff-session
 
 # Local-only Claude Code settings
 .claude/settings.local.json

@@ -61,21 +61,20 @@ WRAPPER_EXACT = frozenset({
     "[Request interrupted by user]",
 })
 
-SLASH_MARKER = "<command-name>/handoff:handoff</command-name>"
-
-
-def _is_activation(entry: dict) -> bool:
+def _is_handoff_write(entry: dict) -> bool:
+    """True when this assistant entry writes or edits handoff-task.md."""
     msg = entry.get("message") or {}
-    if msg.get("role") == "assistant":
-        for block in msg.get("content") or []:
-            if (isinstance(block, dict)
-                    and block.get("type") == "tool_use"
-                    and block.get("name") == "Skill"
-                    and (block.get("input") or {}).get("skill") in ("handoff", "handoff:handoff")):
-                return True
-    if entry.get("type") == "user":
-        content = msg.get("content")
-        if isinstance(content, str) and SLASH_MARKER in content:
+    if msg.get("role") != "assistant":
+        return False
+    for block in msg.get("content") or []:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") != "tool_use":
+            continue
+        if block.get("name") not in ("Write", "Edit"):
+            continue
+        file_path = (block.get("input") or {}).get("file_path") or ""
+        if file_path.endswith("handoff-task.md"):
             return True
     return False
 
@@ -97,12 +96,12 @@ def load_entries(transcript: pathlib.Path) -> list[dict]:
             raw.append(json.loads(line))
         except json.JSONDecodeError:
             continue
-    # Bound at the last handoff activation: drop the "save handoff" turn and
-    # everything after it. The marker is found on raw entries so the isMeta
-    # slash entry is still detectable before the isMeta filter below.
+    # Bound at the last write to handoff-task.md. Agents sometimes update the
+    # task after later user input, so cutting at the write (not at skill
+    # activation) captures those correction prompts in the last-N window.
     cut = len(raw)
     for i in range(len(raw) - 1, -1, -1):
-        if _is_activation(raw[i]):
+        if _is_handoff_write(raw[i]):
             cut = i
             break
     entries: list[dict] = []

@@ -2,5 +2,8 @@
 {"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"working on it"}]}}
 {"type":"user","isSidechain":false,"message":{"role":"user","content":"BOUNDED_KEEP_TWO second real prompt"}}
 {"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"skill":"handoff:handoff"}}]}}
-{"type":"user","isSidechain":false,"message":{"role":"user","content":"BOUNDED_DROP_AFTER post-handoff digression"}}
+{"type":"user","isSidechain":false,"isMeta":true,"message":{"role":"user","content":"skill body injected by harness (isMeta=true, dropped)"}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"BOUNDED_KEEP_THREE correction after activation, before write"}}
+{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"Write","input":{"file_path":"/project/.claude/handoff-task.md"}}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"BOUNDED_DROP_AFTER post-write digression"}}
 {"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}

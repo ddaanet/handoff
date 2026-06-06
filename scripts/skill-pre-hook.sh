@@ -22,6 +22,5 @@ skill="$(jq -r '.tool_input.skill // ""' <<<"$input")"
 [[ "$skill" == "handoff" || "$skill" == "handoff:handoff" ]] || exit 0
 
 cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
 
-exec bash "$(dirname "$0")/_wipe-emit.sh" "$cwd" "PreToolUse" "$transcript"
+exec bash "$(dirname "$0")/_wipe-emit.sh" "$cwd" "PreToolUse"
