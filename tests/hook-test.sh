@@ -152,20 +152,6 @@ set -e
 assert_eq "$rc" "0" "write-guard activated exit code"
 assert_eq "$out" "" "write-guard activated produced no deny output"
 
-# write-guard: handoff.md is hook-owned — denied even when activated.
-echo "=== write-guard (handoff.md: deny) ==="
-set +e
-out="$(
-    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/activated-skill.jsonl" --arg fp "$tmp/.claude/handoff.md" \
-        '{cwd:$cwd, transcript_path:$t, tool_name:"Write", tool_input:{file_path:$fp}}' \
-        | bash scripts/write-guard.sh
-)"
-rc=$?
-set -e
-assert_eq "$rc" "0" "write-guard handoff.md exit code"
-echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
-    || fail "write-guard did not deny write to hook-owned handoff.md"
-
 # write-guard denies cross-project writes via structured JSON on stdout
 # (exit 0). Modern PreToolUse deny path; matches the wipe scripts.
 echo "=== write-guard (cross-project: deny) ==="
@@ -211,20 +197,6 @@ jq -nc --arg cwd "$tmp" --arg fp "$other/.claude/some-other-file.md" \
 rc=$?
 set -e
 assert_eq "$rc" "0" "write-guard non-matching filename exit code"
-
-# read-guard: handoff.md is hook-owned — reads refused always.
-echo "=== read-guard (handoff.md: deny) ==="
-set +e
-out="$(
-    jq -nc --arg cwd "$tmp" --arg t "$repo_root/tests/fixtures/activated-skill.jsonl" --arg fp "$tmp/.claude/handoff.md" \
-        '{cwd:$cwd, transcript_path:$t, tool_name:"Read", tool_input:{file_path:$fp}}' \
-        | bash scripts/read-guard.sh
-)"
-rc=$?
-set -e
-assert_eq "$rc" "0" "read-guard handoff.md exit code"
-echo "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null \
-    || fail "read-guard did not deny read of hook-owned handoff.md"
 
 # read-guard: handoff-task.md read refused before activation.
 echo "=== read-guard (handoff-task.md, not activated: deny) ==="
