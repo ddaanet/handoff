@@ -16,8 +16,10 @@ Install the plugin:
 ```
 
 That's it. No per-project setup step. A `SessionStart(startup|clear)`
-hook reads `./.claude/handoff.md` at session start and injects its
-contents into the fresh agent's context.
+hook assembles the handoff frame in memory at session start — reading
+`./.claude/handoff-task.md` and scraping the prior session transcript
+— and injects the result into the fresh agent's context. No generated
+file is involved.
 
 **Migrating from v0.2.x**: if your project's `CLAUDE.md` contains a
 `## Handoff` section with `@.claude/handoff.md` (added by the old
@@ -37,22 +39,7 @@ Before `/clear`, ask the agent to save a handoff:
 
 Or invoke explicitly with `/handoff:handoff`.
 
-A `PreToolUse(Skill)` hook wipes any prior handoff files the moment
-the skill activates, so the slate is always clean — and tells the
-agent so it doesn't redundantly verify. The agent then updates
-auto-memory with any durable learnings, and in a single turn writes
-both files: a short task snapshot (if anything is outstanding) and a
-session title to `.claude/autorename`. A `PostToolUse(Write|Edit)`
-hook picks up the task snapshot and produces `./.claude/handoff.md`
-combining it with auto-extracted session data (last few user prompts
-verbatim, files edited this session). A second hook picks up
-`autorename` and renames the session via tmux `send-keys` once the
-prompt goes idle (or emits a `/rename` line to paste if not in tmux).
-Guards prevent the agent from reading or writing `.claude/handoff.md`
-and `.claude/handoff-task.md` outside the handoff flow — both files
-are managed exclusively by the skill and its hooks. After `/clear` (or
-in a fresh session), the `SessionStart` hook injects `handoff.md` into
-the new agent's context automatically. Auto-memory restores independently.
+A `PreToolUse(Skill)` hook wipes any prior handoff files the moment the skill activates, so the slate is always clean — and tells the agent so it doesn't redundantly verify. The hook also records the current session's transcript path to `.claude/handoff-session` so the next session knows which JSONL to scrape. The agent then updates auto-memory with any durable learnings, and in a single turn writes a short task snapshot (if anything is outstanding) and a session title to `.claude/autorename`. A `PostToolUse(Write|Edit)` hook stages `handoff-task.md` for commit. A second hook picks up `autorename` and renames the session via tmux `send-keys` once the prompt goes idle (or emits a `/rename` line to paste if not in tmux). Guards prevent the agent from reading or writing `.claude/handoff-task.md` outside the handoff flow. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently.
 
 ## Staleness and cleanup
 
@@ -61,8 +48,12 @@ task is finished, invoke the skill again with nothing outstanding —
 the activation hook wipes prior files and the agent writes nothing
 new, so the next session starts clean.
 
-Commit the files to git if you want an archived trail. There is no
-separate archive directory.
+`handoff-task.md` is staged automatically by the PostToolUse hook and rides your next commit — it is the durable task trail. The `.claude/handoff-session` pointer and `.claude/handoff-error.log` are machine-local; add them to `.gitignore`. A useful `.gitignore` snippet:
+```
+.claude/handoff-session
+.claude/handoff-error.log
+```
+gitlore auto-memory is the complement for durable context that outlives tasks.
 
 ## Scope
 
@@ -89,26 +80,20 @@ Per project, under `./.claude/`. After generating `handoff.md`, the
 hook runs `git add -f` on both task and output files so they appear
 staged for your next commit.
 
-- `handoff-task.md` — agent-written task + open decisions.
-- `handoff.md` — hook-generated, self-contained file with the inlined
-  task content plus extracted session data (last user prompts, files
-  edited).
+- `handoff-task.md` — agent-written task + open decisions; staged for git automatically (track this).
+- `handoff-session` — machine-local pointer to the prior session JSONL; read at the next SessionStart to assemble the frame (gitignore this).
 - `autorename` — transient trigger file; written by the agent with the
   session title, consumed and deleted immediately by the PostToolUse
   hook.
-- `handoff-error.log` — written only if extraction fails.
+- `handoff-error.log` — written only if the SessionStart assembly fails (gitignore this).
 
-The task and handoff files are paired: invoke the skill again with
-nothing outstanding and both get wiped at activation (the "finalize"
-case). Nothing outside the current project is modified.
+`handoff-task.md` and the session pointer are wiped at activation (the "finalize" case): invoke the skill again with nothing outstanding and the next session starts clean. Nothing outside the current project is modified.
 
 ## Uninstall
 
 ```
 /plugin uninstall handoff@ddaanet
 ```
-
-Existing `handoff.md` files stay where they are.
 
 ## Further reading
 

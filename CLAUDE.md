@@ -5,9 +5,10 @@ to edit the plugin's skill, hook, or script.
 
 ## Layout
 
-High-level flow: skill writes `.claude/handoff-task.md` →
-`PostToolUse(Write|Edit)` regenerates `.claude/handoff.md` →
-next session's `SessionStart(startup|clear)` injects it. `README.md`
+High-level flow: skill writes `.claude/handoff-task.md` and stores
+the session pointer → `PostToolUse(Write|Edit)` stages
+`handoff-task.md` for commit → next session's `SessionStart(startup|clear)`
+calls `extract.py` in memory and injects the assembled frame. `README.md`
 has the user-facing version of this.
 
 - `.claude-plugin/plugin.json` — manifest
@@ -23,16 +24,13 @@ has the user-facing version of this.
   invocation paths — the `Skill` tool (agent-driven) and the slash
   command `/handoff:handoff` (user-driven, which loads the skill body
   directly without going through the `Skill` tool).
-  `PreToolUse(Read)`: deny reads of this project's `handoff.md`
-  (hook-owned) always, and its `handoff-task.md` until
-  `handoff:handoff` has activated this session.
-  `PreToolUse(Write|Edit)`: deny `handoff.md` writes (hook-owned
-  output); deny `handoff-task.md` writes before activation; deny
-  `handoff-task.md` writes whose resolved path is not
+  `PreToolUse(Read)`: deny reads of this project's `handoff-task.md`
+  until `handoff:handoff` has activated this session.
+  `PreToolUse(Write|Edit)`: deny `handoff-task.md` writes before
+  activation; deny `handoff-task.md` writes whose resolved path is not
   `$cwd/.claude/handoff-task.md` (cross-project guard).
-  `PostToolUse(Write|Edit)`: regenerate `.claude/handoff.md` whenever
-  `handoff-task.md` is written, so extraction is visible in the same
-  agent turn.
+  `PostToolUse(Write|Edit)`: stage `handoff-task.md` for commit when
+  it is written.
 - `scripts/skill-pre-hook.sh` — PreToolUse(Skill) entry point:
   matches `tool_input.skill` being `handoff` or `handoff:handoff` (the
   Skill tool accepts both as launches of the same skill), then `exec`s
@@ -40,10 +38,12 @@ has the user-facing version of this.
   before the skill body is loaded — keeps the agent out of the
   cleanup path.
 - `scripts/load-handoff.sh` — SessionStart(startup|clear) entry
-  point. Reads `$cwd/.claude/handoff.md` and emits its contents via
+  point. Gates on `.claude/handoff-task.md`. Reads the session pointer
+  from `.claude/handoff-session`, calls `extract.py` (stdout) to
+  assemble the frame in memory, and emits it via
   `hookSpecificOutput.additionalContext` (agent-facing) plus a curt
   `systemMessage` with bytes + age (user-facing). Silent no-op when
-  the file is missing or empty.
+  the task file is missing or empty.
 - `scripts/prompt-pre-hook.sh` — UserPromptSubmit entry point:
   matches prompts starting with `/handoff:handoff`, then `exec`s
   `_wipe-emit.sh` with `hookEventName=UserPromptSubmit`.
@@ -66,11 +66,10 @@ has the user-facing version of this.
   after printing the deny JSON, so only safe from a standalone hook
   script).
 - `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
-  this project's `handoff.md` (hook-owned) always, and its
-  `handoff-task.md` until `handoff:handoff` has activated this session.
+  this project's `handoff-task.md` until `handoff:handoff` has
+  activated this session.
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies
-  writes to this project's `handoff.md` (hook-owned output) always.
-  Denies `handoff-task.md` writes whose resolved path is not
+  `handoff-task.md` writes whose resolved path is not
   `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
   Denies `handoff-task.md` writes before `handoff:handoff` has
   activated this session.
@@ -93,16 +92,14 @@ has the user-facing version of this.
   `rename-when-idle.sh` watcher (in tmux) or emits a `/rename <title>` line
   for the user to paste (outside tmux). Running as a hook rather than via the
   Bash tool means the tmux socket is accessible with no sandbox bypass.
-- `scripts/write-extract.sh` — PostToolUse(Write|Edit) entry point:
+- `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point:
   matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`
-  and runs `extract.py` to (re)generate `$cwd/.claude/handoff.md`.
-  Captures stderr to `.claude/handoff-error.log` on failure. On
-  success, runs `git add -f` on both files so they are staged for the
-  user's next commit.
-- `scripts/extract.py` — parses the session JSONL, writes
-  `.claude/handoff.md` with the inlined contents of
-  `.claude/handoff-task.md` (if it exists) and extracted sections
-  below
+  and runs `git add -f` to stage it for the user's next commit.
+- `scripts/extract.py` — parses the session JSONL (bounded at the
+  last handoff activation), inlines `.claude/handoff-task.md` (if it
+  exists), and emits the assembled frame to stdout. Called at
+  SessionStart by `load-handoff.sh`; contract: `extract.py
+  <transcript.jsonl> <handoff-task.md>`.
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.2.0`). Provides:
@@ -131,8 +128,8 @@ has the user-facing version of this.
   judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
-- Output paths are fixed: `.claude/handoff-task.md` (agent-written)
-  and `.claude/handoff.md` (hook-written) in the project root.
+- Output path: `.claude/handoff-task.md` (agent-written, git-tracked).
+  The session pointer is `.claude/handoff-session` (machine-local).
   Changing these is a breaking change and requires a version bump.
 - `extract.py` must succeed even when the transcript path is empty or
   missing — a handoff with just the inlined task content (if any) and

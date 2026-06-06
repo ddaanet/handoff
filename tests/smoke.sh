@@ -18,9 +18,10 @@ if [[ -z "$transcript" ]]; then
     exit 1
 fi
 
-output="$(mktemp "${TMPDIR:-/tmp}/handoff.XXXXXX.md")"
-trap 'rm -f "$output"' EXIT
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/handoff-smoke.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT
 
-python3 scripts/extract.py "$transcript" "$output"
-echo "--- $output ---"
-cat "$output"
+python3 scripts/extract.py "$transcript" "$repo_root/.claude/handoff-task.md" > "$tmp/handoff.md"
+[[ -s "$tmp/handoff.md" ]] || { echo "smoke: empty output" >&2; exit 1; }
+echo "--- smoke output ---"
+cat "$tmp/handoff.md"
