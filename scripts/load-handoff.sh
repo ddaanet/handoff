@@ -35,8 +35,8 @@ if [[ -s "$pointer" ]]; then
 fi
 
 if ! assembled="$(python3 "$script_dir/extract.py" "$jsonl" "$task" 2>"$log")"; then
-    tail=$(tail -c 400 "$log" 2>/dev/null | tr '\n' ' ')
-    jq -nc --arg log "$log" --arg tail "$tail" \
+    tail_excerpt=$(tail -c 400 "$log" 2>/dev/null | tr '\n' ' ') || true
+    jq -nc --arg log "$log" --arg tail "$tail_excerpt" \
         '{systemMessage: ("handoff load failed (see " + $log + "): " + $tail)}'
     exit 0
 fi
