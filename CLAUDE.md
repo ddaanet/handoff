@@ -75,14 +75,10 @@ has the user-facing version of this.
   `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
   Denies `handoff-task.md` writes before `handoff:handoff` has
   activated this session.
-- `scripts/set-title.sh` — skill entry point for session naming. Takes the
-  title as arguments. Inside tmux, spawns a detached `rename-when-idle.sh`
-  watcher and returns immediately; outside tmux prints a `/rename <title>`
-  line to paste.
 - `scripts/rename-when-idle.sh` — detached watcher. Polls for the Claude TUI
   spinner to be absent (idle), checks the user isn't composing, then fires
   `tmux send-keys -l` to type `/rename <title>` + Enter. Verifies the rename
-  landed (status bar) and retries up to 3×. Spawned by `set-title.sh`;
+  landed (status bar) and retries up to 3×. Spawned by `write-rename.sh`;
   outlives the agent turn.
 - `scripts/_rename-lib.sh` — sourced helper for `rename-when-idle.sh`.
   Defines `is_busy` (spinner present) and `is_typing` (prompt has content)
@@ -170,8 +166,8 @@ has the user-facing version of this.
   stripping, empty/missing transcript).
 - `tests/rename-test.sh` (run directly by `precommit`, no dedicated
   recipe): unit tests for the session rename scripts. Covers
-  `_rename-lib.sh` predicates, `set-title.sh` branches (no title,
-  not-in-tmux), and `rename-when-idle.sh` end-to-end via a tmux stub.
+  `_rename-lib.sh` predicates and `rename-when-idle.sh` end-to-end via a
+  tmux stub.
 
 Test scripts live under `tests/`. The justfile recipes are
 one-liners that delegate. Add new test scenarios to the existing

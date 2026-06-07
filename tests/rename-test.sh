@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Test suite for the rename (session-title) scripts.
 #
-# Covers the pure predicates (_rename-lib.sh), the set-title.sh branches
-# (no title / not-in-tmux), and the rename-when-idle.sh watcher end-to-end
-# against a tmux stub on PATH (no real tmux/Claude needed).
+# Covers the pure predicates (_rename-lib.sh) and the rename-when-idle.sh
+# watcher end-to-end against a tmux stub on PATH (no real tmux/Claude
+# needed).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,19 +33,6 @@ else fail "is_typing true on non-empty prompt"; fi
 
 if printf '%s' "$idle_text" | is_typing; then fail "is_typing false on empty prompt"
 else pass "is_typing false on empty prompt"; fi
-
-# --- set-title.sh: missing title -> exit 2 -------------------------------------
-bash "$SCRIPTS/set-title.sh" >/dev/null 2>&1; rc=$?
-if [[ $rc -eq 2 ]]; then pass "no title exits 2"; else fail "no title exits 2 (rc=$rc)"; fi
-
-bash "$SCRIPTS/set-title.sh" '   ' >/dev/null 2>&1; rc=$?
-if [[ $rc -eq 2 ]]; then pass "whitespace-only title exits 2"; else fail "whitespace-only title exits 2 (rc=$rc)"; fi
-
-# --- set-title.sh: not in tmux -> paste fallback -------------------------------
-out="$(env -u TMUX -u TMUX_PANE bash "$SCRIPTS/set-title.sh" 'My Title' 2>&1)"
-if [[ "$out" == *"/rename My Title"* ]]; then pass "fallback prints the /rename line"
-else fail "fallback prints the /rename line"; fi
-if [[ "$out" == *tmux* ]]; then pass "fallback mentions tmux"; else fail "fallback mentions tmux"; fi
 
 # --- rename-when-idle.sh end-to-end via a tmux stub ----------------------------
 STUBDIR="$(mktemp -d)"; trap 'rm -rf "$STUBDIR"' EXIT

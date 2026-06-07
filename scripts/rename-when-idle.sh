@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # handoff watcher: wait for this tmux pane's prompt to go idle, then type
-# `/rename <title>` into it. Run detached by set-title.sh so it outlives the
+# `/rename <title>` into it. Run detached by write-rename.sh so it outlives the
 # turn (the rename only lands once Claude stops and the prompt is idle).
 #
 # Usage: rename-when-idle.sh <pane-id> <title...>
