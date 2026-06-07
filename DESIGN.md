@@ -448,12 +448,22 @@ inlined block is omitted entirely.
 
 ## Skill: handoff
 
-One skill ships with the plugin:
+Two skills ship with the plugin:
 
 - **`/handoff:handoff`** — the main skill. Updates memory, then
   decides whether to write `handoff-task.md` from a template. The
   cleanup case is handled by the PreToolUse hook at activation; the
   load case is handled by the SessionStart hook at the next session.
+  As part of its flow it also writes the session title to
+  `.claude/autorename`.
+- **`/handoff:autoname`** — handoff's rename-half on its own: decides a
+  session title from the conversation and writes it to
+  `.claude/autorename`, letting the shared `write-rename.sh` hook drive
+  the `/rename`. No task snapshot, no memory write. For a `/btw` side
+  conversation or any session worth a name while the main thread stays
+  live. handoff does not route through it (no benefit, one extra turn);
+  the two skills only share the `.claude/autorename` trigger file. See
+  `docs/superpowers/specs/2026-06-07-autoname-skill-design.md`.
 
 The skill is named `handoff` (matching the plugin) so CLI completion
 on `/handoff:` lands directly on the action, with no second namespace

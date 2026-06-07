@@ -14,6 +14,12 @@ has the user-facing version of this.
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
   contains the markdown template for `handoff-task.md`
+- `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
+  session title from the conversation (no tool calls) and writes it to
+  `.claude/autorename`; the same `write-rename.sh` PostToolUse hook that
+  handoff relies on does the rename. Rename-only — no task file, no
+  memory. For `/btw` side conversations and any session worth a name
+  while the main thread stays live.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
 - `hooks/hooks.json` — declares six hooks.

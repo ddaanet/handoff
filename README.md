@@ -39,6 +39,13 @@ Before `/clear`, ask the agent to save a handoff:
 
 Or invoke explicitly with `/handoff:handoff`.
 
+To name the session *without* a handoff — a `/btw` side conversation, or
+any session worth a title while the main thread stays live — invoke
+`/handoff:autoname`. It derives a title from the conversation and renames
+the session (via the same tmux `send-keys`-when-idle path as handoff, or
+a `/rename` line to paste outside tmux); it writes no task file and
+touches no memory.
+
 A `PreToolUse(Skill)` hook wipes any prior handoff files the moment the skill activates, so the slate is always clean — and tells the agent so it doesn't redundantly verify. The agent then updates auto-memory with any durable learnings, and in a single turn writes a short task snapshot (if anything is outstanding) and a session title to `.claude/autorename`. A `PostToolUse(Write|Edit)` hook stages `handoff-task.md` for commit and records the session pointer to `.claude/handoff-session`. A second hook picks up `autorename` and renames the session via tmux `send-keys` once the prompt goes idle (or emits a `/rename` line to paste if not in tmux). Guards prevent the agent from reading or writing `.claude/handoff-task.md` outside the handoff flow. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently.
 
 ## Staleness and cleanup
