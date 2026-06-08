@@ -1,0 +1,19 @@
+[project]
+name = "handoff"
+version = "0"
+requires-python = ">=3.13"
+
+[tool.uv]
+# Virtual project: extract.py is a standalone script under scripts/, not an
+# installable package. No build-system; uv sync only materializes the dev venv.
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+# extract.py lives under scripts/ and is not a package; put it on sys.path so
+# `import extract` resolves without a conftest hack.
+pythonpath = ["scripts"]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config", "--import-mode=importlib"]

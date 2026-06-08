@@ -61,16 +61,21 @@ WRAPPER_EXACT = frozenset({
     "[Request interrupted by user]",
 })
 
-def _is_handoff_write(entry: dict) -> bool:
-    """True when this assistant entry writes or edits handoff-task.md."""
+def tool_use_blocks(entry: dict) -> list[dict]:
+    """tool_use blocks of an assistant entry; empty list for anything else."""
     msg = entry.get("message") or {}
     if msg.get("role") != "assistant":
-        return False
-    for block in msg.get("content") or []:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") != "tool_use":
-            continue
+        return []
+    return [
+        block
+        for block in msg.get("content") or []
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    ]
+
+
+def _is_handoff_write(entry: dict) -> bool:
+    """True when this assistant entry writes or edits handoff-task.md."""
+    for block in tool_use_blocks(entry):
         if block.get("name") not in ("Write", "Edit"):
             continue
         file_path = (block.get("input") or {}).get("file_path") or ""
@@ -115,14 +120,7 @@ def load_entries(transcript: pathlib.Path) -> list[dict]:
 def extract_files_touched(entries: list[dict]) -> list[str]:
     seen: list[str] = []
     for entry in entries:
-        message = entry.get("message") or {}
-        if message.get("role") != "assistant":
-            continue
-        for block in message.get("content") or []:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") != "tool_use":
-                continue
+        for block in tool_use_blocks(entry):
             if block.get("name") not in ("Edit", "Write"):
                 continue
             path = (block.get("input") or {}).get("file_path")
@@ -236,11 +234,9 @@ def emit(transcript_path: str, task_path: str) -> None:
     lines.append("")
     if tail_prompts:
         for idx, text in tail_prompts:
-            anchor = anchor_for(entries, idx)
-            anchor_lines = anchor.splitlines()
+            anchor_lines = anchor_for(entries, idx).splitlines()
             lines.append(f"**after** {anchor_lines[0]}")
-            for al in anchor_lines[1:]:
-                lines.append(al)
+            lines.extend(anchor_lines[1:])
             lines.append("")
             lines.extend(format_quote(text))
             lines.append("")

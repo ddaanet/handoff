@@ -156,32 +156,41 @@ has the user-facing version of this.
 
 ## Testing
 
+The shell hooks are tested with **bats**; `extract.py` with **pytest**.
+pytest runs off a uv-managed venv that **direnv** activates (`.envrc`
+exports `VIRTUAL_ENV` + prepends `$VIRTUAL_ENV/bin` to `PATH`), so the
+recipes call bare `pytest` — no `uv run`. Materialize/refresh the venv
+with `uv sync` (the only `uv` invocation; `uv.lock` is committed,
+`.venv/` is gitignored). See [[feedback-uv-direnv-venv]].
+
 - `just precommit` — lint manifest + settings, syntax-check scripts,
-  run the hook test suite. The toolkit's `release` recipe depends on
-  this name.
+  `shellcheck -x` the scripts + `.bats` files, then run both test
+  suites (`bats tests/*.bats` + `pytest`). The toolkit's `release`
+  recipe depends on this name; it is also gitlore's `precommitCommand`,
+  so it runs on every memory commit (needs the direnv-activated venv).
 - `just smoke` — `tests/smoke.sh`: run `extract.py` against the most
   recent session JSONL and print the result.
-- `just hook-test` — `tests/hook-test.sh`: end-to-end test of the
-  handoff-specific hook scripts against synthetic tool-event payloads,
-  with assertions and a pass/fail summary. Exit code is propagated.
-  `version-guard.sh` is tested in the toolkit, not here.
-- `just extract-test` — `tests/extract-test.sh`: fixture-driven test
-  of `extract.py`. Runs against hand-crafted JSONL under
-  `tests/fixtures/` and asserts on the rendered handoff.md (files
-  touched, prompt cap, anchors, wrapper filtering, sidechain
-  stripping, empty/missing transcript).
-- `tests/rename-test.sh` (run directly by `precommit`, no dedicated
-  recipe): unit tests for the session rename scripts. Covers
-  `_rename-lib.sh` predicates and `rename-when-idle.sh` end-to-end via a
-  tmux stub.
+- `just hook-test` — `bats tests/hook-test.bats tests/rename-test.bats`:
+  end-to-end test of the handoff-specific hook scripts (and the rename
+  scripts) against synthetic tool-event payloads. `bats run` captures
+  exit codes/output without the `set +e` dance. `version-guard.sh` is
+  tested in the toolkit, not here.
+- `just extract-test` — `pytest`: fixture-driven tests of `extract.py`
+  (`tests/test_extract.py`). Unit tests import the pure functions;
+  end-to-end tests render a full frame (via `emit()` captured with
+  `redirect_stdout`, or the `extract.py` subprocess for the
+  `__main__` contract) against hand-crafted JSONL under
+  `tests/fixtures/` — files touched, prompt cap, anchors, wrapper
+  filtering, sidechain/isMeta stripping, bounded scrape,
+  empty/missing transcript.
 
-Test scripts live under `tests/`. The justfile recipes are
-one-liners that delegate. Add new test scenarios to the existing
-script rather than adding new just recipes.
+Test files live under `tests/`. The justfile recipes are one-liners
+that delegate. Add new scenarios to the existing `.bats`/`test_*.py`
+files rather than adding new just recipes.
 
 The smoke test must run against a real session JSONL — the format is
-undocumented and evolves. The fixture-driven extract test is allowed
-to use synthetic JSONL, but the fixture must mirror the real format
+undocumented and evolves. The fixture-driven pytest suite is allowed
+to use synthetic JSONL, but the fixtures must mirror the real format
 (verify by eyeballing a recent transcript); fictional shapes mislead.
 
 ## Extraction logic

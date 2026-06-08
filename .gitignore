@@ -10,3 +10,7 @@
 # Python bytecode (extract.py)
 __pycache__/
 *.pyc
+
+# uv-managed venv (created by `uv sync`; uv.lock IS tracked)
+.venv/
+.pytest_cache/

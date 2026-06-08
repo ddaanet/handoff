@@ -1,7 +1,7 @@
 ## Current task
 
-The `/handoff:autoname` skill is fully implemented and pushed to `origin/main` (3 commits: skill, set-title.sh removal, docs); the only unshipped step is the release.
+Execute the approved full integration of the bats + pytest test conversion — wire the `justfile`, add `pyproject.toml` + `uv.lock`, move pytest's `pythonpath` into pyproject (dropping the conftest `sys.path` hack), apply the rename-test env-prefix fix and all reviewer quality cleanups, then run the whole suite green; the ordered step-by-step checklist is in the `project-test-suite-framework-port` memory.
 
 ## Open decisions
 
-- Whether to run `just release` — the plugin version is unchanged and the marketplace entry isn't bumped, so end-users won't see autoname until a release. User declined the release this session.
+- How `just precommit` should handle uv's cache being sandbox-blocked: allowlist `~/.cache/uv` in the sandbox config, or run precommit unsandboxed. Decide before wiring precommit — pytest-under-uv (and thus the whole recipe) fails in-sandbox without it.
