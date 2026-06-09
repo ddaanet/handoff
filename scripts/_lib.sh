@@ -24,6 +24,20 @@ handoff_resolve() {
 for p in sys.argv[1:]: print(os.path.realpath(p))' "$@"
 }
 
+# Parse the three fields every path-scoped tool hook needs from the
+# hook-input JSON ($1) in a single jq pass, populating the caller's
+# HOOK_FILE_PATH, HOOK_CWD, and HOOK_TRANSCRIPT. HOOK_CWD is the raw
+# .cwd — callers pass it through handoff_root to anchor on the worktree
+# root. One field per line (not @tsv: tab is IFS-whitespace, so an empty
+# field between two tabs would collapse and shift the rest).
+# shellcheck disable=SC2034  # assigned for the caller's scope
+handoff_hook_fields() {
+    { read -r HOOK_FILE_PATH; read -r HOOK_CWD; read -r HOOK_TRANSCRIPT; } < <(
+        jq -r '.tool_input.file_path // "", .cwd // "", .transcript_path // ""' \
+            <<<"$1"
+    )
+}
+
 # Effective project root for the handoff files of THIS session. When the
 # session cwd ($1, from hook-input .cwd) is inside a linked git worktree of
 # CLAUDE_PROJECT_DIR, returns the worktree root so each worktree owns its own

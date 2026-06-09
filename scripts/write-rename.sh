@@ -9,15 +9,14 @@ source "$(dirname "$0")/_lib.sh"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 
-input="$(cat)"
-file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
-[[ -n "$file_path" ]] || exit 0
-[[ "$(basename "$file_path")" == "autorename" ]] || exit 0
+handoff_hook_fields "$(cat)"
+[[ -n "$HOOK_FILE_PATH" ]] || exit 0
+[[ "$(basename "$HOOK_FILE_PATH")" == "autorename" ]] || exit 0
 
-cwd="$(handoff_root "$(jq -r '.cwd // ""' <<<"$input")")"
+cwd="$(handoff_root "$HOOK_CWD")"
 [[ -n "$cwd" ]] || exit 0
 
-{ read -r target; read -r expected; } < <(handoff_resolve "$file_path" "$cwd/$HANDOFF_REL_RENAME")
+{ read -r target; read -r expected; } < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_RENAME")
 [[ "$target" == "$expected" ]] || exit 0
 
 [[ -f "$target" ]] || exit 0

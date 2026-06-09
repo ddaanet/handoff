@@ -8,25 +8,21 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-input="$(cat)"
-file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
-[[ -n "$file_path" ]] || exit 0
+handoff_hook_fields "$(cat)"
+[[ -n "$HOOK_FILE_PATH" ]] || exit 0
+[[ "$(basename "$HOOK_FILE_PATH")" == "handoff-task.md" ]] || exit 0
 
-base="$(basename "$file_path")"
-[[ "$base" == "handoff-task.md" ]] || exit 0
-
-cwd="$(handoff_root "$(jq -r '.cwd // ""' <<<"$input")")"
-transcript="$(jq -r '.transcript_path // ""' <<<"$input")"
+cwd="$(handoff_root "$HOOK_CWD")"
 
 { read -r target; read -r exp_task; } \
-    < <(handoff_resolve "$file_path" "$cwd/$HANDOFF_REL_TASK")
+    < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_TASK")
 
 if [[ "$target" != "$exp_task" ]]; then
     handoff_deny \
         "write blocked: handoff-task.md outside this project's .claude/. resolved: $target; expected: $exp_task." \
         "write-guard: blocked handoff-task.md write outside $cwd/.claude/"
 fi
-if ! handoff_activated "$transcript"; then
+if ! handoff_activated "$HOOK_TRANSCRIPT"; then
     handoff_deny \
         "handoff-task.md write blocked: handoff skill has not activated this session." \
         "write-guard: blocked handoff-task.md write before handoff activation"
