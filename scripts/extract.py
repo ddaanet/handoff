@@ -44,6 +44,7 @@ Entry = dict[str, Any]
 
 LAST_N_PROMPTS = 5
 MAX_FILES = 30
+WRITE_TOOLS = ("Edit", "Write")  # tool_use names that count as touching a file
 ANCHOR_TEXT_LIMIT = 120
 ANCHOR_LINE_LIMIT = 7  # show all lines if count <= this; truncation hides ≥2 lines
 ANCHOR_HEAD_LINES = 3  # lines shown before [...]
@@ -84,7 +85,7 @@ def tool_use_blocks(entry: Entry) -> list[Entry]:
 def _is_handoff_write(entry: Entry) -> bool:
     """Report whether this assistant entry writes or edits handoff-task.md."""
     for block in tool_use_blocks(entry):
-        if block.get("name") not in ("Write", "Edit"):
+        if block.get("name") not in WRITE_TOOLS:
             continue
         file_path = (block.get("input") or {}).get("file_path") or ""
         if file_path.endswith("handoff-task.md"):
@@ -138,7 +139,7 @@ def extract_files_touched(entries: list[Entry]) -> list[str]:
     seen: list[str] = []
     for entry in entries:
         for block in tool_use_blocks(entry):
-            if block.get("name") not in ("Edit", "Write"):
+            if block.get("name") not in WRITE_TOOLS:
                 continue
             path = (block.get("input") or {}).get("file_path")
             if path and path not in seen:

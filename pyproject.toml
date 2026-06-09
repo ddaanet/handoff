@@ -12,7 +12,7 @@ package = false
 dev = [
     "pytest>=8",
     "ruff>=0.14.9",
-    "mypy>=1.19.1",
+    "mypy>=2.0",
     "ty>=0.0.1a14",
     "docformatter>=1.7.5",
 ]
@@ -108,12 +108,14 @@ convention = "pep257"
 files = ["scripts", "tests"]
 mypy_path = "scripts"
 strict = true
-extra_checks = true
 error_summary = false
-# Turn on experimental option
-# https://mypy.readthedocs.io/en/stable/config_file.html#confval-allow_redefinition_new
-allow_redefinition_new = true
-local_partial_types = true
+warn_unreachable = true
+# Flexible redefinition: redefine a variable at a different type, infer a union
+# from multiple assignments. Plain `allow_redefinition` adopted this behavior in
+# mypy 2.0 (the old behavior is now `allow_redefinition_old`). Requires
+# local_partial_types, which is the default on mypy >= 2.0.
+# extra_checks and local_partial_types are already implied by strict on 2.x.
+allow_redefinition = true
 
 [tool.ty.environment]
 # scripts/ holds importable modules (extract, worktree_root) reached without a
