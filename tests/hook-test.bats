@@ -201,6 +201,17 @@ make_worktree() {
     [ "$status" -eq 0 ]
 }
 
+@test "write-guard (worktree cwd: allow write to worktree .claude)" {
+    wt="$(make_worktree wtG)"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$wt" "$repo_root/tests/fixtures/activated-skill.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
 # --- read-guard ---
 
 @test "read-guard (handoff-task.md, not activated: deny)" {
@@ -231,6 +242,17 @@ make_worktree() {
     ' _ "$tmp"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
+}
+
+@test "read-guard (worktree cwd, not activated: deny)" {
+    wt="$(make_worktree wtR)"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/read-guard.sh
+    ' _ "$wt" "$repo_root/tests/fixtures/extract-basic.jsonl"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 }
 
 # --- skill-pre-hook ---
