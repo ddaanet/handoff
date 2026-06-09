@@ -81,7 +81,6 @@ ignore = [
     "ARG",      # Unused function arguments
     "SLF001",   # Private member accessed
     "TRY003",   # Avoid specifying long messages outside the exception class
-    "ANN",      # Test fixtures/helpers are untyped by convention
     "INP001",   # tests/ is not a package (no __init__.py, by design)
     "D",        # Docstrings not required on test functions
 ]
@@ -115,20 +114,6 @@ error_summary = false
 # https://mypy.readthedocs.io/en/stable/config_file.html#confval-allow_redefinition_new
 allow_redefinition_new = true
 local_partial_types = true
-
-[[tool.mypy.overrides]]
-# tests/ has no __init__.py (intentionally — pytest importlib mode), so mypy
-# names the modules top-level (test_extract, test_worktree_root), not tests.*.
-# Match both shapes so the relaxation actually lands on the tests.
-module = ["tests.*", "test_extract", "test_worktree_root"]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-# Untyped test functions calling untyped helpers (fixtures, _make_* factories)
-# is the convention here; don't flag the calls either.
-disallow_untyped_calls = false
-# Inline fixture dicts infer as list[object] under strict; passing them to the
-# typed extract API is intentional test-data looseness, not a real type error.
-disable_error_code = ["arg-type"]
 
 [tool.ty.environment]
 # scripts/ holds importable modules (extract, worktree_root) reached without a
