@@ -21,6 +21,4 @@ skill="$(jq -r '.tool_input.skill // ""' <<<"$input")"
 # match) keeps unrelated skills no-ops.
 [[ "$skill" == "handoff" || "$skill" == "handoff:handoff" ]] || exit 0
 
-cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-
-exec bash "$(dirname "$0")/_wipe-emit.sh" "$cwd" "PreToolUse"
+exec bash "$(dirname "$0")/_wipe-emit.sh" "$(jq -r '.cwd // ""' <<<"$input")" "PreToolUse"

@@ -9,13 +9,15 @@
 # verify with ls/cat). hookEventName in the output must match the
 # event of the calling hook.
 #
-# Usage: _wipe-emit.sh <cwd> <hook_event_name>
+# Usage: _wipe-emit.sh <session-cwd> <hook_event_name>
+# <session-cwd> is the raw hook-input .cwd; the effective root (worktree
+# root or CLAUDE_PROJECT_DIR) is derived here via handoff_root.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-cwd="${1:?cwd required}"
+cwd="$(handoff_root "${1:-}")"
 hook_event="${2:?hook_event_name required}"
 
 mkdir -p "$cwd/.claude"

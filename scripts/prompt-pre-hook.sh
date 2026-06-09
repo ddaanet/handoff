@@ -15,6 +15,4 @@ input="$(cat)"
 prompt="$(jq -r '.prompt // ""' <<<"$input")"
 [[ "$prompt" =~ ^/handoff:handoff([[:space:]]|$) ]] || exit 0
 
-cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-
-exec bash "$(dirname "$0")/_wipe-emit.sh" "$cwd" "UserPromptSubmit"
+exec bash "$(dirname "$0")/_wipe-emit.sh" "$(jq -r '.cwd // ""' <<<"$input")" "UserPromptSubmit"

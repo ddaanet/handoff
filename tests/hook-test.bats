@@ -321,6 +321,19 @@ make_worktree() {
     [ -d "$fresh/.claude" ]
 }
 
+@test "skill-pre-hook (worktree cwd: wipes worktree .claude, not main)" {
+    wt="$(make_worktree wtW)"
+    : > "$wt/.claude/handoff-task.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
+        | bash scripts/skill-pre-hook.sh
+    ' _ "$wt"
+    [ "$status" -eq 0 ]
+    [ ! -e "$wt/.claude/handoff-task.md" ]
+    [ -e "$tmp/.claude/handoff-task.md" ]
+}
+
 # --- prompt-pre-hook ---
 
 @test "prompt-pre-hook (/handoff:handoff: wipe)" {
@@ -475,4 +488,17 @@ WTTASK
     [ "$status" -eq 0 ]
     [ ! -e "$tmp/.claude/autorename" ]
     echo "$output" | jq -e '.systemMessage | test("empty")' >/dev/null
+}
+
+@test "write-rename (worktree cwd: resolves worktree autorename)" {
+    wt="$(make_worktree wtN)"
+    echo "WT Title" > "$wt/.claude/autorename"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autorename" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | env -u TMUX -u TMUX_PANE bash scripts/write-rename.sh
+    ' _ "$wt"
+    [ "$status" -eq 0 ]
+    [ ! -e "$wt/.claude/autorename" ]
+    echo "$output" | jq -e '.systemMessage | test("/rename WT Title")' >/dev/null
 }
