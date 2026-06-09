@@ -1,14 +1,14 @@
 # mypy guidelines — review checklist
 
-Engineering-grade rules for type-checking this repo's Python with mypy
-(plus ruff and ty). Phrased as checkable DO/AVOID rules so a later agent
-can audit `scripts/*.py` and `tests/*.py` against them. Each non-obvious
-claim cites a primary source inline.
+Engineering-grade rules for type-checking Python with mypy (plus ruff and
+ty). Phrased as checkable DO/AVOID rules so code can be audited against
+them. Each non-obvious claim cites a primary source inline.
 
-Verified against mypy **2.1.0** stable (the installed floor is
-`mypy>=1.19.1`, but current stable is 2.1.0 and mypy **2.0** changed two
-defaults that matter here — see [Repo notes](#repo-notes)). Sources are
-listed at the bottom; URLs are also inlined at each claim.
+Verified against mypy **2.1.0** stable. mypy **2.0** changed two defaults
+that matter here (`--strict-bytes`, `local_partial_types`), so a project
+on a `mypy>=1.x` floor that nonetheless resolves a 2.x interpreter still
+sees the 2.x behavior — pin the version if you depend on either. Sources
+are listed at the bottom; URLs are also inlined at each claim.
 
 ## Strict mode
 
@@ -33,9 +33,8 @@ own right, since an audit pass should know what they catch:
   not specify explicit type parameters"
   ([command_line.html](https://mypy.readthedocs.io/en/stable/command_line.html)).
   This is the rule that forces `dict[str, Any]` instead of a bare `dict`,
-  and is exactly why this repo spells its JSON-entry alias as
-  `Entry = dict[str, Any]` (see `scripts/extract.py`) rather than
-  `Entry = dict`. **DO write fully-parameterised generics** (`list[str]`,
+  and is why a JSON-entry alias is spelled `Json = dict[str, Any]` rather
+  than `Json = dict`. **DO write fully-parameterised generics** (`list[str]`,
   `dict[str, Any]`, `Sequence[int]`); a bare `list`/`dict`/`tuple` in an
   annotation is a finding under strict.
 - **`strict_equality`** — "prohibit[s] [...] comparisons of non-overlapping
@@ -75,8 +74,8 @@ Configuration and opt-in rules around the bundle:
   ([command_line.html](https://mypy.readthedocs.io/en/stable/command_line.html)).
   Tradeoff: it bans the deliberate `Any` escape hatch entirely, so it only
   pays off in code with no genuinely-dynamic boundary. For JSON-parsing
-  code (this repo) it is usually too blunt; prefer typing the boundary
-  (below) over a global ban.
+  code it is usually too blunt; prefer typing the boundary (below) over a
+  global ban.
 - **CONSIDER opt-in optional codes** beyond strict, each via
   `enable_error_code`: `redundant-expr` (always-true/false expressions),
   `truthy-bool` (objects without `__bool__`/`__len__` in a boolean
@@ -96,9 +95,9 @@ Configuration and opt-in rules around the bundle:
   `__init__.py`). `mypy_path` "specifies the paths to use, after trying
   the paths from MYPYPATH" and "may only be set in the global section"
   ([config_file.html](https://mypy.readthedocs.io/en/stable/config_file.html)).
-  This is how `scripts/` modules (`extract`, `worktree_root`) resolve
-  without a package prefix — mirroring pytest's `pythonpath`. Use
-  `packages =` only for real importable packages with `__init__.py`.
+  This is how modules in a flat source dir resolve without a package
+  prefix — mirroring pytest's `pythonpath`. Use `packages =` only for real
+  importable packages with `__init__.py`.
 - **AVOID per-module `[[tool.mypy.overrides]]` that loosen strictness**
   unless the relaxation is forced by a third party you don't control.
   A self-authored module that needs `disallow_untyped_defs = false` is a
@@ -119,11 +118,11 @@ Configuration and opt-in rules around the bundle:
   ([config_file.html](https://mypy.readthedocs.io/en/stable/config_file.html));
   a file passed on the command line, or pulled in via `files`/import
   resolution, is still checked even if it matches `exclude` (mypy
-  [#11760](https://github.com/python/mypy/issues/11760)). Audit rule: if a
+  [#11760](https://github.com/python/mypy/issues/11760)). Rule: if a
   file you expected to be skipped is still type-checked, it's reachable via
   `files`/`mypy_path` — narrow `files` rather than expecting `exclude` to
   override it. (`force_exclude` exists for the discovery case but is not
-  needed in this repo's explicit `files = ["scripts","tests"]` setup.)
+  needed when files are listed explicitly.)
 - **For gradual adoption** (introducing strict mypy into an untyped
   codebase), don't flip `strict = true` globally on day one. Start with the
   default (lenient) config, then ratchet: enable one strict sub-flag at a
@@ -131,8 +130,8 @@ Configuration and opt-in rules around the bundle:
   override that *raises* strictness (the inverse of the loosening overrides
   warned against above), then widen
   ([config_file.html](https://mypy.readthedocs.io/en/stable/config_file.html)).
-  This repo is already fully strict and small, so this is N/A here — listed
-  for when the same checklist is reused on a larger codebase.
+  A small, already-strict codebase needs none of this; the ratchet is for
+  introducing strict mypy into a large untyped codebase.
 - **`local_partial_types`** prevents inferring a variable's type from an
   empty container that is later filled in another scope, and "must be
   enabled when using the mypy daemon"
@@ -167,12 +166,12 @@ Configuration and opt-in rules around the bundle:
 - **WHEN the JSON shape is open/unknown** (arbitrary keys, untrusted
   external transcript format that "evolves"), a bare `dict[str, Any]` or a
   type alias at the parse boundary is the honest annotation — `Any` here is
-  a real boundary, not a hole. This repo does exactly this with
-  `Entry = dict[str, Any]` in `scripts/extract.py`: it parameterises the
+  a real boundary, not a hole. A commented alias such as
+  `Json = dict[str, Any]  # undocumented, evolving format` parameterises the
   generic (satisfying `disallow_any_generics`) while owning the `Any` as a
-  deliberate, documented boundary for the undocumented transcript format.
-  Narrow to concrete types as soon as you read a field. **DO comment the
-  alias** so the `Any` reads as intentional, not lazy.
+  deliberate, documented boundary. Narrow to concrete types as soon as you
+  read a field. **DO comment the alias** so the `Any` reads as intentional,
+  not lazy.
 
 ### Prefer structured types over primitives
 
@@ -193,11 +192,12 @@ heaviest:
   members worth referencing, or behavior. **AVOID raw magic-string
   comparisons** like `name not in ("Write", "Edit")` scattered across a
   module — hoist to a `Literal`/`Enum` or at least a named constant so a
-  rename is one edit and a typo is a type error. This repo's `extract.py`
-  does exactly the scattered-magic-string thing (`"Write"`, `"Edit"`,
-  `"tool_use"`, `"text"`, `"tool_result"`, `"assistant"`, `"user"`) — the
-  audit should weigh whether a `Literal`/`Enum` is worth it given the dicts
-  themselves stay `Any` at the boundary.
+  rename is one edit and a typo is a type error. Caveat: when the
+  surrounding dict stays `Any` at the boundary, a `Literal` annotation on a
+  value read from it is erased on contact (mypy won't check `Any` against a
+  `Literal`), so the realisable win is often just the de-duplication of a
+  named constant, not new checking — weigh the heavier `Literal`/`Enum`
+  against that before reaching for it.
 - **`TypedDict` for a JSON object with a known, fixed key set** (see the
   bullet above) — the apt, zero-runtime structural fit for decoded JSON.
   It models "a `dict` with these keys/value-types" without a parse step, so
@@ -214,9 +214,9 @@ heaviest:
   types at runtime, and its mypy plugin tightens model signatures
   ([pydantic mypy plugin](https://docs.pydantic.dev/latest/integrations/mypy/)).
   But it is a **third-party runtime dependency**. Weigh that against the
-  context: in an application, often worth it; in a stdlib-only hook script
-  like `extract.py` (no runtime deps by design), it's the heaviest option
-  and likely overkill — a `TypedDict` + narrowing carries no dependency.
+  context: in an application, often worth it; in a stdlib-only script with
+  no runtime deps by design, it's the heaviest option and likely overkill —
+  a `TypedDict` + narrowing carries no dependency.
 
 The rule of thumb: **`Literal`/`Enum` for constants, `TypedDict` for known
 JSON shapes, `dataclass` when you parse, pydantic when you must validate.**
@@ -243,17 +243,16 @@ Default toward the lightest that removes the `Any`/magic-string blind spot.
   narrowing was impossible.
 - **DO annotate test functions `-> None`.** Under `--strict`,
   `disallow_untyped_defs` requires it; an un-annotated `def test_x():` is
-  an untyped def and mypy will flag it. This repo's tests are already
-  fully annotated — keep them that way.
+  an untyped def and mypy will flag it. Keep the whole test suite annotated.
 - **DON'T let an untyped decorator erase a function's signature.**
   `disallow_untyped_decorators` (in `--strict`) flags decorating a typed
   function with an untyped decorator
   ([command_line.html](https://mypy.readthedocs.io/en/stable/command_line.html)),
   because an untyped decorator makes the decorated function `Any`,
   silently dropping its annotations. For pytest, `@pytest.fixture` and
-  `@pytest.mark.*` are typed in modern `pytest` (≥8, this repo's floor), so
-  this should not fire; if it does, the fix is a properly-typed decorator,
-  not a per-line ignore.
+  `@pytest.mark.*` are typed in modern `pytest` (≥8), so this should not
+  fire; if it does, the fix is a properly-typed decorator, not a per-line
+  ignore.
 - **USE `reveal_type(expr)` to debug inference, then delete it.** mypy
   prints the static type of `expr` at that point (no import needed at
   type-check time)
@@ -291,7 +290,7 @@ type checker providing more detailed feedback on type errors"
 
 - **Ruff owns annotation *presence*** via the `ANN` group
   (flake8-annotations), which lints for missing annotations on function
-  defs/args/returns. With `select = ["ALL"]` this repo gets `ANN` for
+  defs/args/returns. With `select = ["ALL"]` you get `ANN` for
   free. This **overlaps the intent of** `disallow_untyped_defs` in
   `--strict`: both want the annotation present. The overlap is benign,
   but the tools are not identical — ruff lints *presence* (a missing
@@ -305,10 +304,10 @@ type checker providing more detailed feedback on type errors"
   only in annotations, suggesting an `if TYPE_CHECKING:` block to cut
   runtime overhead
   ([TC001](https://docs.astral.sh/ruff/rules/typing-only-first-party-import/)).
-  This repo **deliberately ignores `TC001`–`TC003`** (see `pyproject.toml`)
-  — a defensible choice for small scripts where the runtime-import cost is
-  negligible and `TYPE_CHECKING` blocks add noise. Don't re-enable without
-  reason.
+  Deliberately ignoring `TC001`–`TC003` is a defensible choice for small
+  scripts where the runtime-import cost is negligible and `TYPE_CHECKING`
+  blocks add noise; for a large or import-heavy codebase, leave them on.
+  Either way, make the call explicit in config rather than by accident.
 - **mypy owns type *correctness*** — narrowing, return-type soundness,
   generics, overload resolution. Ruff does not type-check. Keep
   type-semantics rules in mypy and lint-shape rules in ruff; don't try to
@@ -329,7 +328,7 @@ mypy replacement:
   (`error`/`warn`/`ignore`) but no `--strict` bundle equivalent and no
   rule that requires annotations on every function
   ([ty rules](https://docs.astral.sh/ty/reference/rules/)). So it cannot
-  enforce this repo's strictness contract — mypy remains the gate.
+  enforce a strict-defs contract — mypy remains the gate.
 - **Different defaults and narrowing.** ty checks all code by default
   (including untyped), and its design centers the "gradual guarantee":
   adding annotations to working code never introduces new errors
@@ -338,35 +337,34 @@ mypy replacement:
   finding is a prompt to investigate, not an automatic mypy bug.
 - **No plugin system** (and no plans for one), so ty can't replace mypy
   where ORM/Pydantic plugins matter
-  ([ty github](https://github.com/astral-sh/ty)). Not relevant to this
-  plugin-free repo, but relevant before adopting ty anywhere.
+  ([ty github](https://github.com/astral-sh/ty)). Irrelevant if you use no
+  mypy plugins, but check before adopting ty anywhere.
 - **Suppression syntax differs.** ty understands standard
   `# type: ignore`, plus its own `# ty: ignore[code]` and
   `# type: ignore[ty:code]`
   ([ty rules](https://docs.astral.sh/ty/reference/rules/)). A code that
   matches no known rule suppresses nothing.
-- **DO run ty as a parity probe** alongside mypy (as this repo already
-  wires it under `[tool.ty]`): green-on-both raises confidence; a
-  divergence is a signal to read both tools' reasoning. **DON'T** gate CI
-  on ty alone or drop mypy for it yet.
+- **DO run ty as a parity probe** alongside mypy (wire it as a preview
+  under `[tool.ty]`): green-on-both raises confidence; a divergence is a
+  signal to read both tools' reasoning. **DON'T** gate CI on ty alone or
+  drop mypy for it yet.
 
 ## Practical gotchas
 
 - **Third-party stubs.** For libraries shipping no inline types, install
   the `types-*` stub package (e.g. `types-requests`); mypy emits
-  `import-untyped` / `no-any-unimported` otherwise. This repo's runtime
-  deps are stdlib-only, so no stubs are needed — but don't paper over a
-  future missing stub with a module-level `ignore_missing_imports`
-  override when a `types-*` package exists.
-- **Flat modules vs namespace packages.** With no `__init__.py` (this
-  repo's `scripts/` and `tests/`), mypy resolves imports via `mypy_path`,
-  pytest via `pythonpath` + `--import-mode=importlib`. `namespace_packages`
+  `import-untyped` / `no-any-unimported` otherwise. A stdlib-only project
+  needs no stubs — but don't paper over a missing stub with a module-level
+  `ignore_missing_imports` override when a `types-*` package exists.
+- **Flat modules vs namespace packages.** With no `__init__.py` (a flat
+  source dir), mypy resolves imports via `mypy_path`, pytest via
+  `pythonpath` + `--import-mode=importlib`. `namespace_packages`
   defaults to `True` (PEP 420)
   ([config_file.html](https://mypy.readthedocs.io/en/stable/config_file.html)).
-  Keep the three path settings (mypy `mypy_path`, pytest `pythonpath`, ty
-  `extra-paths`) in sync — they all point at `scripts/`; drift breaks one
-  tool silently. Avoid same-named modules in two unpackaged dirs:
-  importlib mode can't disambiguate them.
+  Keep the path settings of each tool (mypy `mypy_path`, pytest
+  `pythonpath`, ty `extra-paths`) in sync — they should all point at the
+  same source dir; drift breaks one tool silently. Avoid same-named modules
+  in two unpackaged dirs: importlib mode can't disambiguate them.
 - **`warn_redundant_casts`** (in `--strict`) flags casts that change
   nothing; treat its findings as "delete the cast," not "add an ignore."
 - **`no_implicit_reexport`** (in `--strict`) means a name imported into a
@@ -376,31 +374,6 @@ mypy replacement:
   If a test imports a helper that another module merely re-imported,
   expect an `attr-defined` error — fix the source module's `__all__`,
   don't suppress.
-
-## Repo notes
-
-What this config already does well, and the one deliberate-vs-stale call:
-
-- **`strict = true`** — correct floor. ✓
-- **`extra_checks = true`** — already implied by strict; harmless but
-  redundant. Could drop the line.
-- **`local_partial_types = true`** — required for flexible redefinition;
-  on **mypy ≥ 2.0 it is the default**, so the explicit line is now
-  redundant (keep it for clarity/back-compat with the 1.19 floor, or drop
-  it once the floor is ≥ 2.0).
-- **`allow_redefinition_new = true`** — this is the mypy 1.x experimental
-  name. On **mypy 2.0+ it is a deprecated alias for `allow_redefinition`**.
-  **Action:** once the `mypy>=` floor moves to ≥ 2.0, rename to
-  `allow_redefinition = true`. While the floor stays at 1.19.1, the
-  current key is correct.
-- **`mypy_path = "scripts"` + `files = ["scripts","tests"]`** — correct
-  flat-module wiring; mirrors pytest `pythonpath` and ty `extra-paths`. ✓
-- **No per-module overrides, no `disable_error_code`** — clean; no
-  suppression debt at config level. ✓ Keep it that way.
-- **ty wired as a preview parity probe** under `[tool.ty]`, not as the
-  gate — exactly the recommended posture. ✓
-- **Missing-but-worth-considering:** `warn_unreachable = true` (not in
-  strict) would catch dead branches; low cost on a small codebase.
 
 ## Sources
 
@@ -421,80 +394,3 @@ What this config already does well, and the one deliberate-vs-stale call:
 - [ty github](https://github.com/astral-sh/ty)
 - [Adam Johnson — unreachable code detection](https://adamj.eu/tech/2021/05/19/python-type-hints-mypy-unreachable-code-detection/)
 
-## Review log
-
-Independent re-research (2026-06-09) against primary sources. The first
-agent's draft was **largely accurate** — the high-risk mypy-versioning
-claims all held up. Findings:
-
-### Verified correct (re-checked against primary sources)
-- **`--strict` bundle contents** (all 13 flags, including `--extra-checks`,
-  `--strict-equality`, `--no-implicit-reexport`): matches
-  [command_line.html](https://mypy.readthedocs.io/en/stable/command_line.html)
-  exactly.
-- **`extra_checks` is inside `--strict`**: confirmed (so the repo's explicit
-  `extra_checks = true` is genuinely redundant — the doc's "Repo notes"
-  call is right).
-- **`local_partial_types` default `True` as of mypy 2.0**: confirmed,
-  [config_file.html](https://mypy.readthedocs.io/en/stable/config_file.html)
-  ("Default: `True`") and the
-  [2.0 blog](https://mypy-lang.blogspot.com/2026/05/mypy-20-relased.html).
-- **`allow_redefinition_new` is a deprecated alias for `allow_redefinition`**
-  in mypy 2.x: confirmed verbatim in config_file.html ("Deprecated alias
-  for allow_redefinition"). The 2.0 behavior change (plain
-  `--allow-redefinition` adopting the new semantics, old behavior moved to
-  `--allow-redefinition-old`) is confirmed in the changelog/blog — not just
-  the blog.
-- **mypy 2.0/2.1 actually exist** (current stable 2.1.0); the 2026-05 blog
-  URL is real. The whole 2.x framing is sound, not version-confused.
-- **Optional error codes** `redundant-expr`, `truthy-bool`,
-  `possibly-undefined`, `explicit-override` — all exist, off by default
-  ([error_code_list2.html](https://mypy.readthedocs.io/en/stable/error_code_list2.html)).
-- **`disallow_any_explicit`** description — quoted accurately.
-- **ruff TC001/TC002/TC003** are the *current* codes (not the old TCH*) —
-  confirmed on each rule page; matches the repo's `pyproject.toml`.
-- **ty is beta, stable targeted "next year"** — confirmed via
-  [ty blog](https://astral.sh/blog/ty); "10x–100x faster" matches the
-  [ty docs](https://docs.astral.sh/ty/) homepage wording.
-
-### Corrected
-- **ruff FAQ / `ANN` claim.** The draft quoted ruff's FAQ as calling `ANN`
-  "an equivalent to mypy's `disallow_untyped_defs`." That quotation is **not
-  in the ruff FAQ** (verified by fetch + search). Fix: removed the false
-  quote; kept the accurate, weaker point — `ANN` lints annotation
-  *presence*, overlapping the *intent* of `disallow_untyped_defs`, while
-  mypy additionally checks *correctness*. Source narrowed to what the FAQ
-  actually says (recommends pairing ruff with a type checker).
-- **ty intro misattribution.** The draft attributed "strict mode still on
-  the roadmap, not shipped" to the [ty blog](https://astral.sh/blog/ty);
-  the blog does not mention strict mode. Fix: re-sourced the no-strict-mode
-  claim to ty's rules reference (where the doc already correctly cites it
-  below) and replaced the loose "10–100×" with the docs' exact "10x - 100x"
-  wording. Substance unchanged; citation now matches the source.
-
-### Added (high-value, repo-relevant)
-- **`disallow_any_generics`** as a first-class checkable rule, explicitly
-  tied to this repo's `Entry = dict[str, Any]` alias in `scripts/extract.py`
-  (the brief flagged this gap) — bare `dict`/`list`/`tuple` is a strict
-  finding.
-- **`strict_equality`, `warn_return_any`** broken out as checkable rules;
-  `warn_return_any` specifically noted as the strict member that bites
-  `json.loads(...) -> Entry` code.
-- **`no_implicit_optional` is on by default** (since mypy 0.980) — write
-  `T | None` explicitly; verified against command_line.html.
-- **`--strict-bytes` became default in mypy 2.0** (PEP 688) — independent
-  of `--strict`; verified against the 2.0 blog/changelog.
-- **Untyped-decorator handling** (`disallow_untyped_decorators` in strict)
-  and **`reveal_type` for debugging** (+ optional `unimported-reveal`).
-- **`exclude` vs explicit `files`**: `exclude` only filters recursive
-  discovery; explicitly-listed/import-reached files are still checked
-  (mypy [#11760](https://github.com/python/mypy/issues/11760)).
-- **Gradual-adoption strategy** (ratchet strictness; raise-strictness
-  per-module overrides) — marked N/A for this already-strict repo but useful
-  when the checklist is reused.
-
-### Removed / softened as not fully verifiable
-- Did **not** assert exact `force_exclude` semantics — could not pull a
-  primary quote for its precise wording in this pass, so reduced it to a
-  one-line aside (exists for the discovery case; not needed here) rather
-  than a sourced claim.
