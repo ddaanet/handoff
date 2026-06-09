@@ -15,7 +15,7 @@ set -euo pipefail
 source "$(dirname "$0")/_lib.sh"
 
 input="$(cat)"
-cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
+cwd="$(handoff_root "$(jq -r '.cwd // ""' <<<"$input")")"
 hook_event="$(jq -r '.hook_event_name // "SessionStart"' <<<"$input")"
 
 task="$cwd/$HANDOFF_REL_TASK"

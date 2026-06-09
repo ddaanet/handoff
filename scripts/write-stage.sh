@@ -14,7 +14,7 @@ file_path="$(jq -r '.tool_input.file_path // ""' <<<"$input")"
 [[ -n "$file_path" ]] || exit 0
 [[ "$(basename "$file_path")" == "handoff-task.md" ]] || exit 0
 
-cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
+cwd="$(handoff_root "$(jq -r '.cwd // ""' <<<"$input")")"
 
 { read -r target; read -r expected; } < <(handoff_resolve "$file_path" "$cwd/$HANDOFF_REL_TASK")
 [[ "$target" == "$expected" ]] || exit 0

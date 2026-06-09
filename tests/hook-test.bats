@@ -145,6 +145,19 @@ make_worktree() {
     [ "$status" -eq 0 ]
 }
 
+@test "write-stage (worktree cwd: pointer saved in worktree .claude, not main)" {
+    wt="$(make_worktree wtS)"
+    cp "$tmp/.claude/handoff-task.md" "$wt/.claude/handoff-task.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-stage.sh
+    ' _ "$wt" "$transcript"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$wt/.claude/handoff-session")" = "$transcript" ]
+    [ ! -e "$tmp/.claude/handoff-session" ]
+}
+
 # --- write-guard ---
 
 @test "write-guard (handoff-task.md, not activated: deny)" {
@@ -394,6 +407,26 @@ ASMTASK
     ' _ "$sz_tmp"
     [ "$status" -eq 0 ]
     echo "$output" | jq -r '.systemMessage // ""' | grep -Eq '^handoff loaded — [0-9]+\.[0-9]+ KiB, saved'
+}
+
+@test "load-handoff (worktree cwd: reads worktree task, not main)" {
+    wt="$(make_worktree wtL)"
+    cat > "$wt/.claude/handoff-task.md" <<'WTTASK'
+## Current task
+
+worktree handoff body
+
+## Open decisions
+
+- none
+WTTASK
+    printf '%s\n' "$transcript" > "$wt/.claude/handoff-session"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg e "clear" "{cwd:\$cwd, hook_event_name:\$e}" \
+        | bash scripts/load-handoff.sh
+    ' _ "$wt"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -r '.hookSpecificOutput.additionalContext' | grep -q 'worktree handoff body'
 }
 
 # --- write-rename ---
