@@ -344,10 +344,15 @@ mypy replacement:
   `# type: ignore[ty:code]`
   ([ty rules](https://docs.astral.sh/ty/reference/rules/)). A code that
   matches no known rule suppresses nothing.
-- **DO run ty as a parity probe** alongside mypy (wire it as a preview
-  under `[tool.ty]`): green-on-both raises confidence; a divergence is a
-  signal to read both tools' reasoning. **DON'T** gate CI on ty alone or
-  drop mypy for it yet.
+- **DO run ty alongside mypy** (wire it as a preview under `[tool.ty]`):
+  green-on-both raises confidence; a divergence is a signal to read both
+  tools' reasoning. ty's stricter narrowing legitimately catches some
+  `Any`-laundering holes mypy passes, so it earns more than a manual probe.
+  **DO gate on ty *in addition to* mypy** when its version is pinned (a
+  locked beta can't break the build spontaneously — only on a deliberate
+  bump, where a genuine false positive is suppressed narrowly with
+  `# ty: ignore[code]`, not by dropping the gate). **DON'T** gate on ty
+  *alone*, or drop mypy for it — it has no strict-defs contract (above).
 
 ## Practical gotchas
 

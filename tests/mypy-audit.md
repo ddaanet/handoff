@@ -185,9 +185,15 @@ with a one-line should-we for *this* codebase:
 
 `[tool.ruff]` and `[tool.ty]` are consistent with the guidelines: `ALL`
 select with a documented, defensible `ignore` list; `TC001`–`TC003`
-deliberately ignored (guidelines bless this for small scripts); ty wired as
-a preview parity probe under `[tool.ty]`, not as the gate — "exactly the
-recommended posture." The three path settings (mypy `mypy_path`, pytest
+deliberately ignored (guidelines bless this for small scripts); ty wired
+under `[tool.ty]` and gated in `precommit` *alongside* mypy — not as a
+replacement (the guidelines forbid only gating on ty *alone*). It earns the
+gate: ty caught a real `Any`-narrowing hole mypy laundered through (the
+`anchor_for` splitlines call, since fixed), and because its version is
+pinned in `uv.lock` the gate can't break spontaneously — only on a
+deliberate bump, where a beta false-positive is suppressed narrowly with
+`# ty: ignore[code]`, never by dropping the gate. The three path settings
+(mypy `mypy_path`, pytest
 `pythonpath`, ty `extra-paths`) all point at `scripts/` and are in sync, as
 the guidelines require.
 

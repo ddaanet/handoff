@@ -6,7 +6,9 @@ import 'plugin-dev/release.just'
 _default:
     @just --list
 
-# Lint manifests + settings, syntax-check + lint/type-check the Python,
+# Lint manifests + settings, syntax-check + lint/type-check the Python
+# (mypy AND ty — ty catches Any-narrowing holes mypy launders through;
+# its version is locked, so gating it can't break the build spontaneously),
 # run hook + extract tests. Imported `release` recipe depends on this name.
 precommit:
     jq . .claude-plugin/plugin.json > /dev/null
@@ -18,21 +20,23 @@ precommit:
     ruff format --check scripts tests
     docformatter --check scripts/*.py tests/*.py
     mypy
+    ty check
     bats tests/hook-test.bats tests/rename-test.bats
     pytest
     @echo "ok"
 
-# Ruff + docformatter + mypy over the Python. Hard quality gate (no ty).
+# Ruff + docformatter over the Python (lint/format only, no type check).
 lint:
     ruff check scripts tests
     ruff format --check scripts tests
     docformatter --check scripts/*.py tests/*.py
 
-# mypy (strict) over scripts + tests
+# Both type checkers, strict mypy + ty. Both gate precommit.
 typecheck:
     mypy
+    ty check
 
-# ty (preview) — parity probe against mypy; not a precommit gate
+# ty (preview) alone — for reading ty's diagnostics in isolation.
 ty:
     ty check
 
