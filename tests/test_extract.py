@@ -1,6 +1,6 @@
 """Pytest port of tests/extract-test.sh — fixture-driven tests of
-scripts/extract.py. Behaviour-preserving migration: every assertion from
-the shell script is mirrored here.
+scripts/extract.py. Behaviour-preserving migration: every assertion from the
+shell script is mirrored here.
 
 - Unit tests import the pure functions and assert on return values.
 - End-to-end tests render a full frame via the CLI contract — either by
@@ -10,15 +10,15 @@ the shell script is mirrored here.
 The fixtures under tests/fixtures/*.jsonl and their sentinel values ARE
 the coverage map; all of them are exercised.
 """
+
 import contextlib
 import io
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 import extract
+import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
@@ -31,14 +31,15 @@ EXTRACT_PY = REPO_ROOT / "scripts" / "extract.py"
 def render_frame(transcript_path, task_path):
     """Render a frame via emit() and return its stdout.
 
-    The single render path. Uses redirect_stdout rather than capsys so it
-    works at any fixture scope (capsys is function-scoped and cannot back a
-    class-scoped fixture).
+    The single render path. Uses redirect_stdout rather than capsys so it works
+    at any fixture scope (capsys is function-scoped and cannot back a class-
+    scoped fixture).
     """
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        extract.emit("" if transcript_path is None else str(transcript_path),
-                     str(task_path))
+        extract.emit(
+            "" if transcript_path is None else str(transcript_path), str(task_path)
+        )
     return buf.getvalue()
 
 
@@ -93,39 +94,52 @@ class TestClampAnchorLines:
 
 
 class TestIsWrapperEntry:
-    @pytest.mark.parametrize("text", [
-        "<system-reminder>note</system-reminder>",
-        "<local-command-stdout>out</local-command-stdout>",
-        "<task-notification>job done</task-notification>",
-        "<bash-input>ls</bash-input>",
-        "<command-name>/handoff:handoff</command-name>",
-        "[Request interrupted by user]",
-        "Base directory for this skill: /x",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "<system-reminder>note</system-reminder>",
+            "<local-command-stdout>out</local-command-stdout>",
+            "<task-notification>job done</task-notification>",
+            "<bash-input>ls</bash-input>",
+            "<command-name>/handoff:handoff</command-name>",
+            "[Request interrupted by user]",
+            "Base directory for this skill: /x",
+        ],
+    )
     def test_wrappers_detected(self, text):
         assert extract.is_wrapper_entry(text) is True
 
-    @pytest.mark.parametrize("text", [
-        "first prompt",
-        "real prompt KEEPME_ONE",
-        "fourth prompt\n\nwith blank line",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "first prompt",
+            "real prompt KEEPME_ONE",
+            "fourth prompt\n\nwith blank line",
+        ],
+    )
     def test_real_prompts_not_wrappers(self, text):
         assert extract.is_wrapper_entry(text) is False
 
 
 class TestToolUseBlocks:
     def test_extracts_tool_use_only(self):
-        entry = {"message": {"role": "assistant", "content": [
-            {"type": "tool_use", "id": "t1", "name": "Write", "input": {}},
-            {"type": "text", "text": "hi"},
-        ]}}
+        entry = {
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Write", "input": {}},
+                    {"type": "text", "text": "hi"},
+                ],
+            }
+        }
         blocks = extract.tool_use_blocks(entry)
         assert len(blocks) == 1
         assert blocks[0]["name"] == "Write"
 
     def test_non_assistant_returns_empty(self):
-        assert extract.tool_use_blocks({"message": {"role": "user", "content": "x"}}) == []
+        assert (
+            extract.tool_use_blocks({"message": {"role": "user", "content": "x"}}) == []
+        )
 
     def test_missing_message_returns_empty(self):
         assert extract.tool_use_blocks({}) == []
@@ -136,7 +150,9 @@ class TestUserText:
         assert extract.user_text({"content": "  hello  "}) == "hello"
 
     def test_tool_result_only_is_empty(self):
-        msg = {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}
+        msg = {
+            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]
+        }
         assert extract.user_text(msg) == ""
 
     def test_non_text_block_placeholder(self):
@@ -151,14 +167,54 @@ class TestUserText:
 class TestExtractFilesTouched:
     def test_write_edit_only_dedup_first_appearance(self):
         entries = [
-            {"message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Write", "input": {"file_path": "/a.py"}}]}},
-            {"message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Read", "input": {"file_path": "/b.py"}}]}},
-            {"message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Edit", "input": {"file_path": "/c.py"}}]}},
-            {"message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Write", "input": {"file_path": "/a.py"}}]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Write",
+                            "input": {"file_path": "/a.py"},
+                        }
+                    ],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Read",
+                            "input": {"file_path": "/b.py"},
+                        }
+                    ],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Edit",
+                            "input": {"file_path": "/c.py"},
+                        }
+                    ],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Write",
+                            "input": {"file_path": "/a.py"},
+                        }
+                    ],
+                }
+            },
         ]
         # Read excluded, /a.py deduped, order = first appearance.
         assert extract.extract_files_touched(entries) == ["/a.py", "/c.py"]
@@ -171,23 +227,48 @@ class TestAnchorFor:
 
     def test_text_fallback(self):
         entries = [
-            {"message": {"role": "assistant", "content": [{"type": "text", "text": "Wrote file1"}]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Wrote file1"}],
+                }
+            },
             {"type": "user", "message": {"role": "user", "content": "x"}},
         ]
         assert extract.anchor_for(entries, 1) == "Wrote file1"
 
     def test_file_path_target(self):
         entries = [
-            {"message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Edit", "input": {"file_path": "/f2.py"}}]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Edit",
+                            "input": {"file_path": "/f2.py"},
+                        }
+                    ],
+                }
+            },
             {"type": "user", "message": {"role": "user", "content": "x"}},
         ]
         assert extract.anchor_for(entries, 1) == "[Edit] /f2.py"
 
     def test_command_fallback(self):
         entries = [
-            {"message": {"role": "assistant", "content": [
-                {"type": "tool_use", "name": "Bash", "input": {"command": "echo hi"}}]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {"command": "echo hi"},
+                        }
+                    ],
+                }
+            },
             {"type": "user", "message": {"role": "user", "content": "x"}},
         ]
         assert extract.anchor_for(entries, 1) == "[Bash] echo hi"
@@ -210,9 +291,16 @@ class TestExtractBasic:
             "## Open decisions\n\n- none\n"
         )
         result = subprocess.run(
-            [sys.executable, str(EXTRACT_PY),
-             str(FIXTURES / "extract-basic.jsonl"), str(task)],
-            capture_output=True, text=True, cwd=REPO_ROOT,
+            [
+                sys.executable,
+                str(EXTRACT_PY),
+                str(FIXTURES / "extract-basic.jsonl"),
+                str(task),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            check=False,  # the returncode assertion below owns the exit check
         )
         assert result.returncode == 0, result.stderr
         return result.stdout
@@ -229,10 +317,13 @@ class TestExtractBasic:
     def test_no_at_ref(self, out):
         assert "@handoff-task.md" not in out
 
-    @pytest.mark.parametrize("path", [
-        "- `/handoff-test/file1.py`",
-        "- `/handoff-test/file2.py`",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "- `/handoff-test/file1.py`",
+            "- `/handoff-test/file2.py`",
+        ],
+    )
     def test_files_listed(self, out, path):
         assert path in out
 
@@ -248,37 +339,46 @@ class TestExtractBasic:
     def test_exactly_five_prompts(self, out):
         assert out.count("**after** ") == 5
 
-    @pytest.mark.parametrize("anchor", [
-        "**after** (session start)",
-        "**after** Wrote file1",
-        "**after** Done editing",
-        "**after** [Bash] echo hi",
-        "**after** [Edit] /handoff-test/file2.py",
-    ])
+    @pytest.mark.parametrize(
+        "anchor",
+        [
+            "**after** (session start)",
+            "**after** Wrote file1",
+            "**after** Done editing",
+            "**after** [Bash] echo hi",
+            "**after** [Edit] /handoff-test/file2.py",
+        ],
+    )
     def test_anchor_variants(self, out, anchor):
         assert anchor in out
 
     def test_image_placeholder(self, out):
         assert "> [image block]" in out
 
-    @pytest.mark.parametrize("needle", [
-        "> <system-reminder>",
-        "> [Request interrupted by user]",
-        "> <local-command-stdout>",
-        "sidechain prompt",
-    ])
+    @pytest.mark.parametrize(
+        "needle",
+        [
+            "> <system-reminder>",
+            "> [Request interrupted by user]",
+            "> <local-command-stdout>",
+            "sidechain prompt",
+        ],
+    )
     def test_wrapper_and_sidechain_prompts_filtered(self, out, needle):
         assert needle not in out
 
 
 class TestCliContract:
-    """main()'s argument/exit-code contract — the __main__ failure path that
-    emit() does not own."""
+    """Cover main()'s argument/exit-code contract — the __main__ failure path
+    that emit() does not own."""
 
     def test_wrong_arg_count_exits_2_with_usage(self):
         result = subprocess.run(
             [sys.executable, str(EXTRACT_PY)],  # no transcript/task args
-            capture_output=True, text=True, cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            check=False,  # asserting the nonzero exit, so must not raise
         )
         assert result.returncode == 2
         assert "usage:" in result.stderr
@@ -286,7 +386,9 @@ class TestCliContract:
 
 class TestEmptyTranscript:
     def test_no_session_data(self, tmp_path):
-        task = write_task(tmp_path, "## Current task\n\nempty-transcript sentinel 4c8d2e1f\n")
+        task = write_task(
+            tmp_path, "## Current task\n\nempty-transcript sentinel 4c8d2e1f\n"
+        )
         out = render_frame("", task)
         assert "empty-transcript sentinel 4c8d2e1f" in out
         assert "@handoff-task.md" not in out
@@ -296,7 +398,9 @@ class TestEmptyTranscript:
 
 class TestMissingTranscript:
     def test_path_does_not_exist(self, tmp_path):
-        task = write_task(tmp_path, "## Current task\n\nmissing-transcript sentinel 9b6e3f0a\n")
+        task = write_task(
+            tmp_path, "## Current task\n\nmissing-transcript sentinel 9b6e3f0a\n"
+        )
         out = render_frame(tmp_path / "does-not-exist.jsonl", task)
         assert "missing-transcript sentinel 9b6e3f0a" in out
         assert "@handoff-task.md" not in out
@@ -315,52 +419,74 @@ class TestMissingTask:
 
 
 class TestSkillMeta:
-    """extract-skill-meta.jsonl — isMeta skill bodies dropped structurally,
-    real prompts around them retained."""
+    """extract-skill-meta.jsonl — isMeta skill bodies dropped structurally, real
+    prompts around them retained."""
 
     @pytest.fixture(scope="class")
     def out(self):
-        return render_frame(FIXTURES / "extract-skill-meta.jsonl",
-                            FIXTURES / "does-not-exist-task.md")
+        return render_frame(
+            FIXTURES / "extract-skill-meta.jsonl", FIXTURES / "does-not-exist-task.md"
+        )
 
-    @pytest.mark.parametrize("kept", [
-        "real prompt KEEPME_ONE",
-        "real prompt KEEPME_TWO",
-        "real prompt KEEPME_THREE",
-    ])
+    @pytest.mark.parametrize(
+        "kept",
+        [
+            "real prompt KEEPME_ONE",
+            "real prompt KEEPME_TWO",
+            "real prompt KEEPME_THREE",
+        ],
+    )
     def test_real_prompts_kept(self, out, kept):
         assert kept in out
 
-    @pytest.mark.parametrize("dropped", [
-        "DROPME_SKILL_TOOL",
-        "DROPME_SKILL_SLASH",
-        "# Update Config Skill",
-        "# Plugin Creation Workflow",
-        "TASKNOTIF_DROP",
-        "<task-notification>",
-    ])
+    @pytest.mark.parametrize(
+        "dropped",
+        [
+            "DROPME_SKILL_TOOL",
+            "DROPME_SKILL_SLASH",
+            "# Update Config Skill",
+            "# Plugin Creation Workflow",
+            "TASKNOTIF_DROP",
+            "<task-notification>",
+        ],
+    )
     def test_meta_and_wrappers_dropped(self, out, dropped):
         assert dropped not in out
 
 
 class TestAnchorMultiline:
-    """anchor-multiline.jsonl — 3/7-line anchors shown in full; 8-line
-    anchor truncated to head 3 + marker + tail 3."""
+    """anchor-multiline.jsonl — 3/7-line anchors shown in full; 8-line anchor
+    truncated to head 3 + marker + tail 3."""
 
     @pytest.fixture(scope="class")
     def out(self):
-        return render_frame(FIXTURES / "anchor-multiline.jsonl", FIXTURES / "no-task.md")
+        return render_frame(
+            FIXTURES / "anchor-multiline.jsonl", FIXTURES / "no-task.md"
+        )
 
-    @pytest.mark.parametrize("line", [
-        "**after** ANCHOR3_L1", "ANCHOR3_L2", "ANCHOR3_L3",
-    ])
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "**after** ANCHOR3_L1",
+            "ANCHOR3_L2",
+            "ANCHOR3_L3",
+        ],
+    )
     def test_three_line_anchor_full(self, out, line):
         assert line in out
 
-    @pytest.mark.parametrize("line", [
-        "**after** ANCHOR7_L1", "ANCHOR7_L2", "ANCHOR7_L3", "ANCHOR7_L4",
-        "ANCHOR7_L5", "ANCHOR7_L6", "ANCHOR7_L7",
-    ])
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "**after** ANCHOR7_L1",
+            "ANCHOR7_L2",
+            "ANCHOR7_L3",
+            "ANCHOR7_L4",
+            "ANCHOR7_L5",
+            "ANCHOR7_L6",
+            "ANCHOR7_L7",
+        ],
+    )
     def test_seven_line_anchor_full(self, out, line):
         assert line in out
 
@@ -370,9 +496,13 @@ class TestAnchorMultiline:
         # property the clamp_anchor_lines unit test cannot discharge.
         assert_order(
             out,
-            "**after** ANCHOR8_L1", "ANCHOR8_L2", "ANCHOR8_L3",
+            "**after** ANCHOR8_L1",
+            "ANCHOR8_L2",
+            "ANCHOR8_L3",
             "[ 2 lines omitted ]",
-            "ANCHOR8_L6", "ANCHOR8_L7", "ANCHOR8_L8",
+            "ANCHOR8_L6",
+            "ANCHOR8_L7",
+            "ANCHOR8_L8",
         )
 
     @pytest.mark.parametrize("line", ["ANCHOR8_MIDDLE_DROP_4", "ANCHOR8_MIDDLE_DROP_5"])
@@ -381,16 +511,21 @@ class TestAnchorMultiline:
 
 
 class TestBounded:
-    """extract-bounded.jsonl — prompts after the last handoff-task.md write
-    are excluded; everything before the write is kept."""
+    """extract-bounded.jsonl — prompts after the last handoff-task.md write are
+    excluded; everything before the write is kept."""
 
     @pytest.fixture(scope="class")
     def out(self):
         return render_frame(FIXTURES / "extract-bounded.jsonl", FIXTURES / "no-task.md")
 
-    @pytest.mark.parametrize("kept", [
-        "BOUNDED_KEEP_ONE", "BOUNDED_KEEP_TWO", "BOUNDED_KEEP_THREE",
-    ])
+    @pytest.mark.parametrize(
+        "kept",
+        [
+            "BOUNDED_KEEP_ONE",
+            "BOUNDED_KEEP_TWO",
+            "BOUNDED_KEEP_THREE",
+        ],
+    )
     def test_pre_write_prompts_kept(self, out, kept):
         assert kept in out
 

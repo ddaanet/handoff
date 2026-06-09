@@ -9,7 +9,13 @@ requires-python = ">=3.13"
 package = false
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.14.9",
+    "mypy>=1.19.1",
+    "ty>=0.0.1a14",
+    "docformatter>=1.7.5",
+]
 
 [tool.pytest.ini_options]
 # extract.py lives under scripts/ and is not a package; put it on sys.path so
@@ -17,3 +23,118 @@ dev = ["pytest>=8"]
 pythonpath = ["scripts"]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config", "--import-mode=importlib"]
+
+[tool.docformatter]
+recursive = true
+in-place = true
+wrap-summaries = 80
+wrap-descriptions = 80
+
+[tool.ruff]
+# scripts/ and tests/ hold all the Python; everything else is shell/markdown.
+include = ["scripts/*.py", "tests/*.py"]
+output-format = "concise"
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D203",     # no blank line required before class docstring
+    "D213",     # multi-line docstring summary should start at the first line
+    "S603",     # subprocess call
+    "S607",     # partial executable path
+    "PLR2004",  # Magic value used in comparison
+    "EM",       # Error message can be duplicated in traceback, no problem.
+    "TD002",    # missing-todo-author
+    "TD003",    # missing-todo-link
+    "FIX",      # FIXME comments should not cause failure
+    "S101",     # Authorize assert
+    "T201",     # Authorize print
+    "T203",     # Authorize pprint
+
+    # Handled by docformatter. Enabling in ruff causes redundant changes.
+    "D209",     # Multi-line docstring closing quotes should be on a separate line
+
+    # Rules that should be disabled when using ruff as a formatter.
+    # https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
+    "W191",     # tab-indentation
+    "E111",     # indentation-with-invalid-multiple
+    "E114",     # indentation-with-invalid-multiple-comment
+    "E117",     # over-indented
+    "D206",     # docstring-tab-indentation
+    "D300",     # triple-single-quotes
+    "Q000",     # bad-quotes-inline-string
+    "Q001",     # bad-quotes-multiline-string
+    "Q002",     # bad-quotes-docstring
+    "Q003",     # avoidable-escaped-quote
+    "COM812",   # missing-trailing-comma
+    "COM819",   # prohibited-trailing-comma
+    "ISC002",   # multi-line-implicit-string-concatenation
+    "TC001",    # typing-only-first-party-import
+    "TC002",    # typing-only-third-party-import
+    "TC003",    # typing-only-standard-library-import
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",     # Assert statements
+    "ARG",      # Unused function arguments
+    "SLF001",   # Private member accessed
+    "TRY003",   # Avoid specifying long messages outside the exception class
+    "ANN",      # Test fixtures/helpers are untyped by convention
+    "INP001",   # tests/ is not a package (no __init__.py, by design)
+    "D",        # Docstrings not required on test functions
+]
+"scripts/*.py" = [
+    "INP001",   # scripts/ is a flat script dir, not an importable package
+]
+"scripts/worktree_root.py" = [
+    "INP001",   # scripts/ is a flat script dir, not an importable package
+    # Deliberate low-level path-STRING work: a relative `gitdir:` path is
+    # intentionally left un-normalized (so it can't match project/.git and is
+    # treated as not-a-worktree). pathlib's `/` would normalize it, breaking
+    # test_relative_gitdir_treated_as_non_worktree. Keep os.path here.
+    "PTH112",   # os.path.isdir -> Path.is_dir
+    "PTH113",   # os.path.isfile -> Path.is_file
+    "PTH117",   # os.path.isabs -> Path.is_absolute
+    "PTH118",   # os.path.join -> Path / operator
+    "PTH120",   # os.path.dirname -> Path.parent
+    "PTH123",   # open() -> Path.open()
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.mypy]
+files = ["scripts", "tests"]
+mypy_path = "scripts"
+strict = true
+extra_checks = true
+error_summary = false
+# Turn on experimental option
+# https://mypy.readthedocs.io/en/stable/config_file.html#confval-allow_redefinition_new
+allow_redefinition_new = true
+local_partial_types = true
+
+[[tool.mypy.overrides]]
+# tests/ has no __init__.py (intentionally — pytest importlib mode), so mypy
+# names the modules top-level (test_extract, test_worktree_root), not tests.*.
+# Match both shapes so the relaxation actually lands on the tests.
+module = ["tests.*", "test_extract", "test_worktree_root"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+# Untyped test functions calling untyped helpers (fixtures, _make_* factories)
+# is the convention here; don't flag the calls either.
+disallow_untyped_calls = false
+# Inline fixture dicts infer as list[object] under strict; passing them to the
+# typed extract API is intentional test-data looseness, not a real type error.
+disable_error_code = ["arg-type"]
+
+[tool.ty.environment]
+# scripts/ holds importable modules (extract, worktree_root) reached without a
+# package prefix; mirror pytest's pythonpath and mypy's mypy_path.
+python-version = "3.13"
+extra-paths = ["scripts"]
+
+[tool.ty.src]
+include = ["scripts", "tests"]

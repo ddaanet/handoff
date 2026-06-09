@@ -30,19 +30,24 @@ Missing or empty transcript is treated as "no session data" — output is
 still emitted with the extracted sections (or empty-section notes) plus
 whatever the task file contains.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
 import json
 import pathlib
 import sys
+from typing import Any
+
+# Session-JSONL entries are arbitrary decoded JSON objects keyed by string.
+Entry = dict[str, Any]
 
 LAST_N_PROMPTS = 5
 MAX_FILES = 30
 ANCHOR_TEXT_LIMIT = 120
-ANCHOR_LINE_LIMIT = 7    # show all lines if count <= this; truncation hides ≥2 lines
-ANCHOR_HEAD_LINES = 3    # lines shown before [...]
-ANCHOR_TAIL_LINES = 3    # lines shown after [...]
+ANCHOR_LINE_LIMIT = 7  # show all lines if count <= this; truncation hides ≥2 lines
+ANCHOR_HEAD_LINES = 3  # lines shown before [...]
+ANCHOR_TAIL_LINES = 3  # lines shown after [...]
 
 WRAPPER_PREFIXES = (
     "<local-command-",
@@ -57,12 +62,15 @@ WRAPPER_PREFIXES = (
     "Base directory for this skill:",
 )
 
-WRAPPER_EXACT = frozenset({
-    "[Request interrupted by user]",
-})
+WRAPPER_EXACT = frozenset(
+    {
+        "[Request interrupted by user]",
+    }
+)
 
-def tool_use_blocks(entry: dict) -> list[dict]:
-    """tool_use blocks of an assistant entry; empty list for anything else."""
+
+def tool_use_blocks(entry: Entry) -> list[Entry]:
+    """Return tool_use blocks of an assistant entry; empty for anything else."""
     msg = entry.get("message") or {}
     if msg.get("role") != "assistant":
         return []
@@ -73,8 +81,8 @@ def tool_use_blocks(entry: dict) -> list[dict]:
     ]
 
 
-def _is_handoff_write(entry: dict) -> bool:
-    """True when this assistant entry writes or edits handoff-task.md."""
+def _is_handoff_write(entry: Entry) -> bool:
+    """Report whether this assistant entry writes or edits handoff-task.md."""
     for block in tool_use_blocks(entry):
         if block.get("name") not in ("Write", "Edit"):
             continue
@@ -85,16 +93,24 @@ def _is_handoff_write(entry: dict) -> bool:
 
 
 def clamp_anchor_lines(lines: list[str]) -> list[str]:
+    """Collapse an over-long anchor to head + omission marker + tail."""
     if len(lines) <= ANCHOR_LINE_LIMIT:
         return lines
     n = len(lines) - ANCHOR_HEAD_LINES - ANCHOR_TAIL_LINES
-    return lines[:ANCHOR_HEAD_LINES] + [f"[ {n} lines omitted ]"] + lines[-ANCHOR_TAIL_LINES:]
+    return [
+        *lines[:ANCHOR_HEAD_LINES],
+        f"[ {n} lines omitted ]",
+        *lines[-ANCHOR_TAIL_LINES:],
+    ]
 
 
-def load_entries(transcript: pathlib.Path) -> list[dict]:
-    raw: list[dict] = []
-    for line in transcript.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
+def load_entries(transcript: pathlib.Path) -> list[Entry]:
+    """Parse the session JSONL, bounded at the last handoff-task.md write."""
+    raw: list[Entry] = []
+    for raw_line in transcript.read_text(
+        encoding="utf-8", errors="replace"
+    ).splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -109,7 +125,7 @@ def load_entries(transcript: pathlib.Path) -> list[dict]:
         if _is_handoff_write(raw[i]):
             cut = i
             break
-    entries: list[dict] = []
+    entries: list[Entry] = []
     for entry in raw[:cut]:
         if entry.get("isSidechain") or entry.get("isMeta"):
             continue
@@ -117,7 +133,8 @@ def load_entries(transcript: pathlib.Path) -> list[dict]:
     return entries
 
 
-def extract_files_touched(entries: list[dict]) -> list[str]:
+def extract_files_touched(entries: list[Entry]) -> list[str]:
+    """Return file_paths from Write/Edit tool_use, deduped, first-appearance."""
     seen: list[str] = []
     for entry in entries:
         for block in tool_use_blocks(entry):
@@ -129,13 +146,16 @@ def extract_files_touched(entries: list[dict]) -> list[str]:
     return seen[-MAX_FILES:]
 
 
-def user_text(message: dict) -> str:
+def user_text(message: Entry) -> str:
+    """Render a user message's content to text, dropping tool_result blocks."""
     content = message.get("content")
     if isinstance(content, str):
         return content.strip()
     if not isinstance(content, list):
         return ""
-    non_result = [b for b in content if isinstance(b, dict) and b.get("type") != "tool_result"]
+    non_result = [
+        b for b in content if isinstance(b, dict) and b.get("type") != "tool_result"
+    ]
     if not non_result:
         return ""
     parts: list[str] = []
@@ -149,13 +169,15 @@ def user_text(message: dict) -> str:
 
 
 def is_wrapper_entry(text: str) -> bool:
+    """Report whether text is a CLI-injected wrapper (not a real prompt)."""
     stripped = text.strip()
     if stripped in WRAPPER_EXACT:
         return True
     return stripped.startswith(WRAPPER_PREFIXES)
 
 
-def extract_user_prompts(entries: list[dict]) -> list[tuple[int, str]]:
+def extract_user_prompts(entries: list[Entry]) -> list[tuple[int, str]]:
+    """Return (index, text) for real user prompts, wrappers filtered out."""
     result: list[tuple[int, str]] = []
     for i, entry in enumerate(entries):
         if entry.get("type") != "user":
@@ -168,7 +190,8 @@ def extract_user_prompts(entries: list[dict]) -> list[tuple[int, str]]:
     return result
 
 
-def anchor_for(entries: list[dict], user_index: int) -> str:
+def anchor_for(entries: list[Entry], user_index: int) -> str:
+    """Describe the assistant turn immediately preceding a user prompt."""
     for j in range(user_index - 1, -1, -1):
         entry = entries[j]
         message = entry.get("message") or {}
@@ -188,7 +211,7 @@ def anchor_for(entries: list[dict], user_index: int) -> str:
                 )
                 return f"[{name}] {target}".strip() if target else f"[{name}]"
             if btype == "text":
-                text = (block.get("text") or "").strip()
+                text: str = (block.get("text") or "").strip()
                 if text:
                     return "\n".join(clamp_anchor_lines(text.splitlines()))
         return "(silent agent turn)"
@@ -196,11 +219,13 @@ def anchor_for(entries: list[dict], user_index: int) -> str:
 
 
 def format_quote(text: str) -> list[str]:
+    """Markdown-blockquote each line; blank lines render as a bare ``>``."""
     return [f"> {line}" if line.strip() else ">" for line in text.splitlines()]
 
 
 def emit(transcript_path: str, task_path: str) -> None:
-    entries: list[dict] = []
+    """Assemble the handoff frame from transcript + task file and print it."""
+    entries: list[Entry] = []
     transcript = pathlib.Path(transcript_path) if transcript_path else None
     if transcript and transcript.exists():
         entries = load_entries(transcript)
@@ -225,8 +250,7 @@ def emit(transcript_path: str, task_path: str) -> None:
             lines.append("")
     lines.append("## Files touched")
     if files_touched:
-        for path in files_touched:
-            lines.append(f"- `{path}`")
+        lines.extend(f"- `{path}`" for path in files_touched)
     else:
         lines.append("(none extracted)")
     lines.append("")
@@ -247,6 +271,7 @@ def emit(transcript_path: str, task_path: str) -> None:
 
 
 def main(argv: list[str]) -> int:
+    """CLI entry point: validate argv, emit the frame, return an exit code."""
     if len(argv) != 3:
         print(f"usage: {argv[0]} <transcript.jsonl> <handoff-task.md>", file=sys.stderr)
         return 2

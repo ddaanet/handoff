@@ -14,7 +14,7 @@ import sys
 
 
 def _read_gitdir(dotgit_file: str) -> str:
-    """Absolute gitdir path from a linked worktree's ``.git`` file, or "".
+    """Return the absolute gitdir from a linked worktree's ``.git`` file, or "".
 
     A linked worktree's ``.git`` is a file containing ``gitdir: <path>``. A
     relative path is joined to the file's directory but not normalized; git
@@ -28,7 +28,7 @@ def _read_gitdir(dotgit_file: str) -> str:
         return ""
     for line in content.splitlines():
         if line.startswith("gitdir:"):
-            path = line[len("gitdir:"):].strip()
+            path = line[len("gitdir:") :].strip()
             if not path:
                 return ""
             if not os.path.isabs(path):
@@ -38,7 +38,7 @@ def _read_gitdir(dotgit_file: str) -> str:
 
 
 def _is_under(path: str, parent: str) -> bool:
-    """True if ``path`` equals ``parent`` or sits inside it (string match)."""
+    """Report whether ``path`` equals ``parent`` or sits inside it (string)."""
     parent = parent.rstrip(os.sep)
     return path == parent or path.startswith(parent + os.sep)
 
@@ -73,6 +73,7 @@ def worktree_root(cwd: str, project: str) -> str:
 
 
 def main() -> None:
+    """Print the resolved handoff root for argv's cwd and project."""
     cwd = sys.argv[1] if len(sys.argv) > 1 else ""
     project = sys.argv[2] if len(sys.argv) > 2 else ""
     print(worktree_root(cwd, project))
