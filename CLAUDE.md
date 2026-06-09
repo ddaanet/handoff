@@ -73,6 +73,11 @@ has the user-facing version of this.
   `handoff_deny()` (shared PreToolUse deny emitter; calls `exit 0`
   after printing the deny JSON, so only safe from a standalone hook
   script).
+  Also defines `handoff_root()` — the effective handoff root for the session:
+  `handoff_root "<.cwd>"` shells out to `worktree_root.py`, returning the
+  enclosing worktree root or `CLAUDE_PROJECT_DIR`. Every cwd-scoped hook
+  anchors on this rather than `CLAUDE_PROJECT_DIR` directly, so worktree
+  sessions resolve to their own `.claude/`.
 - `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
   this project's `handoff-task.md` until `handoff:handoff` has
   activated this session.
@@ -107,6 +112,11 @@ has the user-facing version of this.
   exists), and emits the assembled frame to stdout. Called at
   SessionStart by `load-handoff.sh`; contract: `extract.py
   <transcript.jsonl> <handoff-task.md>`.
+- `scripts/worktree_root.py` — pure resolver `worktree_root(cwd, project)`:
+  walks up from the session cwd via on-disk `.git` linkage to the enclosing
+  linked-worktree root, else returns `project`. Backs `_lib.sh`'s
+  `handoff_root`; lets each worktree own its `.claude/`. Unit-tested in
+  `tests/test_worktree_root.py` (pytest).
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.2.0`). Provides:
@@ -131,7 +141,10 @@ has the user-facing version of this.
 ## Conventions
 
 - Use `${CLAUDE_PLUGIN_ROOT}` in `hooks.json` for portability.
-- All hooks are mechanical and cwd-scoped. Anything that requires
+- All hooks are mechanical and cwd-scoped. They anchor on `handoff_root`
+  (the enclosing git-worktree root, else `CLAUDE_PROJECT_DIR`) — never on the
+  raw hook-input `.cwd` (drift-prone) nor on `CLAUDE_PROJECT_DIR` directly
+  (pinned to the main tree in a worktree session). Anything that requires
   judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
