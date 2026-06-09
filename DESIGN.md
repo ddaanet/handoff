@@ -439,7 +439,14 @@ inlined block is omitted entirely.
 
 - **Files touched**: `tool_use` with `name ∈ {Edit, Write}`.
   `Read/Grep/Glob` are investigation, not touch. Deduplicated, ordered by
-  first appearance, tail-capped at 30.
+  first appearance, tail-capped at 30. The control/scratch files the
+  handoff and gitlore machinery write while *operating* — handoff's task
+  file, the `autorename` trigger, the session pointer/error log, and
+  gitlore's `gitlore-commit-msg` / `gitlore-merge-state` — are incidental
+  to running the skills, not part of the active set the user is working
+  on, so they are filtered out (`SKILL_ARTIFACT_SUFFIXES` in `extract.py`).
+  gitlore's memory *content* (`memory/*.md`) is deliberately **not**
+  filtered: those edits are real work and belong in the list.
 - **User prompts**: entries with `type == "user"` where the content is
   not entirely composed of `tool_result` blocks. Last 5.
 - **Anchor**: walk backwards from the user turn to the nearest assistant

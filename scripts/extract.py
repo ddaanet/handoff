@@ -45,6 +45,19 @@ Entry = dict[str, Any]
 LAST_N_PROMPTS = 5
 MAX_FILES = 30
 WRITE_TOOLS = ("Edit", "Write")  # tool_use names that count as touching a file
+
+# Control/scratch files the handoff & gitlore machinery writes while operating:
+# byproducts of running the skills, not the user's working set — filtered from
+# "Files touched". gitlore's memory *content* (memory/*.md) is real work and is
+# deliberately NOT listed here.
+SKILL_ARTIFACT_SUFFIXES = (
+    "/.claude/handoff-task.md",
+    "/.claude/handoff-session",
+    "/.claude/handoff-error.log",
+    "/.claude/autorename",
+    "/gitlore-commit-msg",
+    "/gitlore-merge-state",
+)
 ANCHOR_TEXT_LIMIT = 120
 ANCHOR_LINE_LIMIT = 7  # show all lines if count <= this; truncation hides ≥2 lines
 ANCHOR_HEAD_LINES = 3  # lines shown before [...]
@@ -135,14 +148,18 @@ def load_entries(transcript: pathlib.Path) -> list[Entry]:
 
 
 def extract_files_touched(entries: list[Entry]) -> list[str]:
-    """Return file_paths from Write/Edit tool_use, deduped, first-appearance."""
+    """Return file_paths from Write/Edit tool_use, deduped, first-appearance.
+
+    Handoff/gitlore control files (see SKILL_ARTIFACT_SUFFIXES) are skipped —
+    they are byproducts of running the skills, not the user's working set.
+    """
     seen: list[str] = []
     for entry in entries:
         for block in tool_use_blocks(entry):
             if block.get("name") not in WRITE_TOOLS:
                 continue
             path = (block.get("input") or {}).get("file_path")
-            if path and path not in seen:
+            if path and path not in seen and not path.endswith(SKILL_ARTIFACT_SUFFIXES):
                 seen.append(path)
     return seen[-MAX_FILES:]
 

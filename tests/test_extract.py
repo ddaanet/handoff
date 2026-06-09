@@ -219,6 +219,33 @@ class TestExtractFilesTouched:
         # Read excluded, /a.py deduped, order = first appearance.
         assert extract.extract_files_touched(entries) == ["/a.py", "/c.py"]
 
+    def test_skill_artifacts_excluded(self) -> None:
+        """Handoff/gitlore control files are byproducts, not the working set.
+
+        gitlore memory *content* (memory/*.md) is real work and is kept.
+        """
+
+        def write(path: str) -> extract.Entry:
+            block = {"type": "tool_use", "name": "Write", "input": {"file_path": path}}
+            return {"message": {"role": "assistant", "content": [block]}}
+
+        entries = [
+            write("/repo/src/feature.py"),
+            write("/repo/.claude/handoff-task.md"),
+            write("/repo/.claude/autorename"),
+            write("/repo/.git/modules/memory/gitlore-commit-msg"),
+            write("/repo/memory/feedback_thing.md"),
+            write("/repo/memory/MEMORY.md"),
+            write("/repo/.claude/handoff-session"),
+            write("/repo/.git/modules/memory/gitlore-merge-state"),
+        ]
+        # Control/scratch files dropped; real work (incl. memory content) kept.
+        assert extract.extract_files_touched(entries) == [
+            "/repo/src/feature.py",
+            "/repo/memory/feedback_thing.md",
+            "/repo/memory/MEMORY.md",
+        ]
+
 
 class TestAnchorFor:
     def test_session_start(self) -> None:

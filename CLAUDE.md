@@ -156,8 +156,9 @@ has the user-facing version of this.
   empty extracted sections is still valid.
 - Extraction constants (`LAST_N_PROMPTS`, `MAX_FILES`,
   `ANCHOR_TEXT_LIMIT`, `ANCHOR_LINE_LIMIT`, `ANCHOR_HEAD_LINES`,
-  `ANCHOR_TAIL_LINES`, `WRAPPER_PREFIXES`, `WRAPPER_EXACT`) live at the
-  top of `extract.py`; do not inline them.
+  `ANCHOR_TAIL_LINES`, `WRAPPER_PREFIXES`, `WRAPPER_EXACT`,
+  `SKILL_ARTIFACT_SUFFIXES`) live at the top of `extract.py`; do not
+  inline them.
 - The markdown template lives in `SKILL.md` (single source of truth).
   The script does not re-state the template — it just inlines whatever
   the agent wrote.
@@ -210,7 +211,13 @@ to use synthetic JSONL, but the fixtures must mirror the real format
 
 - **Files touched**: `tool_use` events where `name` is `Edit` or
   `Write`. Reading (`Read`, `Grep`, `Glob`) is *investigation*, not
-  touch — intentionally excluded.
+  touch — intentionally excluded. The handoff/gitlore *control* files
+  written while operating the skills (`SKILL_ARTIFACT_SUFFIXES` in
+  `extract.py`: `.claude/handoff-task.md`, `handoff-session`,
+  `handoff-error.log`, `autorename`, gitlore's `gitlore-commit-msg`,
+  `gitlore-merge-state`) are byproducts, not the active set — also
+  excluded. gitlore memory *content* (`memory/*.md`) is real work and
+  is kept.
 - **User prompts**: entries with `type == "user"`. Messages whose
   `content` is entirely `tool_result` blocks are filtered out
   (internal wrappers). CLI-injected wrappers (`<local-command-*>`,
