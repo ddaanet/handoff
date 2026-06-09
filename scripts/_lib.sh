@@ -24,6 +24,18 @@ handoff_resolve() {
 for p in sys.argv[1:]: print(os.path.realpath(p))' "$@"
 }
 
+# Effective project root for the handoff files of THIS session. When the
+# session cwd ($1, from hook-input .cwd) is inside a linked git worktree of
+# CLAUDE_PROJECT_DIR, returns the worktree root so each worktree owns its own
+# .claude/; otherwise returns CLAUDE_PROJECT_DIR (fallback $PWD). The
+# branch-heavy resolution lives in worktree_root.py (unit-tested with pytest);
+# this is the thin shell wrapper. See
+# plans/2026-06-09-per-worktree-handoff-root-design.md.
+handoff_root() {
+    python3 "$(dirname "${BASH_SOURCE[0]}")/worktree_root.py" \
+        "${1:-}" "${CLAUDE_PROJECT_DIR:-$PWD}"
+}
+
 # Has the handoff skill activated in this session? Stateless: derive the
 # answer from the transcript JSONL each call (no marker, no env). Scans
 # for either activation signal the wipe hooks key on — a Skill tool_use

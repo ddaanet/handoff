@@ -35,6 +35,17 @@ TASK
     source "$repo_root/scripts/_lib.sh"
 }
 
+# Build a fake linked git worktree of $tmp under $BATS_TEST_TMPDIR/$name and
+# echo its path. Its .git is a *file* pointing under $tmp/.git/worktrees/$name,
+# mirroring real git worktree layout. $tmp is CLAUDE_PROJECT_DIR (set in setup).
+make_worktree() {
+    local name="${1:-wt}"
+    local wt="$BATS_TEST_TMPDIR/$name"
+    mkdir -p "$wt/.claude" "$tmp/.git/worktrees/$name"
+    printf 'gitdir: %s\n' "$tmp/.git/worktrees/$name" > "$wt/.git"
+    printf '%s\n' "$wt"
+}
+
 # --- _lib.sh: handoff_activated detector ---
 
 @test "handoff_activated: Skill tool_use (qualified) -> activated" {
@@ -65,6 +76,28 @@ TASK
 @test "handoff_activated: missing file -> not activated" {
     run handoff_activated "$tmp/.claude/does-not-exist.jsonl"
     [ "$status" -eq 1 ]
+}
+
+# --- _lib.sh: handoff_root resolver ---
+
+@test "handoff_root: worktree cwd -> worktree root" {
+    wt="$(make_worktree wtA)"
+    run handoff_root "$wt"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$wt" ]
+}
+
+@test "handoff_root: worktree subdir -> worktree root" {
+    wt="$(make_worktree wtB)"
+    run handoff_root "$wt/scripts"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$wt" ]
+}
+
+@test "handoff_root: non-worktree cwd -> CLAUDE_PROJECT_DIR" {
+    run handoff_root "$other"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$tmp" ]
 }
 
 # --- _lib.sh: handoff_deny emitter ---
