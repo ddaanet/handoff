@@ -75,6 +75,15 @@ gitlore auto-memory is the complement for durable context that outlives tasks.
 See [`DESIGN.md`](DESIGN.md) for the research and analysis behind this
 split.
 
+### Choosing a handoff provider
+
+This is the lightweight, local pre-`/clear` snapshot. A separate plugin,
+`ddaa-handoff` (and its French `ddaa-passation`), provides a heavier
+end-of-session *summary* delivered to Notion when available. They share
+the same trigger phrases on purpose, so the same words work whichever you
+pick — therefore **enable exactly one handoff provider per project**.
+Enabling both reloads the collision this split was made to remove.
+
 ## Requirements
 
 - Claude Code (depends on session JSONL format and plugin hooks)
