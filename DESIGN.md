@@ -627,6 +627,21 @@ root via `WorktreeCreate`/`CwdChanged` hooks (observational, no clean
 per-worktree storage, fragile vs. the stateless `.git` walk). Full rationale:
 `plans/2026-06-09-per-worktree-handoff-root-design.md`.
 
+## gitlore-aware handoff (2026-06-12)
+
+The handoff skill runs a read-only probe (`bin/handoff-memory-probe` →
+`scripts/memory-probe.sh`) at wrap-up; on a dirty gitlore-memory submodule
+it emits a directive and the agent summarizes → gets approval → commits via
+gitlore's `commit-memory.sh` (resolved through
+`git config gitlore.commitCommand`). The probe is a PATH-shimmed script, not
+a hook: the agent must act on the result, and verification showed
+`CLAUDE_PLUGIN_ROOT` is absent from the agent's Bash while every plugin's
+`bin/` is on PATH. The conditional lives entirely in the probe
+(harness-over-agent); the skill body just runs it and follows its output.
+gitlore's committer stays in its `scripts/` behind the self-healing
+`commitCommand` key — moving it to `bin/` would reopen a shipped feature and
+break the no-layout-coupling abstraction.
+
 ## References
 
 - LangChain's context engineering framing:

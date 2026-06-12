@@ -27,12 +27,23 @@ First, decide both of the following without making any tool calls:
   steps, unmade decisions, or non-obvious context worth preserving; if so,
   draft the content using the template below.
 
-Then issue the Write calls in the **same turn**:
-- `./.claude/autorename` — sole line is the session title (always)
-- `./.claude/handoff-task.md` — only if there's an active task
+Then, in the **same turn**, issue the writes and run the memory probe:
+- Write `./.claude/autorename` — sole line is the session title (always)
+- Write `./.claude/handoff-task.md` — only if there's an active task
+- Run `handoff-memory-probe` (Bash) — deterministic gitlore-memory check
 
 If there's no active task, omit `handoff-task.md` — the activation hook
 already finalized the session.
+
+### Step 3: Follow the probe
+
+`handoff-memory-probe` prints nothing when there is no gitlore-managed
+memory to commit — finish normally. If it prints a directive, the
+directive itself states what to do; follow it exactly. The usual case
+asks you to summarize the pending memory changes in 1-3 sentences, get
+the user's approval (they may edit the summary), then run the commit
+command it names — never commit without that approval. The probe owns
+the decision — do not re-derive it or inspect the submodule yourself.
 
 **Task file template:**
 
@@ -59,9 +70,6 @@ Task file rules:
   read-time hook adds files-touched.
 - No location other than `./.claude/handoff-task.md` — the hook reads
   this exact path.
-
-If the autorename systemMessage contains a `/rename ...` line (not in
-tmux), relay it in a fenced code block so the user can paste it.
 
 ## Anti-patterns
 

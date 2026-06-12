@@ -9,7 +9,10 @@ High-level flow: skill writes `.claude/handoff-task.md` and stores
 the session pointer → `PostToolUse(Write|Edit)` stages
 `handoff-task.md` for commit → next session's `SessionStart(startup|clear)`
 calls `extract.py` in memory and injects the assembled frame. `README.md`
-has the user-facing version of this.
+has the user-facing version of this. At wrap-up the skill also runs
+`handoff-memory-probe`; when a gitlore-memory submodule is dirty, the probe
+emits a directive and the agent summarizes → gets approval → commits memory
+via gitlore's `commit-memory.sh`.
 
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
@@ -117,6 +120,16 @@ has the user-facing version of this.
   linked-worktree root, else returns `project`. Backs `_lib.sh`'s
   `handoff_root`; lets each worktree own its `.claude/`. Unit-tested in
   `tests/test_worktree_root.py` (pytest).
+- `bin/handoff-memory-probe` — PATH-resident shim (Claude Code adds each
+  plugin's `bin/` to PATH) that execs `scripts/memory-probe.sh`. The skill
+  body invokes it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
+  the agent's Bash, so the shim is the entry point.
+- `scripts/memory-probe.sh` — read-only gitlore-memory detector run by the
+  handoff skill at wrap-up. Owns the dirty-or-not branch and prints the
+  agent's next action (summarize → approve → commit via
+  `git config gitlore.commitCommand`) or stays silent. Couples only to the
+  `gitlore-memory` submodule registration (FR12) and the `commitCommand`
+  key — never gitlore internals.
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.2.0`). Provides:
@@ -184,11 +197,14 @@ with `uv sync` (the only `uv` invocation; `uv.lock` is committed,
   so it runs on every memory commit (needs the direnv-activated venv).
 - `just smoke` — `tests/smoke.sh`: run `extract.py` against the most
   recent session JSONL and print the result.
-- `just hook-test` — `bats tests/hook-test.bats tests/rename-test.bats`:
-  end-to-end test of the handoff-specific hook scripts (and the rename
-  scripts) against synthetic tool-event payloads. `bats run` captures
+- `just hook-test` — `bats tests/hook-test.bats tests/rename-test.bats
+  tests/memory-probe.bats`: end-to-end test of the handoff-specific hook
+  scripts (and the rename scripts) against synthetic tool-event payloads. `bats run` captures
   exit codes/output without the `set +e` dance. `version-guard.sh` is
   tested in the toolkit, not here.
+  `tests/memory-probe.bats` covers `scripts/memory-probe.sh` and the
+  `bin/` shim against a synthetic gitlore repo; it is listed in both the
+  `precommit` and `hook-test` recipes.
 - `just extract-test` — `pytest`: fixture-driven tests of `extract.py`
   (`tests/test_extract.py`). Unit tests import the pure functions;
   end-to-end tests render a full frame (via `emit()` captured with

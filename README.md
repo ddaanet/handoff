@@ -48,6 +48,11 @@ touches no memory.
 
 A `PreToolUse(Skill)` hook wipes any prior handoff files the moment the skill activates, so the slate is always clean — and tells the agent so it doesn't redundantly verify. The agent then updates auto-memory with any durable learnings, and in a single turn writes a short task snapshot (if anything is outstanding) and a session title to `.claude/autorename`. A `PostToolUse(Write|Edit)` hook stages `handoff-task.md` for commit and records the session pointer to `.claude/handoff-session`. A second hook picks up `autorename` and renames the session via tmux `send-keys` once the prompt goes idle (or emits a `/rename` line to paste if not in tmux). Guards prevent the agent from reading or writing `.claude/handoff-task.md` outside the handoff flow. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently.
 
+In a gitlore-managed repository, handoff also offers to commit your memory:
+when the memory submodule has uncommitted changes, it summarizes them, asks
+you to approve (or edit) the summary, and commits via gitlore — so durable
+learnings land instead of waiting for your next commit.
+
 ## Staleness and cleanup
 
 The artifact carries its own timestamp in its first heading. When the
