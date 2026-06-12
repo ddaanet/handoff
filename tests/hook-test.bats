@@ -299,6 +299,62 @@ make_worktree() {
     [ ! -e "$tmp/.claude/handoff.md" ]
 }
 
+# handoff-task.md is git-tracked (write-stage.sh force-adds it). When the
+# wipe deletes a committed task file, the deletion must be staged too — else
+# the write-side `git add -f` and the wipe-side rm are asymmetric and the
+# removal never rides the user's next commit. Seed a committed task file in a
+# throwaway repo, wipe, assert the index shows a staged deletion (porcelain
+# first column `D`, not the unstaged ` D`).
+seed_tracked_task() {
+    local repo="$1"
+    mkdir -p "$repo/.claude"
+    printf 'seed task body\n' > "$repo/.claude/handoff-task.md"
+    git -C "$repo" init -q
+    git -C "$repo" add -f .claude/handoff-task.md
+    git -C "$repo" -c user.email=t@t -c user.name=t commit -qm seed
+}
+
+@test "skill-pre-hook (git staging): stages handoff-task.md deletion on wipe" {
+    git_tmp="$BATS_TEST_TMPDIR/wipegit-ptu"
+    mkdir -p "$git_tmp"
+    seed_tracked_task "$git_tmp"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/skill-pre-hook.sh
+    ' _ "$git_tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$git_tmp/.claude/handoff-task.md" ]
+    git -C "$git_tmp" status --porcelain .claude/handoff-task.md | grep -q '^D'
+}
+
+@test "prompt-pre-hook (git staging): stages handoff-task.md deletion on wipe" {
+    git_tmp="$BATS_TEST_TMPDIR/wipegit-ups"
+    mkdir -p "$git_tmp"
+    seed_tracked_task "$git_tmp"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, prompt:\"/handoff:handoff\"}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/prompt-pre-hook.sh
+    ' _ "$git_tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$git_tmp/.claude/handoff-task.md" ]
+    git -C "$git_tmp" status --porcelain .claude/handoff-task.md | grep -q '^D'
+}
+
+@test "skill-pre-hook (non-git cwd: wipe still succeeds)" {
+    nogit="$BATS_TEST_TMPDIR/nogit"
+    mkdir -p "$nogit/.claude"
+    : > "$nogit/.claude/handoff-task.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/skill-pre-hook.sh
+    ' _ "$nogit"
+    [ "$status" -eq 0 ]
+    [ ! -e "$nogit/.claude/handoff-task.md" ]
+}
+
 @test "skill-pre-hook (other skill: no-op)" {
     : > "$tmp/.claude/handoff-task.md"
     run bash -c '

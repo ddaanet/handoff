@@ -598,7 +598,12 @@ versioning it worthwhile rather than noise.
   two halves drift; the user's commit is the sync point.
 - **Wipe-churn.** Tracked + wiped-at-activation = delete/rewrite each
   handoff, deletion on finalize. A real trail of task transitions, churny in
-  the top-level log, isolated via `git log .claude/handoff-task.md`.
+  the top-level log, isolated via `git log .claude/handoff-task.md`. The wipe
+  *stages* the deletion (`git add -f` on the now-absent path, in
+  `_wipe-emit.sh`), mirroring the write-side `git add -f` in `write-stage.sh`
+  — otherwise a finalized/transitioned task would linger as an unstaged
+  removal and never ride the user's next commit. Suppressed no-op when the
+  file was never tracked or the root isn't a git repo.
 
 ## Open questions
 

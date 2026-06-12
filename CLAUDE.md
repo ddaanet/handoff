@@ -65,6 +65,10 @@ via gitlore's `commit-memory.sh`.
   If anything was removed, emits dual-channel JSON: `systemMessage`
   (user-facing) and `hookSpecificOutput.additionalContext` (agent-facing,
   so the agent knows the wipe happened and doesn't redundantly verify).
+  When `handoff-task.md` (the one tracked artifact) is wiped, stages the
+  deletion with `git add -f` on the now-absent path, mirroring
+  `write-stage.sh`'s write-side staging so the removal rides the next commit
+  (suppressed no-op outside a git repo / when untracked).
   The session pointer is NOT written here — see `write-stage.sh`.
 - `scripts/_lib.sh` — sourced helper for the write and read hooks.
   Defines the `HANDOFF_REL_*` path constants and `handoff_resolve()`,
