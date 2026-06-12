@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: This skill should be used when the user asks to "save handoff", "save context", "prepare handoff", "before /clear", "before I clear", "write handoff", "clean handoff", "discard handoff", "clear handoff", "finalize", "wrap up", "I'm done", or otherwise signals imminent `/clear` or end-of-task. Writes a short markdown task file when there is residual state worth preserving across `/clear`; otherwise leaves nothing in place.
+description: This skill should be used when the user asks to "save handoff", "save context", "prepare handoff", "write handoff", "before /clear", "before I clear", "clear handoff", "discard handoff", "clean handoff", "finalize", "wrap up", "I'm done", "/handoff", "handoff", "summarize so I can continue tomorrow", "conversation too long", "let's pick this up in a new chat", "end", "goodbye", or otherwise signals imminent `/clear` or end-of-task. Writes a short markdown task file when there is residual state worth preserving across `/clear`; otherwise leaves nothing in place.
 ---
 
 # handoff — Pre-Clear Task Snapshot
