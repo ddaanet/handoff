@@ -15,7 +15,7 @@ precommit:
     jq . hooks/hooks.json > /dev/null
     jq . .claude/settings.json > /dev/null
     python3 -c "import ast; ast.parse(open('scripts/extract.py').read())"
-    shellcheck -x scripts/*.sh tests/*.sh tests/*.bats
+    shellcheck -x bin/* scripts/*.sh tests/*.sh tests/*.bats
     ruff check scripts tests
     ruff format --check scripts tests
     docformatter --check scripts/*.py tests/*.py

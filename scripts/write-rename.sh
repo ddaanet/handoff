@@ -41,7 +41,14 @@ if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
 fi
 
 PANE="$TMUX_PANE"
-setsid bash "$script_dir/rename-when-idle.sh" "$PANE" "$title" >/dev/null 2>&1 &
+# setsid fully detaches the watcher into its own session, but it is Linux-only
+# — macOS ships no setsid(1). Fall back to nohup (POSIX, ignores SIGHUP) so the
+# watcher outlives the hook turn on both platforms instead of silently dying.
+if command -v setsid >/dev/null 2>&1; then
+    setsid bash "$script_dir/rename-when-idle.sh" "$PANE" "$title" >/dev/null 2>&1 &
+else
+    nohup bash "$script_dir/rename-when-idle.sh" "$PANE" "$title" >/dev/null 2>&1 &
+fi
 disown 2>/dev/null || true
 jq -nc --arg t "$title" --arg p "$PANE" \
     '{systemMessage: ("handoff: will rename to \"" + $t + "\" once prompt is idle (tmux pane " + $p + ").")}'

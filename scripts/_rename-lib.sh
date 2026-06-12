@@ -4,8 +4,10 @@
 # Sourced by rename-when-idle.sh; do not execute directly.
 # shellcheck disable=SC2034  # consumed by sourcing scripts
 
-# Strip ANSI escapes and carriage returns.
-strip() { sed -E 's/\x1B\[[0-9;?]*[A-Za-z]//g; s/\r//g'; }
+# Strip ANSI escapes and carriage returns. BSD/macOS sed honors neither
+# \x1B nor \r in a script, so feed sed a literal ESC (bash ANSI-C quote,
+# octal for bash 3.2) and delete CRs with tr (which does grok \r everywhere).
+strip() { sed -E $'s/\033\\[[0-9;?]*[A-Za-z]//g' | tr -d '\r'; }
 
 # Busy while the Claude TUI chrome spinner is on screen: timer reads
 # "(<n>s ·" or the "esc to interrupt" hint is visible.

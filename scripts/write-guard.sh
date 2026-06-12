@@ -14,12 +14,12 @@ handoff_hook_fields "$(cat)"
 
 cwd="$(handoff_root "$HOOK_CWD")"
 
-{ read -r target; read -r exp_task; } \
+{ read -r target; read -r expected; } \
     < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_TASK")
 
-if [[ "$target" != "$exp_task" ]]; then
+if [[ "$target" != "$expected" ]]; then
     handoff_deny \
-        "write blocked: handoff-task.md outside this project's .claude/. resolved: $target; expected: $exp_task." \
+        "write blocked: handoff-task.md outside this project's .claude/. resolved: $target; expected: $expected." \
         "write-guard: blocked handoff-task.md write outside $cwd/.claude/"
 fi
 if ! handoff_activated "$HOOK_TRANSCRIPT"; then

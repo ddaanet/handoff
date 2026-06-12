@@ -16,10 +16,10 @@ handoff_hook_fields "$(cat)"
 
 cwd="$(handoff_root "$HOOK_CWD")"
 
-{ read -r target; read -r exp_task; } \
+{ read -r target; read -r expected; } \
     < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_TASK")
 
-if [[ "$target" == "$exp_task" ]] && ! handoff_activated "$HOOK_TRANSCRIPT"; then
+if [[ "$target" == "$expected" ]] && ! handoff_activated "$HOOK_TRANSCRIPT"; then
     handoff_deny \
         "handoff-task.md read blocked: handoff skill has not activated this session." \
         "read-guard: blocked handoff-task.md read before handoff activation"
