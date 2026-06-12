@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Pre-/clear task snapshot for Claude Code: agent writes current task + open decisions; at next session start, a hook scrapes the prior transcript and injects task + last-N prompts + files touched into the fresh agent automatically.",
   "author": {
     "name": "David Allouche",
