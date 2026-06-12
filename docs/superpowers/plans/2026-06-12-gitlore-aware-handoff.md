@@ -10,6 +10,8 @@
 
 **Reference spec:** `docs/superpowers/specs/2026-06-12-gitlore-aware-handoff-design.md`.
 
+**Task grouping rationale:** The probe, its PATH shim, and the justfile wiring are one coupled TDD unit (the shim execs the probe; the recipe lists the bats file; all three mutate `tests/memory-probe.bats`) — Task 1. The non-tmux `additionalContext` fix is fully independent (different files) — Task 2. The skill wiring and docs are no-test prose that depend on the code existing — Task 3. Final verification (`just precommit`/`just smoke`) is an orchestrator gate, run inline in the main session, not a dispatched task.
+
 ---
 
 ## File structure
@@ -25,11 +27,17 @@
 
 ---
 
-## Task 1: The probe script + tests
+## Task 1: Probe + PATH shim + recipe wiring
+
+One coupled TDD unit. Build the probe (red→green), then its PATH shim (red→green) which execs the probe, then wire the shared bats file into the recipes. Each sub-step keeps its own red phase; they share `tests/memory-probe.bats` and so cannot be parallelized — hence one task.
 
 **Files:**
 - Create: `scripts/memory-probe.sh`
+- Create: `bin/handoff-memory-probe`
 - Create: `tests/memory-probe.bats`
+- Modify: `justfile:24` (the `precommit` recipe) and `justfile:53` (the `hook-test` recipe)
+
+### Probe script
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -188,22 +196,9 @@ Expected: PASS (5 tests).
 Run: `shellcheck -x scripts/memory-probe.sh tests/memory-probe.bats`
 Expected: no findings.
 
-- [ ] **Step 6: Commit**
+### PATH shim
 
-```bash
-git add scripts/memory-probe.sh tests/memory-probe.bats
-git commit -m "feat: add read-only gitlore-memory probe for handoff"
-```
-
----
-
-## Task 2: The PATH shim
-
-**Files:**
-- Create: `bin/handoff-memory-probe`
-- Test: `tests/memory-probe.bats` (add one case)
-
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 6: Write the failing test**
 
 Append to `tests/memory-probe.bats` (the `make_gitlore_repo` helper and `SHIM` are already defined in setup):
 
@@ -217,12 +212,12 @@ Append to `tests/memory-probe.bats` (the `make_gitlore_repo` helper and `SHIM` a
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 7: Run to verify it fails**
 
 Run: `bats tests/memory-probe.bats -f shim`
 Expected: FAIL — `bin/handoff-memory-probe` does not exist / not executable.
 
-- [ ] **Step 3: Write the shim**
+- [ ] **Step 8: Write the shim**
 
 Create `bin/handoff-memory-probe`:
 
@@ -236,33 +231,21 @@ here="$(cd "$(dirname "$0")" && pwd)"
 exec bash "$here/../scripts/memory-probe.sh" "$@"
 ```
 
-- [ ] **Step 4: Make it executable and run the test to verify it passes**
+- [ ] **Step 9: Make it executable and run the test to verify it passes**
 
 Run: `chmod +x bin/handoff-memory-probe && bats tests/memory-probe.bats -f shim`
 Expected: PASS.
 
-- [ ] **Step 5: Lint**
+- [ ] **Step 10: Lint**
 
 Run: `shellcheck -x bin/handoff-memory-probe`
 Expected: no findings.
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add bin/handoff-memory-probe tests/memory-probe.bats
-git commit -m "feat: expose memory probe on PATH via bin/ shim"
-```
-
----
-
-## Task 3: Wire the new bats file into the recipes
-
-**Files:**
-- Modify: `justfile:24` (the `precommit` recipe) and `justfile:53` (the `hook-test` recipe)
+### Wire the bats file into the recipes
 
 Both recipes list bats files explicitly, so a new file is invisible until added.
 
-- [ ] **Step 1: Edit `precommit`**
+- [ ] **Step 11: Edit `precommit`**
 
 Change line 24 from:
 
@@ -276,7 +259,7 @@ to:
     bats tests/hook-test.bats tests/rename-test.bats tests/memory-probe.bats
 ```
 
-- [ ] **Step 2: Edit `hook-test`**
+- [ ] **Step 12: Edit `hook-test`**
 
 Change the `hook-test` recipe body from:
 
@@ -290,27 +273,27 @@ to:
     bats tests/hook-test.bats tests/rename-test.bats tests/memory-probe.bats
 ```
 
-- [ ] **Step 3: Verify the recipe runs the new file**
+- [ ] **Step 13: Verify the recipe runs the new file**
 
 Run: `just hook-test`
 Expected: PASS — all three suites run, including the 6 memory-probe tests.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
-git add justfile
-git commit -m "test: run memory-probe.bats in precommit and hook-test"
+git add scripts/memory-probe.sh bin/handoff-memory-probe tests/memory-probe.bats justfile
+git commit -m "feat: add gitlore-memory probe, PATH shim, and recipe wiring"
 ```
 
 ---
 
-## Task 4: Non-tmux rename → agent-facing additionalContext
+## Task 2: Non-tmux rename → agent-facing additionalContext
+
+Fully independent of Task 1 (different files; no shared state). The non-tmux branch currently emits only `systemMessage` (user-facing). The skill body's dead "relay the systemMessage" line never fires because the agent doesn't see `systemMessage`. Route the instruction through `additionalContext` so the agent fences the `/rename` line itself.
 
 **Files:**
 - Modify: `scripts/write-rename.sh:32-36`
 - Test: `tests/hook-test.bats` (extend the existing non-tmux case)
-
-The non-tmux branch currently emits only `systemMessage` (user-facing). The skill body's dead "relay the systemMessage" line never fires because the agent doesn't see `systemMessage`. Route the instruction through `additionalContext` so the agent fences the `/rename` line itself.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -383,10 +366,15 @@ git commit -m "fix: route non-tmux rename hint through agent-facing additionalCo
 
 ---
 
-## Task 5: SKILL.md — add the probe to the flow, drop the dead relay
+## Task 3: SKILL.md wiring + documentation
+
+Both halves are no-test prose edits that depend on the code from Tasks 1–2 existing. The skill edits make the feature actually fire; the docs describe it. Grouped because neither carries an independent test gate.
 
 **Files:**
 - Modify: `skills/handoff/SKILL.md`
+- Modify: `CLAUDE.md`, `README.md`, `DESIGN.md`
+
+### SKILL.md
 
 - [ ] **Step 1: Add the probe to the Step 2 batch**
 
@@ -436,21 +424,9 @@ tmux), relay it in a fenced code block so the user can paste it.
 Run: `wc -w skills/handoff/SKILL.md`
 Expected: under 2000 words (the conventions cap). Confirm the number is well below.
 
-- [ ] **Step 4: Commit**
+### Documentation
 
-```bash
-git add skills/handoff/SKILL.md
-git commit -m "feat: drive proactive gitlore memory commit from handoff skill"
-```
-
----
-
-## Task 6: Documentation
-
-**Files:**
-- Modify: `CLAUDE.md`, `README.md`, `DESIGN.md`
-
-- [ ] **Step 1: Update `CLAUDE.md`**
+- [ ] **Step 4: Update `CLAUDE.md`**
 
 In the high-level flow paragraph (top of "Layout"), append a sentence after the existing flow description:
 
@@ -483,7 +459,7 @@ Add to "Testing" (after the `just hook-test` bullet description), noting the new
 `precommit` and `hook-test` recipes.
 ```
 
-- [ ] **Step 2: Update `README.md`**
+- [ ] **Step 5: Update `README.md`**
 
 Add a short user-facing paragraph to the section describing what handoff does at wrap-up:
 
@@ -494,7 +470,7 @@ you to approve (or edit) the summary, and commits via gitlore — so durable
 learnings land instead of waiting for your next commit.
 ```
 
-- [ ] **Step 3: Append a decision entry to `DESIGN.md`**
+- [ ] **Step 6: Append a decision entry to `DESIGN.md`**
 
 Add a dated entry capturing: the four-part split (detect/summarize/approve/commit); why detection is a PATH-shimmed script and not a hook (the agent must act on the result, and `CLAUDE_PLUGIN_ROOT` is unavailable in agent Bash while plugin `bin/` is on PATH — both verified by test); and why gitlore's `commit-memory.sh` stays in `scripts/` discovered via `gitlore.commitCommand` (self-healing, no layout coupling) rather than moving to `bin/`.
 
@@ -513,18 +489,18 @@ self-healing `commitCommand` key — moving it to `bin/` would reopen a
 shipped feature and break the no-layout-coupling abstraction. |
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add CLAUDE.md README.md DESIGN.md
-git commit -m "docs: document gitlore-aware handoff probe and flow"
+git add skills/handoff/SKILL.md CLAUDE.md README.md DESIGN.md
+git commit -m "feat: drive proactive gitlore memory commit from handoff skill + docs"
 ```
 
 ---
 
-## Task 7: Full verification
+## Final verification (inline — main session, not a dispatched task)
 
-**Files:** none (verification only)
+Run after Task 3 lands. This is an orchestrator gate, not subagent work.
 
 - [ ] **Step 1: Run the full precommit suite**
 
@@ -549,16 +525,18 @@ git status
 
 **Spec coverage:**
 - Probe (`scripts/memory-probe.sh`), all branches — Task 1.
-- `bin/handoff-memory-probe` PATH shim — Task 2.
-- Three-parallel batch + follow-the-probe in SKILL.md — Task 5.
-- Absolute `commit-memory.sh -F -` invocation (inlined by probe) — Task 1 (directive) + Task 5 (agent acts).
-- Prose, editable approval — Task 5 (skill instruction: "they may edit the summary").
-- Non-tmux rename `additionalContext` fix + drop dead lines — Task 4 + Task 5.
-- Tests (probe cases + rename additionalContext) — Task 1, 2, 4; wired in Task 3.
-- Docs/decision record — Task 6. Release (minor bump) — out of plan scope; run `just release` after merge.
+- `bin/handoff-memory-probe` PATH shim — Task 1.
+- Three-line batch + follow-the-probe in SKILL.md — Task 3.
+- Absolute `commit-memory.sh -F -` invocation (inlined by probe) — Task 1 (directive) + Task 3 (agent acts).
+- Prose, editable approval — Task 3 (skill instruction: "they may edit the summary").
+- Non-tmux rename `additionalContext` fix + drop dead lines — Task 2 + Task 3.
+- Tests (probe cases + rename additionalContext) — Task 1, 2; wired into recipes in Task 1.
+- Docs/decision record — Task 3. Release (minor bump) — out of plan scope; run `just release` after merge.
 
-**Non-goals honored:** no gitlore changes; no commit without approval; `handoff-task.md`/`autorename` staging untouched (Task 4 only adds a field to the non-tmux branch).
+**Non-goals honored:** no gitlore changes; no commit without approval; `handoff-task.md`/`autorename` staging untouched (Task 2 only adds a field to the non-tmux branch).
 
 **Type/name consistency:** `handoff-memory-probe` (bin), `scripts/memory-probe.sh`, `tests/memory-probe.bats`, `make_gitlore_repo`, `gitlore.commitCommand`, `submodule.gitlore-memory.path` — used identically across all tasks.
 
 **No placeholders:** every code and test block is concrete; every run step names the command and expected result.
+
+**Granularity:** 3 dispatched tasks (coupled probe unit / independent rename fix / prose) + an inline verification gate, down from an over-sharded 7. Task 1's sub-steps share `tests/memory-probe.bats` and run sequentially; Task 2 is file-disjoint from Task 1 and could run in parallel under dispatching-parallel-agents.
