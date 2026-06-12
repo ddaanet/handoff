@@ -457,7 +457,7 @@ WTTASK
     echo "$output" | jq -e '.systemMessage | test("the title")' >/dev/null
 }
 
-@test "write-rename (matching path, not in tmux): deletes file, systemMessage has /rename line" {
+@test "write-rename (not in tmux): systemMessage + agent-facing additionalContext carry /rename line" {
     echo "the title" > "$tmp/.claude/autorename"
     run bash -c '
         jq -nc --arg cwd "$1" --arg fp "$1/.claude/autorename" \
@@ -467,6 +467,8 @@ WTTASK
     [ "$status" -eq 0 ]
     [ ! -e "$tmp/.claude/autorename" ]
     echo "$output" | jq -e '.systemMessage | test("/rename the title")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/rename the title")' >/dev/null
 }
 
 @test "write-rename (unrelated path: no-op)" {

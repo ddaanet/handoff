@@ -30,8 +30,13 @@ if [[ -z "${title// /}" ]]; then
 fi
 
 if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
-    jq -nc --arg t "$title" \
-        '{systemMessage: ("handoff: not in tmux — paste to rename: /rename " + $t)}'
+    jq -nc --arg t "$title" '{
+        systemMessage: ("handoff: not in tmux — paste to rename: /rename " + $t),
+        hookSpecificOutput: {
+            hookEventName: "PostToolUse",
+            additionalContext: ("Session auto-rename is unavailable (not in tmux). Present this line to the user in a fenced code block so they can paste it:\n/rename " + $t)
+        }
+    }'
     exit 0
 fi
 
