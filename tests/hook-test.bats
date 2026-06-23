@@ -131,6 +131,8 @@ make_worktree() {
     ' _ "$transcript" "$git_tmp"
     [ "$status" -eq 0 ]
     echo "$output" | jq -e '.systemMessage == "handoff — staged for commit"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("version-tracked") and test("gitlore")' >/dev/null
     git -C "$git_tmp" status --porcelain | grep -q 'handoff-task.md'
     [ "$(cat "$git_tmp/.claude/handoff-session" 2>/dev/null)" = "$transcript" ]
     [ ! -f "$git_tmp/.claude/handoff.md" ]

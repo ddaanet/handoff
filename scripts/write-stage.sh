@@ -27,5 +27,8 @@ if [[ -n "$HOOK_TRANSCRIPT" ]]; then
 fi
 
 if git -C "$cwd" add -f "$cwd/$HANDOFF_REL_TASK" 2>/dev/null; then
-    jq -nc '{systemMessage: "handoff — staged for commit"}'
+    agent_ctx="handoff-task.md staged (git add -f) and version-tracked. The task frame enters git history paired with this handoff's gitlore memory commit, which supplies the durable context that makes the frame meaningful."
+    jq -nc \
+        --arg c "$agent_ctx" \
+        '{systemMessage: "handoff — staged for commit", hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $c}}'
 fi
