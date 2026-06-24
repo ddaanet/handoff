@@ -50,9 +50,10 @@ the decision — do not re-derive it or inspect the submodule yourself.
 ```markdown
 ## Current task
 
-<ONE SENTENCE describing what was in progress. Not a recap. What needs
-to resume when a fresh agent picks up. Overflow belongs in memory or
-git.>
+<ONE SENTENCE describing what was in progress — task state, what needs
+to resume when a fresh agent picks up. Not a recap. Not git bookkeeping:
+whether work is committed/pushed is reconstructable from `git status` at
+load time, so never write it here. Overflow belongs in memory or git.>
 
 ## Open decisions
 
@@ -77,6 +78,12 @@ Task file rules:
   memory or git.
 - Durable lessons in `## Open decisions`. Those go to feedback memory.
 - Extra sections in `handoff-task.md`. The template is fixed.
+- Commit/push status anywhere in the file ("work is uncommitted",
+  "ready to commit"). It's reconstructable from `git status`/`git log`
+  at load time and goes stale the moment the user commits after handoff;
+  the hook also injects files-touched. If uncommitted work matters, what
+  matters is *why* (tests red, decision pending) — write that as an open
+  decision, not a status line.
 
 ## Additional resources
 
