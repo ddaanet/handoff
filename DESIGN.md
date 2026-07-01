@@ -87,6 +87,17 @@ consumer's git log isn't polluted with the toolkit's history. The
 trade-off is harder push-upstream, but the toolkit-to-consumer flow is
 one-directional in practice.
 
+**Never hand-edit the vendored copy in a consumer.** The files under a
+consumer's `plugin-dev/` are subtree-managed content owned by this
+repo. To change what a consumer vendors, edit the source *here*, cut a
+tagged toolkit release, then propagate into each consumer with `just
+update-plugin-dev vX.Y.Z` (which runs `git subtree pull`). Editing
+`<consumer>/plugin-dev/*` directly reintroduces exactly the drift the
+subtree model exists to prevent: the consumer's copy silently diverges
+from every other consumer and from the tagged source, and the next
+`subtree pull` will conflict. The single source of truth is
+`ddaanet/claude-plugin-dev` at a tag — nowhere else.
+
 ### Versioning: tags only, never `HEAD`
 
 `install.sh` and `update-plugin-dev` both expect a ref like `v0.2.0`.
@@ -215,6 +226,65 @@ The release recipe, which bumps from current, would have produced the
 Caught at release time when the recipe's tag mismatch happened to
 trigger a check; would have shipped wrong otherwise.
 
+### Marketplace entry: bump if present, create on first publication
+
+The release recipe's marketplace step handles both a plugin that already
+has a `marketplace.json` entry and one being published for the first time:
+
+- **Entry present** → rewrite its `.version` to the new version (the
+  original behaviour).
+- **Entry absent** → append a new entry synthesised from `plugin.json`
+  (`name`, `description`, `author`, `repository`/`homepage`, `license`)
+  plus a `github` `source` whose `repo` is derived from the plugin's
+  `origin` remote (owner/repo, parsed from either the SSH or HTTPS URL).
+
+Originally the recipe treated a missing entry as a fatal pre-flight error
+(`no entry for '<name>'`). That made the *first* release of any plugin
+impossible through the recipe — the maintainer had to hand-edit
+`marketplace.json` first, then release. Since the recipe's whole premise
+is that "a tag without a marketplace bump is invisible to end users,"
+first publication is exactly when the marketplace touch matters most.
+Creating the entry from the manifest closes that gap: one `just release`
+publishes a brand-new plugin end to end.
+
+`source` is the one field not present in `plugin.json`, so it's derived
+from `origin` rather than the manifest. The recipe only targets
+single-plugin GitHub-hosted repos (the consumer-plugin model), so a
+`github` source with an owner/repo slug is always correct here; the
+monorepo `git-subdir` sources (e.g. the skills bundle) are out of scope
+and hand-maintained. The `origin`-remote requirement for new plugins is
+validated in the pre-flight block, before any destructive op.
+
+The commit is idempotent. When the rewrite produces no change — the entry
+was pre-added at exactly the version being released — `git commit` would
+exit non-zero under `set -e` and abort the recipe *after* the
+irreversible commit/tag/push/`gh release create` had already run, leaving
+the maintainer staring at `exit code 1` on a release that actually
+succeeded. The step now checks `git diff --cached --quiet` and skips the
+commit/push (reporting "marketplace already at X") when nothing changed.
+
+### No interactive confirmation in `release`
+
+The `release` recipe runs non-interactively. It does not prompt
+`Release X? [y/N]` before committing/tagging/pushing, and there is no
+`--yes` argument.
+
+An earlier version prompted with `read -rp` and offered `--yes` as a
+skip. Both were removed: `release` always executes behind Claude Code's
+permission layer (or a human's own `just` invocation), which already
+gates the command. The inner prompt re-asked the same question, and
+`--yes` existed only to silence it in the common case where an outer
+gate was present — i.e. almost always. Dropping both collapses a
+double-confirmation into the single gate that matters.
+
+Safety is unchanged: the pre-flight guards (dirty tree, wrong branch,
+manifest/tag desync, marketplace pre-flight) still abort before any
+destructive op. Only the interactive keystroke was removed.
+
+The same applies to this repo's own self-release recipe (the `release`
+in the local `justfile`): it too dropped its `read -rp` prompt and
+`--yes` for the identical reason.
+
 ### Recipe naming: `precommit`, not `validate`
 
 The consumer-defined gate the `release` recipe depends on is called
@@ -232,10 +302,18 @@ The consumer-defined gate the `release` recipe depends on is called
 ### Default branch detection via `origin/HEAD`
 
 The release recipe doesn't hardcode `main` — it reads the default
-branch from `git rev-parse --abbrev-ref origin/HEAD` and falls back
-to `"main"` if unset. Lets the recipe work on `master`, `trunk`,
-fork-default branches, etc., with no behaviour change in the common
-case.
+branch from `git symbolic-ref --short refs/remotes/origin/HEAD` and
+falls back to `"main"` if unset. Lets the recipe work on `master`,
+`trunk`, fork-default branches, etc., with no behaviour change in the
+common case.
+
+`symbolic-ref` rather than `rev-parse --abbrev-ref` because the latter
+exits non-zero *and* prints `"origin/HEAD"` to stdout when the ref is
+unset. Combined with `pipefail` and a `|| echo "main"` fallback, the
+substitution captured both, producing a two-line `main_branch` and the
+nonsensical error "must be on HEAD (currently main)".
+`symbolic-ref` is silent on stdout when the ref is unset, so the
+fallback fires cleanly.
 
 ## Limitations
 
@@ -266,6 +344,23 @@ case.
 
 ## History
 
+- **Unreleased.** Removed the interactive confirmation prompt and the
+  `--yes` argument from the `release` recipe. `just release [bump]` is
+  now non-interactive — the recipe runs behind Claude Code's permission
+  layer (or a human's own invocation), so the inner `read -rp` prompt
+  and its `--yes` skip were redundant. Pre-flight guards unchanged. See
+  "No interactive confirmation in `release`".
+
+- **v0.2.1.** Marketplace step in `release.just` made robust to the
+  entry's pre-state. First publication now creates the `marketplace.json`
+  entry from `plugin.json` (deriving the `github` source from `origin`)
+  instead of aborting with "no entry for '<name>'". The marketplace
+  commit is now idempotent — a no-op rewrite (entry already at the target
+  version) is reported and skipped rather than failing the recipe after
+  the release already landed. See "Marketplace entry: bump if present,
+  create on first publication". Closes
+  `BUG-release-marketplace-noop-commit.md`.
+
 - **2026-04-27 — Initial extraction (`v0.1.0`).** Toolkit broken out
   of `handoff/scripts/version-guard.sh` and the inline release recipes
   in `handoff/justfile` and `gitmoji/justfile`. Unified the two
@@ -280,3 +375,32 @@ case.
   whether to absorb a small standard-hooks set (shellcheck,
   trailing-whitespace) for consumer plugins, or leave each consumer
   to define its own `precommit` shape.
+
+- **2026-04-29 — `v0.2.0`.** Three changes shipped together:
+  - **`VERSION` file + self-release recipe.** The toolkit had no way
+    to self-identify from inside a consumer's subtree (tags don't
+    propagate). Added a plain-text `VERSION` at the repo root and a
+    local `release` recipe in this repo's `justfile` that bumps
+    `VERSION`, tags, and pushes. Same manifest-vs-tag mismatch guard
+    as the consumer recipe, applied to `VERSION`. See "Toolkit
+    version source of truth" above.
+  - **Marketplace bump in `release.just`.** The consumer release
+    recipe now also bumps the corresponding entry in
+    `$MARKETPLACE_DIR/.claude-plugin/marketplace.json` and pushes
+    that repo. Pre-flight checks (env var set, file exists, entry
+    exists, repo clean) run before any destructive op. Rationale: a
+    tag without a marketplace bump is invisible to end users, so
+    treating them as one atomic release matches reality.
+  - **`symbolic-ref` fix for default-branch detection.** See
+    "Default branch detection" above.
+
+  Also added a hook-test for `version-guard.sh` under `tests/`.
+
+  Adoption: `handoff` migrated to the toolkit during this cycle
+  (subtree-add v0.2.0, ran `install.sh`, deleted its local
+  `scripts/version-guard.sh` and inline release recipe). `gitmoji`
+  migration in progress.
+
+  Next: finish `gitmoji` migration. Then revisit the
+  standard-hooks-set question with two real consumers' `precommit`
+  recipes side-by-side.
