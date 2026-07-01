@@ -12,8 +12,8 @@ precommit: whitespace
     @echo ok
 
 # Cut a new toolkit release: bump VERSION, commit, tag, push main + tag,
-# create GitHub release. Pass `--yes` to skip the interactive confirmation.
-release bump='patch' yes='': precommit
+# create GitHub release.
+release bump='patch': precommit
     #!/usr/bin/env bash
     set -euo pipefail
     git diff --quiet HEAD || { echo "error: uncommitted changes" >&2; exit 1; }
@@ -38,10 +38,6 @@ release bump='patch' yes='': precommit
     esac
     tag="v$new_version"
     git rev-parse "$tag" >/dev/null 2>&1 && { echo "error: tag $tag already exists" >&2; exit 1; }
-    if [ "{{yes}}" != "--yes" ]; then
-        read -rp "Release $new_version? [y/N] " answer
-        case "$answer" in y|Y) ;; *) exit 1 ;; esac
-    fi
     printf '%s\n' "$new_version" > VERSION
     git add VERSION
     git commit -m "release: $new_version"

@@ -22,9 +22,7 @@ toolkit_prefix := "plugin-dev"
 
 # Create release: bump plugin.json version, commit, tag, push main + tag,
 # create GitHub release, then bump the marketplace entry and push.
-# Pass `--yes` as the second arg to skip the interactive confirmation
-# (useful when an outer permission layer already gates the command).
-release bump='patch' yes='': precommit
+release bump='patch': precommit
     #!/usr/bin/env bash
     set -euo pipefail
     manifest=".claude-plugin/plugin.json"
@@ -49,8 +47,17 @@ release bump='patch' yes='': precommit
     marketplace_json="$MARKETPLACE_DIR/.claude-plugin/marketplace.json"
     [ -f "$marketplace_json" ] || { echo "error: $marketplace_json not found" >&2; exit 1; }
     plugin_name=$(jq -r .name "$manifest")
-    jq -e --arg n "$plugin_name" '.plugins[] | select(.name == $n)' "$marketplace_json" >/dev/null \
-      || { echo "error: no entry for '$plugin_name' in $marketplace_json" >&2; exit 1; }
+    # A missing entry is not an error: on first publication we create one
+    # from plugin.json (see marketplace step below). But to synthesise the
+    # entry's `source` we need an `origin` remote to derive owner/repo from,
+    # so validate that here, before any destructive op.
+    if jq -e --arg n "$plugin_name" 'any(.plugins[]; .name == $n)' "$marketplace_json" >/dev/null; then
+      marketplace_entry_exists=1
+    else
+      marketplace_entry_exists=0
+      git remote get-url origin >/dev/null 2>&1 \
+        || { echo "error: '$plugin_name' has no entry in $marketplace_json and no 'origin' remote to derive one from" >&2; exit 1; }
+    fi
     git -C "$MARKETPLACE_DIR" diff --quiet HEAD \
       || { echo "error: $MARKETPLACE_DIR has uncommitted changes" >&2; exit 1; }
     new_version=$(jq -r --arg bump "{{bump}}" '
@@ -63,10 +70,6 @@ release bump='patch' yes='': precommit
     ' "$manifest")
     tag="v$new_version"
     git rev-parse "$tag" >/dev/null 2>&1 && { echo "error: tag $tag already exists" >&2; exit 1; }
-    if [ "{{yes}}" != "--yes" ]; then
-        read -rp "Release $new_version? [y/N] " answer
-        case "$answer" in y|Y) ;; *) exit 1 ;; esac
-    fi
     tmp=$(mktemp)
     jq --arg v "$new_version" '.version = $v' "$manifest" > "$tmp"
     mv "$tmp" "$manifest"
@@ -76,16 +79,46 @@ release bump='patch' yes='': precommit
     git push
     git push origin "$tag"
     gh release create "$tag" --title "Release $new_version" --generate-notes
-    # Marketplace bump.
+    # Marketplace bump, or create the entry on first publication.
     mp_tmp=$(mktemp)
-    jq --arg n "$plugin_name" --arg v "$new_version" \
-      '(.plugins[] | select(.name == $n) | .version) = $v' \
-      "$marketplace_json" > "$mp_tmp"
+    if [ "$marketplace_entry_exists" = 1 ]; then
+      jq --arg n "$plugin_name" --arg v "$new_version" \
+        '(.plugins[] | select(.name == $n) | .version) = $v' \
+        "$marketplace_json" > "$mp_tmp"
+    else
+      # Derive owner/repo from origin for the `github` source. Strip a
+      # trailing .git, then everything up to the host separator, leaving
+      # `owner/repo` for both git@host:owner/repo and https://host/owner/repo.
+      repo_slug=$(git remote get-url origin | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')
+      jq --arg v "$new_version" --arg repo "$repo_slug" --slurpfile m "$manifest" '
+        .plugins += [{
+          name: $m[0].name,
+          source: { source: "github", repo: $repo },
+          description: ($m[0].description // ""),
+          version: $v,
+          author: ($m[0].author // { name: "" }),
+          repository: ($m[0].repository // $m[0].homepage // ("https://github.com/" + $repo)),
+          license: ($m[0].license // "MIT")
+        }]
+      ' "$marketplace_json" > "$mp_tmp"
+    fi
     mv "$mp_tmp" "$marketplace_json"
     git -C "$MARKETPLACE_DIR" add .claude-plugin/marketplace.json
-    git -C "$MARKETPLACE_DIR" commit -m "release: $plugin_name $new_version"
-    git -C "$MARKETPLACE_DIR" push
-    echo "Release $tag complete (marketplace bumped to $new_version)"
+    # Idempotent commit: when the entry was already at $new_version (e.g. the
+    # plugin was pre-added to the marketplace at this version), the rewrite is
+    # a no-op and `git commit` would exit 1 under `set -e`, aborting *after*
+    # the irreversible release steps. Only commit/push when something changed.
+    if git -C "$MARKETPLACE_DIR" diff --cached --quiet; then
+      echo "Release $tag complete (marketplace already at $new_version)"
+    else
+      git -C "$MARKETPLACE_DIR" commit -m "release: $plugin_name $new_version"
+      git -C "$MARKETPLACE_DIR" push
+      if [ "$marketplace_entry_exists" = 1 ]; then
+        echo "Release $tag complete (marketplace bumped to $new_version)"
+      else
+        echo "Release $tag complete (marketplace entry created at $new_version)"
+      fi
+    fi
 
 # Update the vendored plugin-dev toolkit to a specific tag (recommended)
 # or branch. Run from the consumer plugin root, on a clean tree.

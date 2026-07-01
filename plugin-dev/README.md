@@ -9,8 +9,9 @@ on contributor-side dotfiles).
 
 - **`release.just`** — release recipe + toolkit-update recipe. Imported
   into the consumer's `justfile`. The `release` recipe validates state,
-  bumps `.claude-plugin/plugin.json`, commits, tags, pushes, and creates
-  a GitHub release. The `update-plugin-dev` recipe pulls a newer
+  bumps `.claude-plugin/plugin.json`, commits, tags, pushes, creates a
+  GitHub release, and bumps (or creates) the plugin's entry in
+  `marketplace.json`. The `update-plugin-dev` recipe pulls a newer
   toolkit version into the consumer.
 - **`version-guard.sh`** — `PreToolUse(Write|Edit)` hook. Refuses agent
   edits that change `.claude-plugin/plugin.json`'s `.version`. The
@@ -33,15 +34,15 @@ Clone the toolkit at a tag, then run its `install.sh` from the plugin's
 root directory:
 
 ```sh
-git clone --depth 1 -b v0.1.0 \
+git clone --depth 1 -b v0.2.0 \
     git@github.com:ddaanet/claude-plugin-dev.git /tmp/cpd
 cd /path/to/your/plugin
-bash /tmp/cpd/install.sh v0.1.0
+bash /tmp/cpd/install.sh v0.2.0
 ```
 
 `install.sh` does three things:
 
-1. `git subtree add --prefix=plugin-dev … v0.1.0 --squash` (vendors the toolkit).
+1. `git subtree add --prefix=plugin-dev … v0.2.0 --squash` (vendors the toolkit).
 2. Adds `import 'plugin-dev/release.just'` to the plugin's `justfile`
    (creating one if absent).
 3. Wires the version-guard hook into `.claude/settings.json`.
