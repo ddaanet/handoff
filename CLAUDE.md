@@ -23,6 +23,10 @@ via gitlore's `commit-memory.sh`.
   handoff relies on does the rename. Rename-only — no task file, no
   memory. For `/btw` side conversations and any session worth a name
   while the main thread stays live.
+- `skills/precompact/SKILL.md` — the `/handoff:precompact` skill.
+  Memory-flush paragraph before a manual `/compact`: capture durable
+  learnings in auto-memory, then tell the user to compact. No task
+  file, no rename, no probe/commit (disk survives compaction).
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
 - `hooks/hooks.json` — declares six hooks.
@@ -251,6 +255,9 @@ to use synthetic JSONL, but the fixtures must mirror the real format
   and the `/slash-command`), and a native skill body can be 100+ KB and
   starts with its own heading, not a known wrapper prefix — so
   `WRAPPER_PREFIXES` alone misses it. Drop on the structural flag.
+  `/compact` summaries are dropped the same way: the injected summary is a
+  `type:"user"` entry carrying `isCompactSummary == true` (no `isMeta`), so
+  `load_entries` checks that flag too.
 - **Anchor**: walk backwards from each kept user prompt to the nearest
   assistant turn. Prefer `tool_use` name + target; fall back to first
   line of assistant text.

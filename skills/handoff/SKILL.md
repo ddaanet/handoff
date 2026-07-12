@@ -30,20 +30,17 @@ First, decide both of the following without making any tool calls:
 Then, in the **same turn**, issue the writes and run the memory probe:
 - Write `./.claude/autorename` — sole line is the session title (always)
 - Write `./.claude/handoff-task.md` — only if there's an active task
-- Run `handoff-memory-probe` (Bash) — deterministic gitlore-memory check
+- Run `handoff-memory-probe` (Bash) — deterministic memory check
 
 If there's no active task, omit `handoff-task.md` — the activation hook
 already finalized the session.
 
 ### Step 3: Follow the probe
 
-`handoff-memory-probe` prints nothing when there is no gitlore-managed
-memory to commit — finish normally. If it prints a directive, the
-directive itself states what to do; follow it exactly. The usual case
-asks you to summarize the pending memory changes in 1-3 sentences, get
-the user's approval (they may edit the summary), then run the commit
-command it names — never commit without that approval. The probe owns
-the decision — do not re-derive it or inspect the submodule yourself.
+`handoff-memory-probe` prints nothing when there is nothing to do —
+finish normally. If it prints a directive, follow it exactly; the
+directive carries its own instructions. The probe owns the decision —
+do not re-derive or verify it yourself.
 
 **Task file template:**
 

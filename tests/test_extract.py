@@ -483,6 +483,32 @@ class TestSkillMeta:
         assert dropped not in out
 
 
+class TestCompactSummary:
+    """extract-compact-summary.jsonl — /compact injects its summary as a
+    type:user entry carrying isCompactSummary (not isMeta); dropped structurally
+    alongside isMeta/isSidechain, real prompts around it kept."""
+
+    @pytest.fixture(scope="class")
+    def out(self) -> str:
+        return render_frame(
+            FIXTURES / "extract-compact-summary.jsonl",
+            FIXTURES / "does-not-exist-task.md",
+        )
+
+    @pytest.mark.parametrize(
+        "kept",
+        [
+            "real prompt KEEPME_BEFORE",
+            "real prompt KEEPME_AFTER",
+        ],
+    )
+    def test_real_prompts_kept(self, out: str, kept: str) -> None:
+        assert kept in out
+
+    def test_compact_summary_dropped(self, out: str) -> None:
+        assert "DROPME_COMPACT_SUMMARY" not in out
+
+
 class TestAnchorMultiline:
     """anchor-multiline.jsonl — 3/7-line anchors shown in full; 8-line anchor
     truncated to head 3 + marker + tail 3."""

@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+# Dev launcher shim: prepend `--plugin-dir <repo root>` so the in-tree
+# plugin is active without remembering the flag. On PATH via `.envrc`
+# (`PATH_add .bin`). Chains to the next `claude` on PATH (e.g. gitlore's
+# launcher shim) with our own dir stripped from PATH — the gitlore shim
+# resolves *its* next claude against the inherited PATH, so leaving
+# ourselves on it would make the two shims exec each other forever.
+
+self=$(cd "$(dirname "$0")" && pwd)
+root=$(dirname "$self")
+newpath=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$self" | paste -sd: -)
+real=$(PATH="$newpath" command -v claude) \
+  || { echo "claude shim: no real claude on PATH" >&2; exit 127; }
+PATH="$newpath" exec "$real" --plugin-dir "$root" "$@"

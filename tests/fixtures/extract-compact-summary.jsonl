@@ -1,0 +1,4 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "real prompt KEEPME_BEFORE"}}
+{"type": "system", "isSidechain": false, "subtype": "compact_boundary", "content": "Conversation compacted", "isMeta": false, "compactMetadata": {"trigger": "manual", "preTokens": 46159}}
+{"type": "user", "isSidechain": false, "isVisibleInTranscriptOnly": true, "isCompactSummary": true, "message": {"role": "user", "content": "This session is being continued from a previous conversation that ran out of context. The conversation is summarized below:\nDROPME_COMPACT_SUMMARY analysis of prior session, can run to multiple KB in real transcripts."}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "real prompt KEEPME_AFTER"}}

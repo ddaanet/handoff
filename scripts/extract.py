@@ -141,7 +141,11 @@ def load_entries(transcript: pathlib.Path) -> list[Entry]:
             break
     entries: list[Entry] = []
     for entry in raw[:cut]:
-        if entry.get("isSidechain") or entry.get("isMeta"):
+        if (
+            entry.get("isSidechain")
+            or entry.get("isMeta")
+            or entry.get("isCompactSummary")
+        ):
             continue
         entries.append(entry)
     return entries
