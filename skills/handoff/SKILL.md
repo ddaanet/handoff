@@ -7,7 +7,7 @@ description: Snapshot the in-progress task and still-open decisions before a `/c
 
 Preserve the irreducible residual across `/clear`: what was in
 progress and what's still undecided. Hooks handle wipe-before-write
-and extract-after-write — your job is the task file.
+and stage-after-write — your job is the task file.
 
 ## Protocol
 
@@ -64,8 +64,8 @@ Task file rules:
 
 - No `#` heading — the read-time hook prepends one when it assembles
   the frame next session.
-- No file paths or code unless a decision hinges on them. The
-  read-time hook adds files-touched.
+- No file paths or code unless a decision hinges on them. The working
+  set is reconstructable from `git status` at load time.
 - No location other than `./.claude/handoff-task.md` — the hook reads
   this exact path.
 
@@ -77,12 +77,11 @@ Task file rules:
 - Extra sections in `handoff-task.md`. The template is fixed.
 - Commit/push status anywhere in the file ("work is uncommitted",
   "ready to commit"). It's reconstructable from `git status`/`git log`
-  at load time and goes stale the moment the user commits after handoff;
-  the hook also injects files-touched. If uncommitted work matters, what
-  matters is *why* (tests red, decision pending) — write that as an open
-  decision, not a status line.
+  at load time and goes stale the moment the user commits after handoff.
+  If uncommitted work matters, what matters is *why* (tests red, decision
+  pending) — write that as an open decision, not a status line.
 
 ## Additional resources
 
 - **`references/design.md`** — design rationale: what the residual is
-  and why the agent-authored task file plus mechanical extract split.
+  and why the agent-authored task file plus read-time assembly split.

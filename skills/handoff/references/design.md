@@ -32,28 +32,25 @@ That leaves two fields only the agent can fill:
 
 These are the irreducible residual. They live in `handoff-task.md`
 (agent-authored from the template in `SKILL.md`). A
-`PostToolUse(Write|Edit)` hook stages the file and records a pointer
-to the current session's transcript. Next session, a
-`SessionStart(startup|clear)` hook assembles the frame in memory —
-inlining the task content and adding the mechanical extras (files
-touched, last user prompts scraped from the pointed transcript) — and
-injects it into context. No generated file, no `@`-ref or
-project-CLAUDE.md setup required.
+`PostToolUse(Write|Edit)` hook stages the file. Next session, a
+`SessionStart(startup|clear)` hook assembles the frame in memory — a
+timestamp header plus the inlined task content — and injects it into
+context. No generated file, no `@`-ref or project-CLAUDE.md setup
+required.
 
-## Why user prompts verbatim instead of summarised
+## Why no verbatim transcript or file list
 
-Last user prompts are the only unreconstructable conversational
-signal:
-
-- Agent responses re-derive from intent + code state
-- Tool results re-run
-- User intent leaves no trace elsewhere
-
-Summaries lose the verbatim phrasing that often cues better
-continuation than paraphrase. So the hook quotes the last N user
-prompts directly, with only a thin anchor from the preceding agent
-turn to resolve anaphora ("do it that way", "refactor that
-function").
+The frame is the task file alone; the transcript is never read.
+Reproducing prior exchanges verbatim
+read as *memory* rather than as a report about a past session, and
+manufactured false continuity — a fresh session narrating a prior
+session's work as its own. The two irreducible fields already carry the
+"where we left off" seam in report register, so the transcript was a
+redundant second capture in the one register that does the harm. The
+per-session file list is likewise dropped: the honest working set is
+the harness's own `gitStatus` block at load time, current after the
+prior session's commits landed. See the plugin-root DESIGN.md, "Task
+frame drops the transcript and file list".
 
 ## Why markdown template, not JSON schema
 
@@ -77,7 +74,7 @@ JSON fields.
 
 ## Why read-time assembly rather than a generated file
 
-Inline extraction (skill body has the agent run extract.py after
+Inline extraction (skill body has the agent assemble the frame after
 writing) puts mechanical work back on the agent. Skipping that.
 
 An earlier iteration generated a `handoff.md` at write time and
@@ -86,11 +83,9 @@ baked the verbatim last-N prompts into git history, and froze the
 scrape at handoff time (when the tail of the transcript is just the
 "save handoff" request itself).
 
-Instead the frame is assembled at *read* time. `PostToolUse(Write|Edit)`
-records a pointer to the session transcript; `SessionStart` scrapes
-that transcript and builds the frame in memory, bounded at the last
-handoff activation so post-handoff digressions don't leak in. Nothing
-generated, nothing committed but the agent-authored task file.
+Instead the frame is assembled at *read* time. `SessionStart` reads the
+task file and prepends a timestamp header. Nothing generated, nothing
+committed but the agent-authored task file.
 
 ## File guards
 

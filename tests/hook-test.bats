@@ -25,12 +25,6 @@ hook smoke test
 - none
 TASK
 
-    # Shared synthetic fixture: hermetic across machines and forks, and lets
-    # the test assert that the transcript path is actually exercised (not just
-    # that the inlined task content survives).
-    transcript="$repo_root/tests/fixtures/extract-basic.jsonl"
-    [ -f "$transcript" ] || return 1
-
     # shellcheck source-path=SCRIPTDIR source=../scripts/_lib.sh disable=SC1091
     source "$repo_root/scripts/_lib.sh"
 }
@@ -114,50 +108,34 @@ make_worktree() {
 }
 
 # --- write-stage ---
-# Stages handoff-task.md, saves the session pointer, and does NOT create
-# handoff.md. The pointer is saved at write time (not activation time) so
-# agents that update the task after later user input point to the right JSONL.
+# Stages handoff-task.md with `git add -f` and does NOT create handoff.md.
 
-@test "write-stage (git staging): stages task, saves pointer, no handoff.md" {
+@test "write-stage (git staging): stages task, no handoff.md" {
     git_tmp="$BATS_TEST_TMPDIR/git"
     mkdir -p "$git_tmp"
     git -C "$git_tmp" init -q
     mkdir -p "$git_tmp/.claude"
     cp "$tmp/.claude/handoff-task.md" "$git_tmp/.claude/handoff-task.md"
     run bash -c '
-        jq -nc --arg t "$1" --arg fp "$2/.claude/handoff-task.md" \
-            "{transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | CLAUDE_PROJECT_DIR="$2" bash scripts/write-stage.sh
-    ' _ "$transcript" "$git_tmp"
+        jq -nc --arg fp "$1/.claude/handoff-task.md" \
+            "{tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/write-stage.sh
+    ' _ "$git_tmp"
     [ "$status" -eq 0 ]
     echo "$output" | jq -e '.systemMessage == "handoff — staged for commit"' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("version-tracked") and test("gitlore")' >/dev/null
     git -C "$git_tmp" status --porcelain | grep -q 'handoff-task.md'
-    [ "$(cat "$git_tmp/.claude/handoff-session" 2>/dev/null)" = "$transcript" ]
     [ ! -f "$git_tmp/.claude/handoff.md" ]
 }
 
 @test "write-stage (unrelated path: no-op)" {
     run bash -c '
-        jq -nc --arg t "$1" --arg fp "$2/README.md" \
-            "{transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        jq -nc --arg fp "$1/README.md" \
+            "{tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
         | bash scripts/write-stage.sh
-    ' _ "$transcript" "$tmp"
+    ' _ "$tmp"
     [ "$status" -eq 0 ]
-}
-
-@test "write-stage (worktree cwd: pointer saved in worktree .claude, not main)" {
-    wt="$(make_worktree wtS)"
-    cp "$tmp/.claude/handoff-task.md" "$wt/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-stage.sh
-    ' _ "$wt" "$transcript"
-    [ "$status" -eq 0 ]
-    [ "$(cat "$wt/.claude/handoff-session")" = "$transcript" ]
-    [ ! -e "$tmp/.claude/handoff-session" ]
 }
 
 # --- write-guard ---
@@ -433,7 +411,7 @@ seed_tracked_task() {
 
 # --- load-handoff ---
 
-@test "load-handoff (read-time assembly): injects task + scraped prompt, echoes event" {
+@test "load-handoff (read-time assembly): injects header + task, echoes event" {
     asm_tmp="$BATS_TEST_TMPDIR/asm"; mkdir -p "$asm_tmp/.claude"
     cat > "$asm_tmp/.claude/handoff-task.md" <<'ASMTASK'
 ## Current task
@@ -444,21 +422,19 @@ hook smoke test
 
 - none
 ASMTASK
-    printf '%s\n' "$transcript" > "$asm_tmp/.claude/handoff-session"
     run bash -c '
         jq -nc --arg e "clear" "{hook_event_name:\$e}" \
         | CLAUDE_PROJECT_DIR="$1" bash scripts/load-handoff.sh
     ' _ "$asm_tmp"
     [ "$status" -eq 0 ]
     ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    echo "$ctx" | grep -q '^# Handoff — '
     echo "$ctx" | grep -q 'hook smoke test'
-    echo "$ctx" | grep -q 'fifth prompt'
     echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "clear"' >/dev/null
 }
 
 @test "load-handoff (read-time assembly): silent no-op without task file" {
     asm_tmp="$BATS_TEST_TMPDIR/asm"; mkdir -p "$asm_tmp/.claude"
-    printf '%s\n' "$transcript" > "$asm_tmp/.claude/handoff-session"
     run bash -c '
         jq -nc --arg e "clear" "{hook_event_name:\$e}" \
         | CLAUDE_PROJECT_DIR="$1" bash scripts/load-handoff.sh
@@ -491,7 +467,6 @@ worktree handoff body
 
 - none
 WTTASK
-    printf '%s\n' "$transcript" > "$wt/.claude/handoff-session"
     run bash -c '
         jq -nc --arg cwd "$1" --arg e "clear" "{cwd:\$cwd, hook_event_name:\$e}" \
         | bash scripts/load-handoff.sh

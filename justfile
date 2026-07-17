@@ -9,13 +9,12 @@ _default:
 # Lint manifests + settings, syntax-check + lint/type-check the Python
 # (mypy AND ty — ty catches Any-narrowing holes mypy launders through;
 # its version is locked, so gating it can't break the build spontaneously),
-# run hook + extract tests. Imported `release` recipe depends on this name.
+# run hook + pytest suites. Imported `release` recipe depends on this name.
 precommit:
     jq . .claude-plugin/plugin.json > /dev/null
     jq . hooks/hooks.json > /dev/null
     jq . .claude/settings.json > /dev/null
-    python3 -c "import ast; ast.parse(open('scripts/extract.py').read())"
-    shellcheck -x .bin/* bin/* scripts/*.sh tests/*.sh tests/*.bats
+    shellcheck -x .bin/* bin/* scripts/*.sh tests/*.bats
     ruff check scripts tests
     ruff format --check scripts tests
     docformatter --check scripts/*.py tests/*.py
@@ -40,18 +39,10 @@ typecheck:
 ty:
     ty check
 
-# Assemble the handoff frame from an explicit transcript (testing)
-extract transcript output:
-    python3 scripts/extract.py {{transcript}} {{output}}
-
-# Smoke test: extract against the most recent session JSONL
-smoke:
-    bash tests/smoke.sh
-
 # Run the hook + rename test suites (bats) against synthetic tool-event input
 hook-test:
     bats tests/hook-test.bats tests/rename-test.bats tests/memory-probe.bats tests/precompact-probe.bats
 
-# Run the extract.py tests (pytest) against the synthetic JSONL fixtures
-extract-test:
+# Run the Python unit tests (pytest) — worktree_root.py resolver
+py-test:
     pytest

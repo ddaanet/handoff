@@ -5,10 +5,10 @@ to edit the plugin's skill, hook, or script.
 
 ## Layout
 
-High-level flow: skill writes `.claude/handoff-task.md` and stores
-the session pointer → `PostToolUse(Write|Edit)` stages
-`handoff-task.md` for commit → next session's `SessionStart(startup|clear)`
-calls `extract.py` in memory and injects the assembled frame. `README.md`
+High-level flow: skill writes `.claude/handoff-task.md` →
+`PostToolUse(Write|Edit)` stages `handoff-task.md` for commit → next
+session's `SessionStart(startup|clear)` assembles the frame in memory
+(header + inlined task file) and injects it. `README.md`
 has the user-facing version of this. At wrap-up the skill also runs
 `handoff-memory-probe`; when a gitlore-memory submodule is dirty, the probe
 emits a directive and the agent summarizes → gets approval → commits memory
@@ -33,8 +33,8 @@ via gitlore's `commit-memory.sh`.
   full rationale is in the plugin-root `DESIGN.md`
 - `hooks/hooks.json` — declares six hooks.
   `SessionStart(startup|clear)`: assemble the frame in memory via
-  `load-handoff.sh` (reads pointer, calls `extract.py`) and inject
-  it via `additionalContext`.
+  `load-handoff.sh` (header + inlined task file) and inject it via
+  `additionalContext`.
   `PreToolUse(Skill)` and `UserPromptSubmit`: wipe prior handoff files
   when `handoff:handoff` activates. The two together cover both
   invocation paths — the `Skill` tool (agent-driven) and the slash
@@ -54,10 +54,9 @@ via gitlore's `commit-memory.sh`.
   before the skill body is loaded — keeps the agent out of the
   cleanup path.
 - `scripts/load-handoff.sh` — SessionStart(startup|clear) entry
-  point. Gates on `.claude/handoff-task.md`. Reads the session pointer
-  from `.claude/handoff-session`, calls `extract.py` (stdout) to
-  assemble the frame in memory, and emits it via
-  `hookSpecificOutput.additionalContext` (agent-facing) plus a curt
+  point. Gates on `.claude/handoff-task.md`, assembles the frame in
+  memory (a timestamp header plus the inlined task file), and emits it
+  via `hookSpecificOutput.additionalContext` (agent-facing) plus a curt
   `systemMessage` with bytes + age (user-facing). Silent no-op when
   the task file is missing or empty.
 - `scripts/prompt-pre-hook.sh` — UserPromptSubmit entry point:
@@ -116,15 +115,7 @@ via gitlore's `commit-memory.sh`.
   Bash tool means the tmux socket is accessible with no sandbox bypass.
 - `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point:
   matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`,
-  saves the session pointer to `.claude/handoff-session` (at write time,
-  not activation time — agents update the task after later user input, so
-  the pointer must reference the session of the last write), then stages
-  the file with `git add -f`.
-- `scripts/extract.py` — parses the session JSONL (bounded at the
-  last handoff activation), inlines `.claude/handoff-task.md` (if it
-  exists), and emits the assembled frame to stdout. Called at
-  SessionStart by `load-handoff.sh`; contract: `extract.py
-  <transcript.jsonl> <handoff-task.md>`.
+  then stages the file with `git add -f`.
 - `scripts/worktree_root.py` — pure resolver `worktree_root(cwd, project)`:
   walks up from the session cwd via on-disk `.git` linkage to the enclosing
   linked-worktree root, else returns `project`. Backs `_lib.sh`'s
@@ -182,19 +173,10 @@ via gitlore's `commit-memory.sh`.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
 - Output path: `.claude/handoff-task.md` (agent-written, git-tracked).
-  The session pointer is `.claude/handoff-session` (machine-local).
-  Changing these is a breaking change and requires a version bump.
-- `extract.py` must succeed even when the transcript path is empty or
-  missing — a handoff with just the inlined task content (if any) and
-  empty extracted sections is still valid.
-- Extraction constants (`LAST_N_PROMPTS`, `MAX_FILES`,
-  `ANCHOR_TEXT_LIMIT`, `ANCHOR_LINE_LIMIT`, `ANCHOR_HEAD_LINES`,
-  `ANCHOR_TAIL_LINES`, `WRAPPER_PREFIXES`, `WRAPPER_EXACT`,
-  `SKILL_ARTIFACT_SUFFIXES`) live at the top of `extract.py`; do not
-  inline them.
+  Changing it is a breaking change and requires a version bump.
 - The markdown template lives in `SKILL.md` (single source of truth).
-  The script does not re-state the template — it just inlines whatever
-  the agent wrote.
+  `load-handoff.sh` does not re-state the template — it just inlines
+  whatever the agent wrote.
 - Sourced helpers (`_lib.sh`, `_wipe-emit.sh`) need
   `# shellcheck source-path=SCRIPTDIR source=<file>.sh` above the
   `source` line so `shellcheck -x` follows them. Add
@@ -203,20 +185,20 @@ via gitlore's `commit-memory.sh`.
 
 ## Testing
 
-The shell hooks are tested with **bats**; `extract.py` with **pytest**.
-pytest runs off a uv-managed venv that **direnv** activates (`.envrc`
-exports `VIRTUAL_ENV` + prepends `$VIRTUAL_ENV/bin` to `PATH`), so the
-recipes call bare `pytest` — no `uv run`. Materialize/refresh the venv
-with `uv sync` (the only `uv` invocation; `uv.lock` is committed,
-`.venv/` is gitignored). See [[feedback-uv-direnv-venv]].
+The shell hooks are tested with **bats**; the `worktree_root.py`
+resolver with **pytest**. pytest runs off a uv-managed venv that
+**direnv** activates (`.envrc` exports `VIRTUAL_ENV` + prepends
+`$VIRTUAL_ENV/bin` to `PATH`), so the recipes call bare `pytest` — no
+`uv run`. Materialize/refresh the venv with `uv sync` (the only `uv`
+invocation; `uv.lock` is committed, `.venv/` is gitignored). See
+[[feedback-uv-direnv-venv]].
 
-- `just precommit` — lint manifest + settings, syntax-check scripts,
-  `shellcheck -x` the scripts + `.bats` files, then run both test
-  suites (`bats tests/*.bats` + `pytest`). The toolkit's `release`
-  recipe depends on this name; it is also gitlore's `precommitCommand`,
-  so it runs on every memory commit (needs the direnv-activated venv).
-- `just smoke` — `tests/smoke.sh`: run `extract.py` against the most
-  recent session JSONL and print the result.
+- `just precommit` — lint manifest + settings, `shellcheck -x` the
+  scripts + `.bats` files, ruff/docformatter/mypy/ty the Python, then
+  run both test suites (`bats tests/*.bats` + `pytest`). The toolkit's
+  `release` recipe depends on this name; it is also gitlore's
+  `precommitCommand`, so it runs on every memory commit (needs the
+  direnv-activated venv).
 - `just hook-test` — `bats tests/hook-test.bats tests/rename-test.bats
   tests/memory-probe.bats tests/precompact-probe.bats`: end-to-end test of
   the handoff-specific hook
@@ -228,58 +210,28 @@ with `uv sync` (the only `uv` invocation; `uv.lock` is committed,
   covers `scripts/precompact-probe.sh` and its shim against a synthetic
   repo with/without an SDD ledger. Both are listed in the
   `precommit` and `hook-test` recipes.
-- `just extract-test` — `pytest`: fixture-driven tests of `extract.py`
-  (`tests/test_extract.py`). Unit tests import the pure functions;
-  end-to-end tests render a full frame (via `emit()` captured with
-  `redirect_stdout`, or the `extract.py` subprocess for the
-  `__main__` contract) against hand-crafted JSONL under
-  `tests/fixtures/` — files touched, prompt cap, anchors, wrapper
-  filtering, sidechain/isMeta stripping, bounded scrape,
-  empty/missing transcript.
+- `just py-test` — `pytest`: unit tests of `worktree_root.py`
+  (`tests/test_worktree_root.py`) — the worktree-root resolver's branch
+  matrix.
 
 Test files live under `tests/`. The justfile recipes are one-liners
 that delegate. Add new scenarios to the existing `.bats`/`test_*.py`
 files rather than adding new just recipes.
 
-The smoke test must run against a real session JSONL — the format is
-undocumented and evolves. The fixture-driven pytest suite is allowed
-to use synthetic JSONL, but the fixtures must mirror the real format
-(verify by eyeballing a recent transcript); fictional shapes mislead.
+The JSONL fixtures the bats suite feeds to `handoff_activated`
+(`tests/fixtures/*.jsonl`) must mirror the real transcript format — the
+format is undocumented and evolves, so verify by eyeballing a recent
+transcript; fictional shapes mislead.
 
-## Extraction logic
+## Frame assembly
 
-- **Files touched**: `tool_use` events where `name` is `Edit` or
-  `Write`. Reading (`Read`, `Grep`, `Glob`) is *investigation*, not
-  touch — intentionally excluded. The handoff/gitlore *control* files
-  written while operating the skills (`SKILL_ARTIFACT_SUFFIXES` in
-  `extract.py`: `.claude/handoff-task.md`, `handoff-session`,
-  `handoff-error.log`, `autorename`, gitlore's `gitlore-commit-msg`,
-  `gitlore-merge-state`) are byproducts, not the active set — also
-  excluded. gitlore memory *content* (`memory/*.md`) is real work and
-  is kept.
-- **User prompts**: entries with `type == "user"`. Messages whose
-  `content` is entirely `tool_result` blocks are filtered out
-  (internal wrappers). CLI-injected wrappers (`<local-command-*>`,
-  `<bash-*>`, `<command-*>`, `<system-reminder>`, `<task-notification>`)
-  are filtered via `WRAPPER_PREFIXES`; `[Request interrupted by user]`
-  via `WRAPPER_EXACT`.
-- **isMeta entries**: harness-injected entries (`isMeta == true`) are
-  dropped in `load_entries`, alongside `isSidechain`. This is how skill
-  bodies are kept out of the handoff: a skill activation injects its
-  full body as an `isMeta` user entry on both paths (the `Skill` tool
-  and the `/slash-command`), and a native skill body can be 100+ KB and
-  starts with its own heading, not a known wrapper prefix — so
-  `WRAPPER_PREFIXES` alone misses it. Drop on the structural flag.
-  `/compact` summaries are dropped the same way: the injected summary is a
-  `type:"user"` entry carrying `isCompactSummary == true` (no `isMeta`), so
-  `load_entries` checks that flag too.
-- **Anchor**: walk backwards from each kept user prompt to the nearest
-  assistant turn. Prefer `tool_use` name + target; fall back to first
-  line of assistant text.
-- **Cutoff**: the scrape is bounded at the last Write/Edit to
-  `handoff-task.md` (not at skill activation). Agents sometimes update
-  the task after later user input; cutting at the write captures those
-  correction prompts in the last-N window.
+`load-handoff.sh` does not touch the transcript. The frame is a
+timestamp header plus the inlined agent-authored `handoff-task.md`.
+There is no session id, no files-touched list, and no verbatim prompt
+transcript — the working set is the harness's own `gitStatus` block at
+load time, and reproducing prior exchanges verbatim manufactured false
+continuity. See DESIGN.md, "Task frame drops the transcript and file
+list (2026-07-17)".
 
 ## Non-goals
 

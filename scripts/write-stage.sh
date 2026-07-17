@@ -19,13 +19,6 @@ cwd="$(handoff_root "$HOOK_CWD")"
 [[ "$target" == "$expected" ]] || exit 0
 [[ -f "$target" ]] || exit 0
 
-# Save the session pointer here (write time), not at activation time.
-# extract.py cuts the scrape at the last write to handoff-task.md, so
-# the pointer must reference the session containing that write.
-if [[ -n "$HOOK_TRANSCRIPT" ]]; then
-    printf '%s\n' "$HOOK_TRANSCRIPT" > "$cwd/$HANDOFF_REL_SESSION"
-fi
-
 if git -C "$cwd" add -f "$cwd/$HANDOFF_REL_TASK" 2>/dev/null; then
     agent_ctx="handoff-task.md staged (git add -f) and version-tracked. The task frame enters git history paired with this handoff's gitlore memory commit, which supplies the durable context that makes the frame meaningful."
     jq -nc \

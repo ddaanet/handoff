@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # SessionStart hook for handoff loading. Fires on `startup` and
 # `clear` (see hooks/hooks.json). Gates on .claude/handoff-task.md:
-#   - reads the session pointer from .claude/handoff-session
-#   - calls extract.py (stdout) to assemble the frame in memory
-#   - emits the assembled frame via hookSpecificOutput.additionalContext
-#     so the fresh agent sees the handoff in its input for this turn;
+#   - assembles the frame in memory — a timestamp header plus the
+#     inlined agent-authored task file;
+#   - emits the frame via hookSpecificOutput.additionalContext so the
+#     fresh agent sees the handoff in its input for this turn;
 #   - emits a curt systemMessage with content size + task file age.
-# Silent no-op when the task file is missing or empty. Errors are
-# logged to .claude/handoff-error.log; the hook exits 0 either way so
-# a failure never blocks session startup.
+# Silent no-op when the task file is missing or empty. The hook exits 0
+# on every path so it never blocks session startup.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
@@ -19,28 +18,16 @@ cwd="$(handoff_root "$(jq -r '.cwd // ""' <<<"$input")")"
 hook_event="$(jq -r '.hook_event_name // "SessionStart"' <<<"$input")"
 
 task="$cwd/$HANDOFF_REL_TASK"
-pointer="$cwd/$HANDOFF_REL_SESSION"
-log="$cwd/$HANDOFF_REL_ERR"
-script_dir="$(cd "$(dirname "$0")" && pwd)"
 
 # Gate on the agent-authored task file. No task file → nothing to inject.
 [[ -s "$task" ]] || exit 0
 
-# Pointer → prior session JSONL. Missing/stale pointer degrades to task-only
-# (extract.py treats an empty/absent transcript as "no session data").
-jsonl=""
-if [[ -s "$pointer" ]]; then
-    jsonl="$(<"$pointer")"
-    [[ -f "$jsonl" ]] || jsonl=""
-fi
-
-if ! assembled="$(python3 "$script_dir/extract.py" "$jsonl" "$task" 2>"$log")"; then
-    tail_excerpt=$(tail -c 400 "$log" 2>/dev/null | tr '\n' ' ') || true
-    jq -nc --arg log "$log" --arg tail "$tail_excerpt" \
-        '{systemMessage: ("handoff load failed (see " + $log + "): " + $tail)}'
-    exit 0
-fi
-rm -f "$log"
+# The frame is the header plus the task file inlined verbatim. The prior
+# session's working set is served by the harness's own gitStatus block,
+# not reproduced here (see DESIGN.md, "Task frame drops the transcript
+# and file list").
+stamp="$(date '+%Y-%m-%d %H:%M:%S %z')"
+assembled="$(printf '# Handoff — %s\n\n%s\n' "$stamp" "$(cat "$task")")"
 
 bytes=${#assembled}
 if (( bytes < 1024 )); then
