@@ -24,9 +24,11 @@ via gitlore's `commit-memory.sh`.
   memory. For `/btw` side conversations and any session worth a name
   while the main thread stays live.
 - `skills/precompact/SKILL.md` — the `/handoff:precompact` skill.
-  Memory-flush paragraph before a manual `/compact`: capture durable
-  learnings in auto-memory, then tell the user to compact. No task
-  file, no rename, no probe/commit (disk survives compaction).
+  Before a manual `/compact`: capture durable learnings in auto-memory,
+  bring any mid-task durable progress ledger current (general line +
+  `handoff-precompact-probe`), then tell the user to compact. No task
+  file, no rename, no memory commit (disk survives compaction; the
+  commit rides the following session).
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
 - `hooks/hooks.json` — declares six hooks.
@@ -138,6 +140,16 @@ via gitlore's `commit-memory.sh`.
   `git config gitlore.commitCommand`) or stays silent. Couples only to the
   `gitlore-memory` submodule registration (FR12) and the `commitCommand`
   key — never gitlore internals.
+- `bin/handoff-precompact-probe` — PATH-resident shim that execs
+  `scripts/precompact-probe.sh`. Invoked by the precompact skill body by
+  bare name (same pattern as `handoff-memory-probe`).
+- `scripts/precompact-probe.sh` — read-only durable-progress detector run
+  by the precompact skill before `/compact`. Owns the plugin-specific
+  vocabulary so the skill body stays vocab-free: a one-row registry
+  resolves git root and, if a known structured-workflow ledger exists
+  (currently superpowers SDD's `.superpowers/sdd/progress.md`), prints a
+  flush directive; else silent. Advisory nudge, not a commit gate —
+  precompact never runs the memory-probe.
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.2.0`). Provides:
@@ -206,12 +218,15 @@ with `uv sync` (the only `uv` invocation; `uv.lock` is committed,
 - `just smoke` — `tests/smoke.sh`: run `extract.py` against the most
   recent session JSONL and print the result.
 - `just hook-test` — `bats tests/hook-test.bats tests/rename-test.bats
-  tests/memory-probe.bats`: end-to-end test of the handoff-specific hook
+  tests/memory-probe.bats tests/precompact-probe.bats`: end-to-end test of
+  the handoff-specific hook
   scripts (and the rename scripts) against synthetic tool-event payloads. `bats run` captures
   exit codes/output without the `set +e` dance. `version-guard.sh` is
   tested in the toolkit, not here.
   `tests/memory-probe.bats` covers `scripts/memory-probe.sh` and the
-  `bin/` shim against a synthetic gitlore repo; it is listed in both the
+  `bin/` shim against a synthetic gitlore repo; `tests/precompact-probe.bats`
+  covers `scripts/precompact-probe.sh` and its shim against a synthetic
+  repo with/without an SDD ledger. Both are listed in the
   `precommit` and `hook-test` recipes.
 - `just extract-test` — `pytest`: fixture-driven tests of `extract.py`
   (`tests/test_extract.py`). Unit tests import the pure functions;

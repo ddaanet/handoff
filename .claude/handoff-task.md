@@ -1,12 +1,14 @@
 ## Current task
 
-Release the pending plugin changes — compact-summary extractor fix,
-new `/handoff:precompact` skill, `.bin/claude` dev launcher shim —
-via `just release` (patch bump).
+The precompact durable-progress-probe enhancement is complete and
+`just precommit`-green — no implementation remains; only the decisions
+below are open.
 
 ## Open decisions
 
-- Whether `load-handoff.sh` should emit `sessionTitle` in its
-  SessionStart output (documented in the hooks reference, untested) to
-  name the successor session at load time — could supplement or
-  replace the tmux `rename-when-idle.sh` path.
+- Cut a patch release (`just release`) for this change now, or batch it
+  with later work?
+- Should `load-handoff.sh` emit `sessionTitle` at SessionStart to name
+  the successor session (documented in the hooks reference, untested)?
+  Could supplement or replace the tmux `rename-when-idle.sh` path.
+  (Carried from before, still unresolved.)

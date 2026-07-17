@@ -811,6 +811,51 @@ survives as *positioning*, not plugin boundaries: ddaa-handoff
 (claude.ai summaries), handoff (Claude Code native continuity), gitlore
 (versioned memory on top).
 
+### Durable progress files: the precompact probe (2026-07-17)
+
+precompact was memory-only by construction — the task crosses
+compaction in the summary. That default is right for a plain
+conversation but wrong for a structured execution workflow that keeps a
+**durable progress ledger** the summary cannot reproduce. superpowers
+SDD is the motivating case: its `.superpowers/sdd/progress.md` records
+`Task N: complete (commits <base>..<head>, review clean)` lines and
+deferred Minor findings, and the SDD skill itself says to trust that
+ledger over post-compaction recollection. A mid-run `/compact` with a
+stale ledger is the most expensive SDD failure — completed tasks get
+re-dispatched.
+
+Two-part fix, matching the handoff/gitlore split:
+
+- **General line in the skill body** (plugin-agnostic): if the session
+  is mid-structured-task with a durable progress/state file, bring it
+  current before compacting. Covers *unknown* workflows; carries no
+  foreign vocabulary.
+- **`handoff-precompact-probe`** (`scripts/precompact-probe.sh` + `bin/`
+  shim): the probe owns the plugin-specific vocabulary, exactly as
+  `handoff-memory-probe` owns gitlore's. Read-only, silent by default; a
+  one-row registry resolves git root (`git rev-parse --show-toplevel`,
+  mirroring SDD's own `sdd-workspace`) and, if
+  `.superpowers/sdd/progress.md` exists, emits the calibrated flush
+  directive. No git root → no known ledger → silent.
+
+Named after the *moment* (`precompact`), not the mechanism
+(`progress`): the agent runs it opaquely and follows whatever it prints,
+with no name-level hint that would prompt it to re-derive on its own —
+the same opaqueness the gitlore Step-3 simplification bought.
+
+Two deliberate exclusions. The probe detects a file's **existence**, not
+its currency — only the agent, from conversation context, can judge
+whether the ledger is current, so the directive says "bring it current"
+rather than guessing at staleness. And precompact **still does not run
+`handoff-memory-probe`**: committing memory stays wrap-up logic (the
+commit rides the following session), so the probe is advisory — a nudge,
+not the gitlore probe's mandatory commit gate.
+
+Calibrated against superpowers 6.1.1: the origin note's vocabulary
+("in-flight fix-waves", "how to verify an incoming subagent report") was
+dropped — those are live controller behaviors, not durable ledger state.
+The ledger holds only completed-task lines and deferred Minor findings.
+
 ### Session JSONL schema reference
 
 Transcript-parsing defects recur because the format is

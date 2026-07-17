@@ -3,13 +3,20 @@ name: precompact
 description: Flush durable learnings to auto-memory before a session compaction, so they survive the summarizer at full fidelity instead of paraphrased. Use when the user asks to "precompact", "before compact", "before I compact", "prepare compact", "about to compact", "flush memory before compact", or otherwise signals an imminent manual `/compact`. For an imminent `/clear` or end of task, use the handoff skill instead — it also snapshots the task and names the session.
 ---
 
-# precompact — Memory Flush Before /compact
+# precompact — Flush Before /compact
 
 Compaction paraphrases the conversation; disk survives it untouched.
-The one step worth taking before a manual `/compact`:
+The steps worth taking before a manual `/compact`:
 
-If durable learnings surfaced this session, capture them in
-auto-memory now. Skip if nothing durable surfaced — do not force.
+1. If durable learnings surfaced this session, capture them in
+   auto-memory now. Skip if nothing durable surfaced — do not force.
+
+2. If this session is mid-structured-task and keeps a durable
+   progress/state file — a ledger the compaction summary can't reliably
+   reproduce — bring it current before compacting.
+
+3. Run `handoff-precompact-probe` and follow any directive it prints.
+   Nothing printed → nothing to do.
 
 Then tell the user to run `/compact`.
 
