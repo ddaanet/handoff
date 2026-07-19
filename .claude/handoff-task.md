@@ -1,7 +1,12 @@
 ## Current task
 
-Scraping-machinery removal from the handoff plugin is done (frame is now a timestamp header plus the inlined task file; `extract.py`, the `handoff-session` pointer, the `Session:` line, and `handoff-error.log` are gone; precommit green); the remaining ship step is a minor version bump via `just release` (behavior changed — the frame and the machine-local files — but nothing user-facing breaks).
+The precompact "commit memory → compact → continue" redesign is fully settled
+and written to `docs/2026-07-18-precompact-drive-design.md`; nothing is built
+yet — next session implements it with inline TDD.
 
 ## Open decisions
 
-- Whether to correct the `reference_jsonl_slash_command_shape` memory: it still names the removed `extract.py` as the `isMeta`/`isSidechain` filter site, but the live filter is now `handoff_activated()` in `_lib.sh` only.
+- Whether the spec needs your review/adjustment before implementation begins
+  (it has not been through the brainstorming review gate), and whether to
+  derive a formal plan via writing-plans first or implement directly from the
+  spec (which is already organized component-by-component).
