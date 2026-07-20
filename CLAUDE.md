@@ -15,10 +15,17 @@ emits a directive and the agent summarizes → gets approval → writes gitlore'
 message + trigger files, which gitlore's own `PostToolBatch` hook consumes.
 
 Second flow, driven by the precompact skill: probe (memory commit + ledger
-flush) → skill writes `.claude/autocompact` → `PostToolUse` validates it →
-`Stop` arms the compaction → `SessionStart(compact)` fires the continuation
+flush) → skill writes `handoff-task.md` and `.claude/autocompact` →
+`PostToolUse` validates the latter → `Stop` arms the compaction →
+`SessionStart(compact)` re-injects the task file and fires the continuation
 prompt. Both typed lines go through detached tmux watchers spawned by hooks at
 turn boundaries, never from inside a live turn.
+
+Both skills write the same `handoff-task.md`. It is the durable side of the
+seam — content that must survive verbatim — while the continuation prompt is
+only a handle to it. Consequently `handoff_activated()` treats either skill as
+an activation signal, and the file persists across the compaction to be
+re-injected again at the next `startup|clear`.
 
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
@@ -33,9 +40,11 @@ turn boundaries, never from inside a live turn.
   Drives **commit memory → compact → continue**: capture durable
   learnings in auto-memory, run `handoff-precompact-probe` and follow
   its directives (memory commit and/or ledger flush), then write
+  `handoff-task.md` (per the handoff skill's template) and
   `.claude/autocompact` (line 1 the literal `/compact [directive]`,
-  line 2 a single-line continuation prompt). The hooks do the rest; the
-  skill never runs `/compact` itself. No task file, no rename.
+  line 2 a single-line continuation prompt that is only a handle to the
+  task file). The hooks do the rest; the skill never runs `/compact`
+  itself. No rename.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
 - `hooks/hooks.json` — declares nine hooks.
@@ -91,8 +100,12 @@ turn boundaries, never from inside a live turn.
   which canonicalizes multiple paths in one `python3` subprocess
   (GNU/BSD `realpath` are incompatible; python is portable and
   amortizes startup). Also defines `handoff_activated()` (stateless
-  transcript scraper — checks whether the handoff skill has activated
-  this session by scanning for either invocation signal) and
+  transcript scraper — checks whether `handoff` **or** `precompact` has
+  activated this session, scanning both invocation signals for each;
+  either opens the guards, since both skills write the task file),
+  `handoff_frame()` (assembles the injectable frame — timestamp header
+  plus inlined task file — shared by `load-handoff.sh` and
+  `load-compact.sh` so the two transitions cannot drift) and
   `handoff_deny()` (shared PreToolUse deny emitter; calls `exit 0`
   after printing the deny JSON, so only safe from a standalone hook
   script).
@@ -142,10 +155,12 @@ turn boundaries, never from inside a live turn.
   no-op when the file is absent — `Stop` fires every turn. `Stop` does not
   fire on Esc, so an interrupted turn cannot arm compaction.
 - `scripts/load-compact.sh` — `SessionStart(compact)` entry point: consumes
-  `autocompact.pending` and spawns `continue-when-idle.sh`. `source:
-  "compact"` is the authoritative compaction-complete signal — no pane
-  scraping. Silent when there is no pending file (auto-compaction fires the
-  same hook).
+  `autocompact.pending`, injects the task-file frame via `additionalContext`
+  (`handoff_frame`; omitted when there is no task file), and spawns
+  `continue-when-idle.sh`. `source: "compact"` is the authoritative
+  compaction-complete signal — no pane scraping. Silent when there is no
+  pending file (auto-compaction fires the same hook). Reading the task file
+  does not consume it.
 - `scripts/compact-when-idle.sh` — detached watcher for line 1.
   Type-verify-submit: sends the command with `send-keys -l` and **no** Enter,
   reads back whether the TUI rendered command recognition, and only then

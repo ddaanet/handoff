@@ -17,6 +17,18 @@ HANDOFF_REL_COMPACT=".claude/autocompact"
 # shellcheck disable=SC2034
 HANDOFF_REL_COMPACT_PENDING=".claude/autocompact.pending"
 
+# Assemble the injectable frame for a task file ($1): a timestamp header plus
+# the file inlined verbatim. Prints nothing and returns 1 when the file is
+# missing or empty, so callers can gate on the exit status. Shared by
+# load-handoff.sh (startup|clear) and load-compact.sh (compact) — one frame
+# shape for both transitions, since both inject the same file.
+handoff_frame() {
+    local task="$1"
+    [[ -s "$task" ]] || return 1
+    printf '# Task — %s\n\n%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S %z')" "$(cat "$task")"
+}
+
 # Parse and validate an autocompact file ($1) into the caller's COMPACT_L1
 # (the literal /compact command to type) and COMPACT_L2 (the continuation
 # prompt). Returns 0 when well-formed; otherwise returns 1 with COMPACT_ERR set
@@ -90,21 +102,28 @@ handoff_root() {
         "${1:-}" "${CLAUDE_PROJECT_DIR:-$PWD}"
 }
 
-# Has the handoff skill activated in this session? Stateless: derive the
-# answer from the transcript JSONL each call (no marker, no env). Scans
-# for either activation signal the wipe hooks key on — a Skill tool_use
-# (agent path; the bare `handoff` and qualified `handoff:handoff` arg are
-# both launches of the same skill) or the /handoff:handoff slash command
-# (user path, stored as a <command-name> wrapper). Verified against real
-# transcripts 2026-05-23. Exit 0 if activated, 1 otherwise (incl.
-# empty/missing/unreadable transcript).
+# Has a task-file-writing skill activated in this session? Stateless:
+# derive the answer from the transcript JSONL each call (no marker, no
+# env). Either `handoff` or `precompact` counts — both write
+# handoff-task.md, so both must open the read and write guards. Scans both
+# invocation paths per skill: a Skill tool_use (agent path; the bare and
+# plugin-qualified skill arg are both launches of the same skill) or the
+# slash command (user path, stored as a <command-name> wrapper). Verified
+# against real transcripts 2026-05-23. Exit 0 if activated, 1 otherwise
+# (incl. empty/missing/unreadable transcript).
 handoff_activated() {
     local transcript="$1"
     [[ -n "$transcript" && -f "$transcript" ]] || return 1
     python3 - "$transcript" <<'PY'
 import json, sys
 
-SLASH = "<command-name>/handoff:handoff</command-name>"
+# Both skills write handoff-task.md, so either activates the guards. The bare
+# and qualified skill args are both launches of the same skill.
+SKILLS = {"handoff", "handoff:handoff", "precompact", "handoff:precompact"}
+SLASHES = (
+    "<command-name>/handoff:handoff</command-name>",
+    "<command-name>/handoff:precompact</command-name>",
+)
 try:
     fh = open(sys.argv[1], encoding="utf-8", errors="replace")
 except OSError:
@@ -121,18 +140,18 @@ with fh:
         if entry.get("isSidechain"):
             continue
         msg = entry.get("message") or {}
-        # Agent path: Skill tool_use with skill == handoff[:handoff].
+        # Agent path: Skill tool_use naming either skill.
         if msg.get("role") == "assistant":
             for block in msg.get("content") or []:
                 if (isinstance(block, dict)
                         and block.get("type") == "tool_use"
                         and block.get("name") == "Skill"
-                        and (block.get("input") or {}).get("skill") in ("handoff", "handoff:handoff")):
+                        and (block.get("input") or {}).get("skill") in SKILLS):
                     sys.exit(0)
         # User path: slash command stored as a <command-name> wrapper.
         if entry.get("type") == "user":
             content = msg.get("content")
-            if isinstance(content, str) and SLASH in content:
+            if isinstance(content, str) and any(s in content for s in SLASHES):
                 sys.exit(0)
 sys.exit(1)
 PY

@@ -26,8 +26,7 @@ task="$cwd/$HANDOFF_REL_TASK"
 # session's working set is served by the harness's own gitStatus block,
 # not reproduced here (see DESIGN.md, "Task frame drops the transcript
 # and file list").
-stamp="$(date '+%Y-%m-%d %H:%M:%S %z')"
-assembled="$(printf '# Handoff — %s\n\n%s\n' "$stamp" "$(cat "$task")")"
+assembled="$(handoff_frame "$task")"
 
 bytes=${#assembled}
 if (( bytes < 1024 )); then

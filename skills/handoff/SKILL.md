@@ -47,10 +47,12 @@ do not re-derive or verify it yourself.
 ```markdown
 ## Current task
 
-<ONE SENTENCE describing what was in progress — task state, what needs
-to resume when a fresh agent picks up. Not a recap. Not git bookkeeping:
-whether work is committed/pushed is reconstructable from `git status` at
-load time, so never write it here. Overflow belongs in memory or git.>
+<What was in progress — task state, what needs to resume when a fresh
+agent picks up. Usually one sentence. Where work genuinely spans several
+in-flight threads, list them; a session under pressure carries what it
+carries, and cramming it into one line loses the thing worth keeping. Not
+a recap. Not git bookkeeping: whether work is committed/pushed is
+reconstructable from `git status` at load time, so never write it here.>
 
 ## Open decisions
 
@@ -59,6 +61,12 @@ load time, so never write it here. Overflow belongs in memory or git.>
 
 <Drop the section if there are no open decisions. No filler.>
 ```
+
+This file is the durable side of the seam: anything that must survive
+**verbatim** — identifiers, commit ranges, file paths a decision hinges
+on, the exact shape of an open question — belongs here, because this is
+what gets re-injected intact. Prose that a summary would preserve just as
+well does not need to be here.
 
 Task file rules:
 
@@ -71,8 +79,8 @@ Task file rules:
 
 ## Anti-patterns
 
-- A multi-sentence "Current task". One sentence; the rest goes to
-  memory or git.
+- Padding "Current task" to look thorough. Length should track how many
+  threads are genuinely in flight, not effort.
 - Durable lessons in `## Open decisions`. Those go to feedback memory.
 - Extra sections in `handoff-task.md`. The template is fixed.
 - Commit/push status anywhere in the file ("work is uncommitted",

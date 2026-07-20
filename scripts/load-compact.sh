@@ -34,12 +34,21 @@ fi
 # Consume unconditionally: the continuation fires at most once per compaction.
 rm -f "$pending"
 
+# The task file carries the content across the compaction; the typed prompt is
+# only a handle to it. Inject the frame here so the handle resolves against the
+# real thing rather than the summariser's paraphrase. Not consumed by reading —
+# it stays on disk for the next SessionStart(startup|clear).
+frame="$(handoff_frame "$cwd/$HANDOFF_REL_TASK")" || frame=""
+
 if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
-    jq -nc --arg n "$COMPACT_L2" '{
+    jq -nc --arg n "$COMPACT_L2" --arg f "$frame" '{
         systemMessage: "handoff: not in tmux — continuation not typed; emitted to paste.",
         hookSpecificOutput: {
             hookEventName: "SessionStart",
-            additionalContext: ("Compaction finished, but the continuation prompt could not be typed (not in tmux). Present this line to the user in a fenced code block so they can paste it:\n" + $n)
+            additionalContext: (
+                (if $f == "" then "" else $f + "\n" end)
+                + "Compaction finished, but the continuation prompt could not be typed (not in tmux). Present this line to the user in a fenced code block so they can paste it:\n"
+                + $n)
         }
     }'
     exit 0
@@ -53,5 +62,8 @@ else
 fi
 disown 2>/dev/null || true
 
-jq -nc --arg n "$COMPACT_L2" --arg p "$PANE" \
-    '{systemMessage: ("handoff: compacted — will resume with \"" + $n + "\" once the prompt is idle (tmux pane " + $p + ").")}'
+jq -nc --arg n "$COMPACT_L2" --arg p "$PANE" --arg f "$frame" \
+    '{systemMessage: ("handoff: compacted — will resume with \"" + $n + "\" once the prompt is idle (tmux pane " + $p + ").")}
+     + (if $f == "" then {}
+        else {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $f}}
+        end)'

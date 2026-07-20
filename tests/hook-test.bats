@@ -57,6 +57,17 @@ make_worktree() {
     [ "$status" -eq 0 ]
 }
 
+# precompact writes the same task file, so it is an activation signal too.
+@test "handoff_activated: precompact Skill tool_use -> activated" {
+    run handoff_activated "$repo_root/tests/fixtures/activated-precompact-skill.jsonl"
+    [ "$status" -eq 0 ]
+}
+
+@test "handoff_activated: precompact slash command -> activated" {
+    run handoff_activated "$repo_root/tests/fixtures/activated-precompact-slash.jsonl"
+    [ "$status" -eq 0 ]
+}
+
 @test "handoff_activated: no signal -> not activated" {
     run handoff_activated "$repo_root/tests/fixtures/extract-basic.jsonl"
     [ "$status" -eq 1 ]
@@ -156,6 +167,26 @@ make_worktree() {
             "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
         | bash scripts/write-guard.sh
     ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "write-guard (handoff-task.md, precompact activated: allow)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/activated-precompact-skill.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "read-guard (handoff-task.md, precompact activated: allow)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/read-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/activated-precompact-slash.jsonl"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
@@ -428,7 +459,9 @@ ASMTASK
     ' _ "$asm_tmp"
     [ "$status" -eq 0 ]
     ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
-    echo "$ctx" | grep -q '^# Handoff — '
+    # "Task", not "Handoff": the file is current task state now, written by
+    # either skill and injected at both transitions.
+    echo "$ctx" | grep -q '^# Task — '
     echo "$ctx" | grep -q 'hook smoke test'
     echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "clear"' >/dev/null
 }
@@ -718,6 +751,38 @@ run_load_compact() {
     [ "$status" -eq 0 ]
     [ ! -e "$tmp/.claude/autocompact.pending" ]
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("continue with task 3")' >/dev/null
+}
+
+# The task file carries the content across compaction; the typed prompt is only
+# a handle to it. So the frame has to be injected here, the same way
+# load-handoff.sh injects it at startup|clear.
+@test "load-compact (task file present: injects the frame)" {
+    printf '%s\n' "/compact" "resume per the task file" > "$tmp/.claude/autocompact.pending"
+    printf '%s\n' "## Now" "- rewire the parser" > "$tmp/.claude/handoff-task.md"
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("rewire the parser")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null
+    # The task file survives — it is not consumed by being read.
+    [ -s "$tmp/.claude/handoff-task.md" ]
+}
+
+@test "load-compact (no task file: continuation still fires, no frame)" {
+    rm -f "$tmp/.claude/handoff-task.md"
+    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact.pending"
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.systemMessage | test("continue")' >/dev/null
+    echo "$output" | jq -e 'has("hookSpecificOutput") | not' >/dev/null
+}
+
+@test "load-compact (not in tmux, task file present: frame and prompt both emitted)" {
+    printf '%s\n' "/compact" "resume per the task file" > "$tmp/.claude/autocompact.pending"
+    printf '%s\n' "## Now" "- rewire the parser" > "$tmp/.claude/handoff-task.md"
+    run_load_compact "$tmp" 'env -u TMUX -u TMUX_PANE'
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("rewire the parser")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("resume per the task file")' >/dev/null
 }
 
 @test "load-compact (worktree cwd: consumes the worktree pending file)" {
