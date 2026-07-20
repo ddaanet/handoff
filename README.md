@@ -47,6 +47,31 @@ the session (via the same tmux `send-keys`-when-idle path as handoff, or
 a `/rename` line to paste outside tmux); it writes no task file and
 touches no memory.
 
+## Compact and continue
+
+`/handoff:precompact` is the other half: not a wrap-up, but a way to keep
+going. Long sessions eventually have to compact, and compaction paraphrases
+the conversation — anything that has to survive *exactly* should be on disk
+first. So the skill captures durable learnings in auto-memory, commits them if
+your repo is gitlore-managed, writes the task file, and then drives the
+compaction for you: `/compact` is typed into the prompt once your turn ends,
+and once it finishes, the task file is re-injected and a one-line continuation
+prompt is submitted. You do not run `/compact` yourself, and you do not have
+to type anything to resume.
+
+Both skills write the same `.claude/handoff-task.md`. That is the durable side
+of the seam — it carries whatever must survive verbatim, at whatever length
+the work demands. The continuation prompt is only a handle to it.
+
+Driving the prompt needs tmux; outside it, the two lines are printed for you to
+paste. If a line fails to land — the pane was busy, you were mid-sentence, the
+command was not recognized — the watcher records why, and you and the agent are
+told at your next prompt rather than being left to wonder whether the
+compaction happened.
+
+Use `precompact` when the work continues and `handoff` when it ends. Compacting
+right before `/clear` throws away what the compaction just paid for.
+
 A `PreToolUse(Skill)` hook wipes any prior handoff files the moment the skill activates, so the slate is always clean — and tells the agent so it doesn't redundantly verify. The agent then updates auto-memory with any durable learnings, and in a single turn writes a short task snapshot (if anything is outstanding) and a session title to `.claude/autorename`. A `PostToolUse(Write|Edit)` hook stages `handoff-task.md` for commit. A second hook picks up `autorename` and renames the session via tmux `send-keys` once the prompt goes idle (or emits a `/rename` line to paste if not in tmux). Guards prevent the agent from reading or writing `.claude/handoff-task.md` outside the handoff flow. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently.
 
 In a gitlore-managed repository, handoff also offers to commit your memory:
@@ -69,7 +94,8 @@ new, so the next session starts clean.
 |---|---|
 | Durable facts, preferences, feedback | auto-memory |
 | Conversation transcript, resume | session JSONL + `claude -c` |
-| In-session compaction | Claude Code `/compact`, Session Memory |
+| Summarising the conversation | Claude Code `/compact`, Session Memory |
+| **Compacting without losing the thread** | **this plugin** (`precompact`) |
 | Code state | the repo |
 | **Current task + open decisions across `/clear`** | **this plugin** |
 
@@ -100,6 +126,12 @@ on `handoff-task.md` so it appears staged for your next commit.
 - `autorename` — transient trigger file; written by the agent with the
   session title, consumed and deleted immediately by the PostToolUse
   hook.
+- `autocompact` — transient trigger file written by `precompact`: the
+  `/compact` line and the continuation prompt. Renamed to
+  `autocompact.pending` when the compaction is armed, and consumed once it
+  completes.
+- `autocompact.failed` — written only when a line could not be delivered,
+  and consumed when you are told about it at your next prompt.
 
 `handoff-task.md` is wiped at activation (the "finalize" case): invoke the skill again with nothing outstanding and the next session starts clean. Nothing outside the current project is modified.
 
@@ -116,6 +148,8 @@ on `handoff-task.md` so it appears staged for your next commit.
   plugin itself.
 - [`skills/handoff/SKILL.md`](skills/handoff/SKILL.md) — the skill
   that the agent follows when you ask for a handoff.
+- [`skills/precompact/SKILL.md`](skills/precompact/SKILL.md) — the
+  compact-and-continue skill.
 
 ## License
 
