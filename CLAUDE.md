@@ -55,9 +55,11 @@ re-injected again at the next `startup|clear`.
   when `handoff:handoff` activates. The two together cover both
   invocation paths — the `Skill` tool (agent-driven) and the slash
   command `/handoff:handoff` (user-driven, which loads the skill body
-  directly without going through the `Skill` tool).
+  directly without going through the `Skill` tool). Only `handoff`
+  wipes: `precompact` overwrites the task file in place, and a wipe
+  would drop the state it is about to carry across the compaction.
   `PreToolUse(Read)`: deny reads of this project's `handoff-task.md`
-  until `handoff:handoff` has activated this session.
+  until `handoff` or `precompact` has activated this session.
   `PreToolUse(Write|Edit)`: deny `handoff-task.md` writes before
   activation; deny `handoff-task.md` writes whose resolved path is not
   `$cwd/.claude/handoff-task.md` (cross-project guard).
@@ -115,12 +117,12 @@ re-injected again at the next `startup|clear`.
   anchors on this rather than `CLAUDE_PROJECT_DIR` directly, so worktree
   sessions resolve to their own `.claude/`.
 - `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
-  this project's `handoff-task.md` until `handoff:handoff` has
+  this project's `handoff-task.md` until `handoff` or `precompact` has
   activated this session.
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies
   `handoff-task.md` writes whose resolved path is not
   `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
-  Denies `handoff-task.md` writes before `handoff:handoff` has
+  Denies `handoff-task.md` writes before `handoff` or `precompact` has
   activated this session.
 - `scripts/rename-when-idle.sh` — detached watcher. Polls for the Claude TUI
   spinner to be absent (idle), checks the user isn't composing, then fires
