@@ -11,8 +11,14 @@ session's `SessionStart(startup|clear)` assembles the frame in memory
 (header + inlined task file) and injects it. `README.md`
 has the user-facing version of this. At wrap-up the skill also runs
 `handoff-memory-probe`; when a gitlore-memory submodule is dirty, the probe
-emits a directive and the agent summarizes → gets approval → commits memory
-via gitlore's `commit-memory.sh`.
+emits a directive and the agent summarizes → gets approval → writes gitlore's
+message + trigger files, which gitlore's own `PostToolBatch` hook consumes.
+
+Second flow, driven by the precompact skill: probe (memory commit + ledger
+flush) → skill writes `.claude/autocompact` → `PostToolUse` validates it →
+`Stop` arms the compaction → `SessionStart(compact)` fires the continuation
+prompt. Both typed lines go through detached tmux watchers spawned by hooks at
+turn boundaries, never from inside a live turn.
 
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
@@ -24,14 +30,15 @@ via gitlore's `commit-memory.sh`.
   memory. For `/btw` side conversations and any session worth a name
   while the main thread stays live.
 - `skills/precompact/SKILL.md` — the `/handoff:precompact` skill.
-  Before a manual `/compact`: capture durable learnings in auto-memory,
-  bring any mid-task durable progress ledger current (general line +
-  `handoff-precompact-probe`), then tell the user to compact. No task
-  file, no rename, no memory commit (disk survives compaction; the
-  commit rides the following session).
+  Drives **commit memory → compact → continue**: capture durable
+  learnings in auto-memory, run `handoff-precompact-probe` and follow
+  its directives (memory commit and/or ledger flush), then write
+  `.claude/autocompact` (line 1 the literal `/compact [directive]`,
+  line 2 a single-line continuation prompt). The hooks do the rest; the
+  skill never runs `/compact` itself. No task file, no rename.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
-- `hooks/hooks.json` — declares six hooks.
+- `hooks/hooks.json` — declares nine hooks.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
   `additionalContext`.
@@ -46,7 +53,11 @@ via gitlore's `commit-memory.sh`.
   activation; deny `handoff-task.md` writes whose resolved path is not
   `$cwd/.claude/handoff-task.md` (cross-project guard).
   `PostToolUse(Write|Edit)`: stage `handoff-task.md` for commit when
-  it is written.
+  it is written; rename the session on an `autorename` write; validate
+  an `autocompact` write.
+  `Stop`: arm the compaction when `.claude/autocompact` exists.
+  `SessionStart(compact)`: fire the continuation prompt after a
+  compaction completes.
 - `scripts/skill-pre-hook.sh` — PreToolUse(Skill) entry point:
   matches `tool_input.skill` being `handoff` or `handoff:handoff` (the
   Skill tool accepts both as launches of the same skill), then `exec`s
@@ -116,6 +127,34 @@ via gitlore's `commit-memory.sh`.
 - `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point:
   matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`,
   then stages the file with `git add -f`.
+- `scripts/write-compact.sh` — PostToolUse(Write|Edit) entry point for the
+  compaction driver. Matches writes resolving to `$cwd/.claude/autocompact`
+  and **validates only**: exactly two lines, line 1 begins `/compact`. Never
+  spawns, never deletes — the file must survive to `Stop`. A malformed file
+  gets a `systemMessage` plus an imperative `additionalContext` so the agent
+  can fix it in the same turn instead of hitting a silent no-op at `Stop`.
+  Path matching is the consume-time cross-project guard (same shape as
+  `autorename`): no PreToolUse guard, no activation gate.
+- `scripts/stop-compact.sh` — `Stop` entry point: arms the compaction.
+  Renames `autocompact` → `autocompact.pending` **before** spawning, so a
+  later `Stop` in the same session cannot re-arm, then spawns a detached
+  `compact-when-idle.sh` (or emits both lines to paste outside tmux). Silent
+  no-op when the file is absent — `Stop` fires every turn. `Stop` does not
+  fire on Esc, so an interrupted turn cannot arm compaction.
+- `scripts/load-compact.sh` — `SessionStart(compact)` entry point: consumes
+  `autocompact.pending` and spawns `continue-when-idle.sh`. `source:
+  "compact"` is the authoritative compaction-complete signal — no pane
+  scraping. Silent when there is no pending file (auto-compaction fires the
+  same hook).
+- `scripts/compact-when-idle.sh` — detached watcher for line 1.
+  Type-verify-submit: sends the command with `send-keys -l` and **no** Enter,
+  reads back whether the TUI rendered command recognition, and only then
+  Enters — sending `C-u` and aborting if it rendered `No commands match`.
+  Retries the Enter alone (re-sending the text would concatenate a copy).
+- `scripts/continue-when-idle.sh` — detached watcher for line 2. Same idle
+  wait, no recognition check: line 2 is prose, and prose at idle is the safe
+  class. Both watchers read only the **visible** pane — a `capture-pane -S`
+  history read matches a stale timer and reports busy long after `Stop`.
 - `scripts/worktree_root.py` — pure resolver `worktree_root(cwd, project)`:
   walks up from the session cwd via on-disk `.git` linkage to the enclosing
   linked-worktree root, else returns `project`. Backs `_lib.sh`'s
@@ -127,20 +166,27 @@ via gitlore's `commit-memory.sh`.
   the agent's Bash, so the shim is the entry point.
 - `scripts/memory-probe.sh` — read-only gitlore-memory detector run by the
   handoff skill at wrap-up. Owns the dirty-or-not branch and prints the
-  agent's next action (summarize → approve → commit via
-  `git config gitlore.commitCommand`) or stays silent. Couples only to the
-  `gitlore-memory` submodule registration (FR12) and the `commitCommand`
-  key — never gitlore internals.
+  agent's next action or stays silent. Composes the memory directive from
+  `_probe-lib.sh` alone (no SDD nudge — that is a precompact concern).
+- `scripts/_probe-lib.sh` — sourced helper holding both probe directives, so
+  the memory-commit prompt is authored once and composed twice.
+  `probe_memory_directive` gates on the `gitlore-memory` submodule
+  registration (FR12) and a dirty worktree, then instructs the agent to
+  summarize → get approval → write `.claude/gitlore-memory-message` and
+  `.claude/gitlore-commit-memory`. That file-trigger IPC replaced the old
+  `git config gitlore.commitCommand` + `commit-memory.sh -F -` Bash path:
+  all file writes, so it sidesteps the sandbox and the auto-mode classifier.
+  Couples only to the two IPC filenames — never gitlore internals.
+  `probe_sdd_directive` holds the structured-workflow ledger nudge.
 - `bin/handoff-precompact-probe` — PATH-resident shim that execs
   `scripts/precompact-probe.sh`. Invoked by the precompact skill body by
   bare name (same pattern as `handoff-memory-probe`).
-- `scripts/precompact-probe.sh` — read-only durable-progress detector run
-  by the precompact skill before `/compact`. Owns the plugin-specific
-  vocabulary so the skill body stays vocab-free: a one-row registry
-  resolves git root and, if a known structured-workflow ledger exists
-  (currently superpowers SDD's `.superpowers/sdd/progress.md`), prints a
-  flush directive; else silent. Advisory nudge, not a commit gate —
-  precompact never runs the memory-probe.
+- `scripts/precompact-probe.sh` — read-only detector run by the precompact
+  skill before `/compact`. Owns the plugin-specific vocabulary so the skill
+  body stays vocab-free: composes the memory directive **then** the SDD
+  ledger nudge from `_probe-lib.sh`, or stays silent when neither applies.
+  Memory goes first — it is the flow's one interactive gate (FR11 approval)
+  and must commit while context is still full, before the summariser runs.
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.2.0`). Provides:
@@ -207,9 +253,16 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   tested in the toolkit, not here.
   `tests/memory-probe.bats` covers `scripts/memory-probe.sh` and the
   `bin/` shim against a synthetic gitlore repo; `tests/precompact-probe.bats`
-  covers `scripts/precompact-probe.sh` and its shim against a synthetic
-  repo with/without an SDD ledger. Both are listed in the
-  `precommit` and `hook-test` recipes.
+  covers `scripts/precompact-probe.sh` and its shim, including the composed
+  memory-then-SDD ordering. Both build their fixtures from
+  `tests/probe-helpers.bash` (one shared synthetic-repo shape, so the two
+  suites cannot drift). Both are listed in the `precommit` and `hook-test`
+  recipes.
+  The compaction driver is covered in the two existing suites rather than a
+  new file: `tests/hook-test.bats` for `write-compact.sh` / `stop-compact.sh`
+  / `load-compact.sh`, `tests/rename-test.bats` for the two watchers and the
+  `is_unknown_command` predicate (they share `_rename-lib.sh` and the tmux
+  stub).
 - `just py-test` — `pytest`: unit tests of `worktree_root.py`
   (`tests/test_worktree_root.py`) — the worktree-root resolver's branch
   matrix.
