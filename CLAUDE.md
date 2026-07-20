@@ -293,8 +293,10 @@ transcript; fictional shapes mislead.
 
 ## Frame assembly
 
-`load-handoff.sh` does not touch the transcript. The frame is a
-timestamp header plus the inlined agent-authored `handoff-task.md`.
+Neither loader touches the transcript. The frame is a timestamp header
+plus the inlined agent-authored `handoff-task.md`, assembled by
+`handoff_frame()` and injected at both transitions — `load-handoff.sh`
+on `startup|clear`, `load-compact.sh` on `compact`.
 There is no session id, no files-touched list, and no verbatim prompt
 transcript — the working set is the harness's own `gitStatus` block at
 load time, and reproducing prior exchanges verbatim manufactured false
