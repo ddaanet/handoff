@@ -50,11 +50,13 @@ if snap | is_unknown_command; then
     exit 1
 fi
 
-# Recognized. Enter, then confirm the composer drained; retry the Enter only
-# (re-sending the text would concatenate a second copy).
+# Recognized. Enter, then confirm the turn actually started; retry the Enter
+# only (re-sending the text would concatenate a second copy). Keyed on is_busy,
+# not is_typing — see continue-when-idle.sh for why a drained-composer read
+# cannot distinguish a submit from an Enter absorbed as a line break.
 for _ in 1 2 3; do
     tmux send-keys -t "$PANE" Enter
     sleep "$VERIFY_DELAY"
-    snap | is_typing || exit 0
+    snap | is_busy && exit 0
 done
 exit 1

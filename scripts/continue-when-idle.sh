@@ -38,9 +38,20 @@ done
 snap | is_typing && exit 0
 
 tmux send-keys -t "$PANE" -l "$LINE2"
+
+# Load-bearing settle. An Enter sent immediately after a long literal send lands
+# inside the TUI's paste window and is absorbed as a line break, not a submit.
+# compact-when-idle.sh gets this gap for free from its recognition readback;
+# line 2 has no readback, so the gap has to be explicit. Do not remove it as
+# redundant — the prose path has no other protection.
+sleep "$VERIFY_DELAY"
+
+# Confirm on is_busy — the turn actually started. `is_typing` is the wrong
+# signal: it inspects only the last ❯ line, so an absorbed Enter leaves a
+# multi-line composer that reads as empty and fakes a successful submit.
 for _ in 1 2 3; do
     tmux send-keys -t "$PANE" Enter
     sleep "$VERIFY_DELAY"
-    snap | is_typing || exit 0
+    snap | is_busy && exit 0
 done
 exit 1

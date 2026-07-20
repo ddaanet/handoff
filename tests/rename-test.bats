@@ -133,7 +133,7 @@ make_compact_stub() {
 sub="\$1"; shift
 case "\$sub" in
   capture-pane)
-    if [ -f "$STATE_E" ]; then printf '%s\n' '  ⎿  Compacted (312 messages)' '❯ '
+    if [ -f "$STATE_E" ]; then printf '%s\n' '✻ Compacting… (3s · esc to interrupt)' '❯ '
     elif [ -f "$STATE_L" ]; then printf '%s\n' $1 '❯ /compact'
     else printf '%s\n' '──── x ──' '❯ '
     fi ;;
@@ -196,21 +196,32 @@ STUB
 
 # --- continue-when-idle.sh (line 2: prose, no recognition check) ---------------
 
-@test "continue watcher types the prompt literally then Enters" {
-    SENT="$STUBDIR/sent.log"; COUNT="$STUBDIR/count"
-    echo 0 > "$COUNT"; : > "$SENT"
+# tmux stub for the continue watcher. $1 = "submits" (the Enter starts a turn,
+# so the pane goes busy) or "absorbs" (the Enter lands inside the TUI's paste
+# window and becomes a literal newline — the pane stays idle, composer occupied).
+make_continue_stub() {
+    SENT="$STUBDIR/sent.log"; : > "$SENT"
+    STATE_E="$STUBDIR/sent_enter"; rm -f "$STATE_E"
+    local busy="'✻ Thinking… (3s · esc to interrupt)' '❯ '"
+    [ "$1" = absorbs ] && busy="'──── x ──' '❯ '"
     cat > "$STUBDIR/tmux" <<STUB
 #!/usr/bin/env bash
 sub="\$1"; shift
 case "\$sub" in
   capture-pane)
-    n=\$(cat "$COUNT"); n=\$((n + 1)); echo "\$n" > "$COUNT"
-    printf '%s\n' '──── x ──' '❯ ' ;;
-  send-keys) printf '%s|' "\$@" >> "$SENT"; printf '\n' >> "$SENT" ;;
+    if [ -f "$STATE_E" ]; then printf '%s\n' $busy
+    else printf '%s\n' '──── x ──' '❯ '
+    fi ;;
+  send-keys)
+    printf '%s|' "\$@" >> "$SENT"; printf '\n' >> "$SENT"
+    case "\$*" in *Enter*) touch "$STATE_E" ;; esac ;;
 esac
 STUB
     chmod +x "$STUBDIR/tmux"
+}
 
+@test "continue watcher types the prompt literally then Enters" {
+    make_continue_stub submits
     run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
         AUTONAME_VERIFY_DELAY=0.01 \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
@@ -219,6 +230,25 @@ STUB
     sent="$(cat "$SENT")"
     [[ "$sent" == *"-l|continue with task 3|"* ]]
     [[ "$sent" == *"Enter|"* ]]
+    # Exactly one Enter: a pane that went busy is a confirmed submit.
+    [ "$(grep -c 'Enter|' "$SENT")" -eq 1 ]
+}
+
+# Regression: line 2 used to Enter with no settle after a long literal send, so
+# the TUI absorbed the Enter as a newline. `is_typing` then read the resulting
+# multi-line composer as empty (it only inspects the last ❯ line) and the
+# watcher exited 0 having submitted nothing. Verification keys on is_busy now.
+@test "continue watcher retries and fails when the Enter is absorbed" {
+    make_continue_stub absorbs
+    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
+        AUTONAME_VERIFY_DELAY=0.01 \
+        bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
+    [ "$status" -ne 0 ]
+
+    sent="$(cat "$SENT")"
+    [ "$(grep -c 'Enter|' "$SENT")" -eq 3 ]
+    # The text is never re-sent — that would concatenate a second copy.
+    [ "$(grep -c -- '-l|' "$SENT")" -eq 1 ]
 }
 
 @test "continue watcher sends nothing while user types" {
