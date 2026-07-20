@@ -1037,6 +1037,15 @@ watcher only arms at turn end. And the directive text is shared with
 `handoff-memory-probe`, which had been left on the older Bash path when gitlore
 built the file-trigger *for* handoff; one helper realigns both.
 
+One ordering constraint fell out of the first live run. The design assumed the
+FR11 approval and the `autocompact` write could land in one turn, but an
+approval is a *user response*, so asking for it ends the turn — and `Stop` is
+exactly where the compaction arms. An `autocompact` written alongside the
+approval request would compact away the conversation the unapproved summary is
+drawn from, defeating the reason memory commits first. So the write is deferred
+to the turn after the directive resolves; the skill body states this as a
+condition on step 3 rather than leaving it to be rediscovered.
+
 ## References
 
 - LangChain's context engineering framing:

@@ -25,7 +25,13 @@ user whether to proceed.
    **exactly**. Nothing printed → nothing to do. The probe owns the
    decision; do not re-derive or verify it yourself.
 
-3. Write `./.claude/autocompact` — exactly two lines:
+3. Write `./.claude/autocompact` — **only once step 2 is fully complete**,
+   never in the same turn as a question the directive told you to ask.
+   Writing it arms compaction at the *next* turn boundary, and a question
+   ends the turn — so an autocompact written alongside an approval request
+   compacts away the very conversation the answer applies to. When a
+   directive needs an answer, end the turn on the question and write the
+   file in the turn after it is resolved. Exactly two lines:
 
    - **Line 1** — the literal command to run: `/compact`, or
      `/compact <directive>` when a focus instruction would help the
