@@ -1,6 +1,8 @@
 # precompact drives compaction — design spec
 
 **Created:** 2026-07-18
+**Revised:** 2026-07-19 — trigger architecture reworked after a TUI spike
+(see "Verified TUI behavior")
 **Status:** Approved design, pending implementation
 **Skill affected:** `handoff:precompact`
 
@@ -140,92 +142,175 @@ The file *is* "the two things to send." Line 1 carries the literal `/compact`
 so the watcher types it verbatim and stays dumb. A light sanity check — line 1
 begins with `/compact` — guards against garbage/cross-project misfires.
 
-### `write-compact.sh` — new `PostToolUse(Write|Edit)` hook
+### Trigger architecture — hooks, not a mid-turn watcher
 
-Mirrors `write-rename.sh`:
+Three hooks, each firing on a harness-authoritative signal. **No hook spawns a
+watcher from inside a live turn.** The empirical basis is the taxonomy below;
+the short version is that prose typed mid-turn is injected into the running
+turn, so a watcher that starts polling mid-turn can corrupt the very work it is
+meant to preserve.
+
+**1. `write-compact.sh` — `PostToolUse(Write|Edit)`: validate only.**
 
 1. Match writes whose resolved path is `$cwd/.claude/autocompact` (via
-   `handoff_root` + `handoff_resolve`, a **consume-time** cross-project guard
-   — no separate PreToolUse guard and no activation gate, exactly like
-   `autorename`; the file is ephemeral, gitignored/untracked, consumed on
-   write).
-2. Read the two lines; validate (exactly two lines, line 1 begins `/compact`).
-   On malformed content: emit a `systemMessage` and no-op.
-3. Delete the file.
-4. In tmux (`$TMUX` + `$TMUX_PANE` set): spawn a detached
-   `compact-when-idle.sh` via `setsid`/`nohup` fallback (same detach dance as
-   `write-rename.sh`), passing the pane id and the two lines. Emit a curt
-   `systemMessage` ("will compact once idle …").
-5. Outside tmux: emit both lines for the user to paste, in
-   `hookSpecificOutput.additionalContext` + a user-facing `systemMessage`
-   (mirroring `write-rename.sh`'s degradation).
+   `handoff_root` + `handoff_resolve`, a **consume-time** cross-project guard —
+   no separate PreToolUse guard and no activation gate, exactly like
+   `autorename`; the file is ephemeral and gitignored/untracked).
+2. Validate: exactly two lines, line 1 begins `/compact`.
+3. On malformed content: emit a user-facing `systemMessage` **and** an
+   agent-facing `hookSpecificOutput.additionalContext` naming the constraint
+   that failed, so the agent can rewrite the file in the same turn instead of
+   discovering the no-op at `Stop`. This is a DIRECTIVE channel, not a DENY
+   channel, so the wording is imperative.
+4. Never spawns, never deletes. The file must survive to `Stop`.
 
-### `compact-when-idle.sh` — new detached watcher
+**2. `stop-compact.sh` — `Stop`: arm the compaction.**
+
+Fires when the main loop has actually finished the turn — the only point at
+which typing a slash command means what this design assumes.
+
+1. No `.claude/autocompact` → silent no-op (the common case; `Stop` fires on
+   every turn).
+2. Rename `autocompact` → `autocompact.pending` **before** spawning, so a later
+   `Stop` in the same session cannot re-arm.
+3. In tmux: spawn a detached `compact-when-idle.sh` (same `setsid`/`nohup`
+   detach dance as `write-rename.sh`), passing the pane id and line 1.
+4. Outside tmux: emit both lines for the user to paste (mirroring
+   `write-rename.sh`'s degradation) and remove the pending file.
+
+**3. `load-compact.sh` — `SessionStart(compact)`: fire the continuation.**
+
+`source: "compact"` is the authoritative compaction-complete signal, replacing
+any pane-marker scraping.
+
+1. No `.claude/autocompact.pending` → silent no-op (also covers auto-compaction,
+   which fires the same hook).
+2. Spawn a detached `continue-when-idle.sh` with line 2, then delete the pending
+   file.
+
+Line 2 is **typed as an ordinary prompt at idle**, not injected as
+`additionalContext`: `additionalContext` is context, not a prompt, and cannot
+start a turn. Typing it means it drains as its own turn and fires
+`UserPromptSubmit` normally.
+
+### `compact-when-idle.sh` — detached watcher (line 1)
 
 Sibling of `rename-when-idle.sh`; reuses `_rename-lib.sh` (`is_busy`,
-`is_typing`, `strip`). Usage: `compact-when-idle.sh <pane-id> <line1> <line2>`.
+`is_typing`, `strip`). Usage: `compact-when-idle.sh <pane-id> <line1>`.
 
-1. Wait until the pane is **stably idle** (`is_busy` false for ~3 consecutive
-   polls, up to a timeout) — readiness is *not* the `❯` glyph (see verified
-   findings). Never type over a prompt the user is editing (`is_typing`).
-2. Send line 1 literally (`send-keys -l`), then `Enter`. Verify it submitted
-   (input cleared / line 1 left the input); retry a few times like the rename
-   watcher.
-3. Wait for the **`⎿ Compacted (`** marker to appear in the pane (generous
-   timeout). This is the compaction-complete signal — **not** busy-polling,
-   because compaction can be too fast to catch as busy (verified).
-4. Send line 2 literally, then `Enter`. Verify submitted.
+1. Wait until the pane is **stably idle** and the composer is empty
+   (`is_typing` false). `is_typing` is load-bearing, not defensive:
+   `send-keys` concatenates onto half-typed user text, which is now the
+   principal corruption risk.
+2. **Type-verify-submit.** Send line 1 literally with `send-keys -l` and *no*
+   Enter. Capture the pane and confirm the TUI rendered command recognition (an
+   autocomplete row for the command). If instead it rendered
+   `No commands match "…"`, send `C-u` to clear, abort, and leave a diagnostic
+   — never Enter on an unrecognized command.
+3. Enter. Verify submission (line 1 left the composer); retry a few times like
+   the rename watcher.
+4. Exit. Completion is **not** this watcher's problem — `SessionStart(compact)`
+   owns it.
 
-The watcher never depends on a queued message surviving compaction's context
-swap: line 2 is sent only after the `Compacted` marker, so it lands as a fresh
-idle submit against the compacted context. (Input-during-busy queuing is a
-safety net, not a dependency — see findings.)
+Predicates must read **only the visible pane**, never `capture-pane -S`
+history: a stale timer glyph in scrollback reads as BUSY long after the turn
+ended (observed during the spike).
+
+### `continue-when-idle.sh` — detached watcher (line 2)
+
+Usage: `continue-when-idle.sh <pane-id> <line2>`. Wait for stable idle and an
+empty composer, send line 2 literally, Enter, verify. No recognition check —
+line 2 is prose, and prose at idle is the safe class.
 
 ---
 
 ## Verified TUI behavior (empirical basis)
 
-Verified this session against **Claude Code v2.1.214**, Haiku 4.5, tmux 3.5a,
-by driving a throwaway `claude` session in a private tmux socket (snapshots in
-the session scratchpad). These are the load-bearing facts; the implementer
-should not re-derive them:
+Verified **2026-07-19** against **Claude Code v2.1.215**, Opus 4.8, tmux 3.5a,
+by driving a throwaway `claude` session in a detached tmux session with a
+logging hook on every event (spike preserved in the session scratchpad; the
+plugin's own suite was untouched). These are the load-bearing facts; the
+implementer should not re-derive them.
 
-1. **Input during any busy operation is queued, not interrupted or merged.**
-   Typing + Enter while a turn (or compaction) runs shows "Press up to edit
-   queued messages"; the queued text runs as its own turn afterward. Esc
-   interrupts; typing does not.
-2. **Readiness ≠ the `❯` glyph.** The prompt glyph appears while the backend
-   still shows `/rc connecting…`; keystrokes/Enter sent then do **not** submit.
-   Must wait for a stable connected-idle state (what `rename-when-idle.sh`
-   already does).
-3. **Busy indicator = the `(<n>s ·` timer** plus a randomized gerund
-   (`Frolicking…`, `Fiddle-faddling…`, `Effecting…`). `_rename-lib.sh`'s
-   `is_busy` greps `\([0-9]+s ·|esc to interrupt` — the timer clause still
-   matches this version. The predicate transfers unchanged.
-4. **`/compact <directive>` submits via `send-keys -l` + `Enter`** and
-   triggers real compaction: the pane shows `⎿ Compacted (ctrl+o to see full
-   summary)` and the `SessionStart:compact` hooks fire.
-5. **Compaction can be too fast to catch as "busy"** (≈40k context on Haiku
-   compacted between 0.2s polls). The reliable completion signal is the
-   `⎿ Compacted (` marker line, not a busy→idle transition.
-6. **A continuation sent after the marker runs against the compacted
-   context** — verified by a correct answer sourced from the retained summary.
+### Mid-turn input taxonomy
+
+Typing while a turn is running does **not** have one uniform behavior. All four
+rows observed directly:
+
+| Input typed mid-turn | Behavior | `UserPromptSubmit` |
+|---|---|---|
+| `/focus` (TUI-local) | intercepted immediately, never queued | — |
+| `/compact` (harness action) | queued → interpreted at the turn boundary | no |
+| `/handoff` (plugin/skill) | queued → drains as **its own turn** | **yes** |
+| plain prose | **injected into the running turn** | no |
+
+Consequences that drive the design:
+
+1. **Slash-shaped input is never delivered to the model as prose.** An
+   unrecognized command drains to `● Unknown command: …`. The feared
+   "agent hallucinates a compaction" path does not exist.
+2. **Prose is the dangerous input.** It is injected into the running turn's
+   next model call — confirmed by the probe session replying *"Noted your
+   mid-turn message: PROBE-CONTROL-PLAIN-TEXT … I'll continue."* Line 2 typed
+   mid-turn would corrupt the turn it is meant to follow.
+3. **A queued `/compact` fires at the *next* `Stop`**, which may be an early
+   turn boundary rather than the end of the work.
+
+### Hook signals
+
+4. **The chain fires in order**, with ~0.75s from `Stop` to the queue draining:
+   `Stop` → `PreCompact` (+0.75s) → `SessionStart` with `"source":"compact"`
+   (+47s). A queued plugin command shows the same latency: `Stop` →
+   `UserPromptSubmit` (+0.76s) with `prompt` set to the raw command text.
+5. **`Stop` does not fire on Esc interrupt.** An interrupted turn cannot arm the
+   compaction — the fail-safe direction, for free.
+6. **`Stop` payload** carries `session_id`, `cwd`, `prompt_id`,
+   `permission_mode`, `effort`, `stop_hook_active`, `last_assistant_message`,
+   `background_tasks`, `session_crons`.
+
+### Pane mechanics
+
+7. **Command recognition is visible before Enter.** Typing `/compact` with no
+   Enter renders an autocomplete row with the command and its description;
+   `/comzzz` renders `No commands match "/comzzz"`. Both are distinguishable in
+   `capture-pane`, which is what makes type-verify-submit implementable.
+8. **Busy indicator = the `[0-9]+s ·` timer** plus a randomized gerund
+   (`Effecting…`, `Cogitated…`). `_rename-lib.sh`'s `is_busy` transfers
+   unchanged — but predicates must read only the **visible** pane. A
+   `capture-pane -S` history read matched a stale timer and reported BUSY after
+   `Stop` had already fired.
+9. **The tmux socket is unreachable from the agent's sandboxed Bash**
+   (`error connecting to /tmp/tmux-…: Operation not permitted`), confirming the
+   hook-spawned watcher as the only sandbox-clean path.
+
+### Investigated and disproven
+
+10. **Queued input does not bypass `UserPromptSubmit` in general.** `/compact`
+    skips it because it is a harness action that never becomes a prompt, not
+    because queueing suppresses hooks. A queued `/handoff` fired
+    `UserPromptSubmit` with `prompt == "/handoff"` — so
+    `prompt-pre-hook.sh`'s wipe works correctly when the user types
+    `/handoff:handoff` at a busy session. No fix needed.
 
 ---
 
 ## Files touched
 
 **New:**
-- `scripts/write-compact.sh` — PostToolUse entry, spawns the watcher / paste
-  fallback.
-- `scripts/compact-when-idle.sh` — detached watcher.
+- `scripts/write-compact.sh` — PostToolUse validator (no spawn, no delete).
+- `scripts/stop-compact.sh` — `Stop` entry; arms via `autocompact.pending` and
+  spawns the line-1 watcher / paste fallback.
+- `scripts/load-compact.sh` — `SessionStart(compact)` entry; spawns the line-2
+  watcher.
+- `scripts/compact-when-idle.sh` — detached watcher, line 1, type-verify-submit.
+- `scripts/continue-when-idle.sh` — detached watcher, line 2.
 - `scripts/_probe-lib.sh` — shared memory-commit + SDD directive text.
-- `write-compact.sh` coverage — extend `tests/hook-test.bats` (path /
-  two-line validation, tmux-spawn vs paste fallback), matching how
-  `write-rename.sh` is exercised.
-- `compact-when-idle.sh` predicate/marker coverage — extend
-  `tests/rename-test.bats` for the `Compacted`-marker wait against a synthetic
-  pane.
+- `write-compact.sh` / `stop-compact.sh` / `load-compact.sh` coverage — extend
+  `tests/hook-test.bats` (path + two-line validation, malformed-file
+  `additionalContext`, arm-once-only via the `.pending` rename, tmux-spawn vs
+  paste fallback), matching how `write-rename.sh` is exercised.
+- Watcher coverage — extend `tests/rename-test.bats` for the command-recognition
+  predicate (autocomplete row vs `No commands match`) against a synthetic pane.
 
 **Changed:**
 - `skills/precompact/SKILL.md` — full rewrite: generic vocab-free body, drop
@@ -238,7 +323,9 @@ should not re-derive them:
   the `gitlore.commitCommand` / `-F -` path.
 - `hooks/hooks.json` — add `write-compact.sh` to the existing
   `PostToolUse(Write|Edit)` array (alongside `write-stage.sh`,
-  `write-rename.sh`).
+  `write-rename.sh`); add a new `Stop` entry; extend the `SessionStart` matcher
+  to `startup|clear|compact`, dispatching `compact` to `load-compact.sh` and
+  leaving `startup|clear` on `load-handoff.sh`.
 - `tests/memory-probe.bats` — update for the file-trigger output.
 - `tests/precompact-probe.bats` — cover the composed memory + SDD output.
 - `DESIGN.md` — dated subsection recording the reversal (memory commit +
@@ -264,10 +351,19 @@ should not re-derive them:
   fragile. It also composes with the magic-file pattern (message, trigger,
   `autocompact` are all files a hook consumes) and orders memory-before-
   compaction naturally.
-- **Marker-gated continuation.** Gating line 2 on the `⎿ Compacted (` marker
-  avoids depending on queue-through-compaction (the one behavior not verified:
-  a queued message surviving the context swap). Queuing remains a safety net
-  if timing slips.
+- **Hook-gated, not watcher-gated.** Both typed lines are gated on
+  harness-authoritative signals (`Stop`, `SessionStart(compact)`) rather than on
+  a watcher polling a live pane. A mid-turn watcher has no safe idle window to
+  find: the spinner is absent during permission prompts, and prose typed into a
+  live turn is injected into it. The idle-wait survives inside each watcher, but
+  demoted from safety mechanism to settle delay.
+- **`SessionStart(compact)` over the `⎿ Compacted (` marker.** The hook is
+  authoritative and needs no pane scraping; it also covers the case where
+  compaction completes too fast to observe as a busy→idle transition.
+- **Type-verify-submit.** Command recognition is visible in the composer before
+  Enter, so the watcher checks rather than hopes. Cheap insurance against a
+  contaminated composer, which the spike identified as the residual risk once
+  the hallucination path was ruled out.
 - **Magic file mirrors `autorename`.** Ephemeral, consumed-on-write,
   path-checked at consume time — no PreToolUse guard, no activation gate.
 - **Migrate the shared probe (not precompact-only).** handoff was left on the
@@ -285,6 +381,8 @@ should not re-derive them:
   the resume.
 - A `PreCompact` hook. It fires too late to author a continuation and cannot
   drive the resubmit; rejected in favor of the magic-file + watcher path.
+  (`SessionStart(compact)`, which fires *after* compaction, does the
+  completion-signalling job instead.)
 - Driving tmux from the Bash tool. The socket is outside the sandbox (verified:
   even the test needed the sandbox disabled); the hook-spawned watcher is the
   only sandbox-clean path.
