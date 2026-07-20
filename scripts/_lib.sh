@@ -10,6 +10,50 @@
 HANDOFF_REL_TASK=".claude/handoff-task.md"
 # shellcheck disable=SC2034
 HANDOFF_REL_RENAME=".claude/autorename"
+# shellcheck disable=SC2034
+HANDOFF_REL_COMPACT=".claude/autocompact"
+# The armed rename target. Stop moves autocompact here before spawning, so a
+# later Stop in the same session cannot re-arm; SessionStart(compact) consumes it.
+# shellcheck disable=SC2034
+HANDOFF_REL_COMPACT_PENDING=".claude/autocompact.pending"
+
+# Parse and validate an autocompact file ($1) into the caller's COMPACT_L1
+# (the literal /compact command to type) and COMPACT_L2 (the continuation
+# prompt). Returns 0 when well-formed; otherwise returns 1 with COMPACT_ERR set
+# to a one-phrase reason naming the constraint that failed.
+#
+# Exactly two lines, a single trailing newline tolerated. Line 2 must be a
+# single line because in the TUI one Enter is one submit — an embedded newline
+# would submit the continuation early. Read with a `read` loop rather than
+# mapfile: bash 3.2 (macOS system bash) has no mapfile.
+# shellcheck disable=SC2034  # assigned for the caller's scope
+handoff_compact_read() {
+    local file="$1" line count=0
+    COMPACT_L1=""; COMPACT_L2=""; COMPACT_ERR=""
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        count=$((count + 1))
+        case $count in
+            1) COMPACT_L1="$line" ;;
+            2) COMPACT_L2="$line" ;;
+        esac
+    done < "$file"
+
+    if [ "$count" -ne 2 ]; then
+        COMPACT_ERR="the file must hold exactly two lines (found $count)"
+        return 1
+    fi
+    case "$COMPACT_L1" in
+        "/compact"|"/compact "*) ;;
+        *) COMPACT_ERR="line 1 must be \`/compact\` or \`/compact <directive>\`"
+           return 1 ;;
+    esac
+    if [ -z "${COMPACT_L2// /}" ]; then
+        COMPACT_ERR="line 2 must be the continuation prompt, and must not be empty"
+        return 1
+    fi
+    return 0
+}
 
 # Portable path canonicalization. `realpath -m` is GNU-only; BSD
 # `realpath` rejects non-existent components. Python handles both and

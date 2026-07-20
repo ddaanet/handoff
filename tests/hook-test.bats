@@ -537,3 +537,193 @@ WTTASK
     [ ! -e "$wt/.claude/autorename" ]
     echo "$output" | jq -e '.systemMessage | test("/rename WT Title")' >/dev/null
 }
+
+# --- write-compact (PostToolUse validator) ---
+#
+# Validate only: never spawns, never deletes. The file must survive to Stop,
+# which is the hook that actually arms the compaction.
+
+# Write a .claude/autocompact under $1 with the remaining args as lines.
+seed_autocompact() {
+    local dir="$1"; shift
+    printf '%s\n' "$@" > "$dir/.claude/autocompact"
+}
+
+run_write_compact() {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autocompact" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-compact.sh
+    ' _ "$1"
+}
+
+@test "write-compact (well-formed: silent, file survives)" {
+    seed_autocompact "$tmp" "/compact focus on the parser" "continue with task 3"
+    run_write_compact "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ -f "$tmp/.claude/autocompact" ]
+}
+
+@test "write-compact (bare /compact: accepted)" {
+    seed_autocompact "$tmp" "/compact" "continue with task 3"
+    run_write_compact "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "write-compact (one line: directive names the two-line constraint)" {
+    seed_autocompact "$tmp" "/compact"
+    run_write_compact "$tmp"
+    [ "$status" -eq 0 ]
+    [ -f "$tmp/.claude/autocompact" ]
+    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("two lines")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
+}
+
+@test "write-compact (three lines: directive)" {
+    seed_autocompact "$tmp" "/compact" "continue" "extra"
+    run_write_compact "$tmp"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("two lines")' >/dev/null
+}
+
+@test "write-compact (line 1 not /compact: directive names the prefix)" {
+    seed_autocompact "$tmp" "compact now" "continue with task 3"
+    run_write_compact "$tmp"
+    [ "$status" -eq 0 ]
+    [ -f "$tmp/.claude/autocompact" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/compact")' >/dev/null
+}
+
+@test "write-compact (unrelated path: no-op)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$1/README.md" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-compact.sh
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "write-compact (cross-project autocompact: no-op)" {
+    seed_autocompact "$other" "/compact" "continue"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$2/.claude/autocompact" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-compact.sh
+    ' _ "$tmp" "$other"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "write-compact (worktree cwd: validates worktree autocompact)" {
+    wt="$(make_worktree wtC)"
+    seed_autocompact "$wt" "bad first line" "continue"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autocompact" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-compact.sh
+    ' _ "$wt"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/compact")' >/dev/null
+}
+
+# --- stop-compact (Stop: arm the compaction) ---
+
+run_stop_compact() {
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, stop_hook_active:false}" \
+        | '"$2"' bash scripts/stop-compact.sh
+    ' _ "$1"
+}
+
+@test "stop-compact (no autocompact: silent no-op)" {
+    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "stop-compact (in tmux: renames to .pending and reports armed)" {
+    seed_autocompact "$tmp" "/compact keep the parser work" "continue with task 3"
+    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact" ]
+    [ -f "$tmp/.claude/autocompact.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("compact")' >/dev/null
+}
+
+@test "stop-compact (arms once only: second Stop is silent)" {
+    seed_autocompact "$tmp" "/compact" "continue with task 3"
+    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "stop-compact (not in tmux: emits both lines to paste, clears pending)" {
+    seed_autocompact "$tmp" "/compact keep the parser work" "continue with task 3"
+    run_stop_compact "$tmp" 'env -u TMUX -u TMUX_PANE'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact" ]
+    [ ! -e "$tmp/.claude/autocompact.pending" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/compact keep the parser work")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("continue with task 3")' >/dev/null
+}
+
+@test "stop-compact (malformed file survived write-compact: no arming)" {
+    seed_autocompact "$tmp" "not a command" "continue"
+    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
+}
+
+@test "stop-compact (worktree cwd: arms the worktree file)" {
+    wt="$(make_worktree wtS)"
+    seed_autocompact "$wt" "/compact" "continue with task 3"
+    run_stop_compact "$wt" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ -f "$wt/.claude/autocompact.pending" ]
+}
+
+# --- load-compact (SessionStart(compact): fire the continuation) ---
+
+run_load_compact() {
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, source:\"compact\"}" \
+        | '"$2"' bash scripts/load-compact.sh
+    ' _ "$1"
+}
+
+@test "load-compact (no pending: silent no-op)" {
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "load-compact (pending present: consumes it and reports the continuation)" {
+    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact.pending"
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("continue")' >/dev/null
+}
+
+@test "load-compact (not in tmux: emits continuation to paste, clears pending)" {
+    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact.pending"
+    run_load_compact "$tmp" 'env -u TMUX -u TMUX_PANE'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact.pending" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("continue with task 3")' >/dev/null
+}
+
+@test "load-compact (worktree cwd: consumes the worktree pending file)" {
+    wt="$(make_worktree wtL)"
+    printf '%s\n' "/compact" "continue with task 3" > "$wt/.claude/autocompact.pending"
+    run_load_compact "$wt" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$wt/.claude/autocompact.pending" ]
+}

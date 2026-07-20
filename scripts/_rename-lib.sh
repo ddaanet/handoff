@@ -15,3 +15,8 @@ is_busy() { strip | grep -Eq '\([0-9]+s ·|esc to interrupt'; }
 
 # Typing: the last "❯" prompt line has non-space content — user is composing.
 is_typing() { strip | grep -E '❯' | tail -n1 | grep -Eq '❯[[:space:]]+[^[:space:]]'; }
+
+# A slash command typed with no Enter renders either an autocomplete row for
+# the command or `No commands match "…"`. True on the latter: the composer holds
+# something the TUI will not run, so Enter must never follow.
+is_unknown_command() { strip | grep -Fq 'No commands match'; }

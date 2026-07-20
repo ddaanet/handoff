@@ -1,5 +1,5 @@
 {
-  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, read guard, and post-write staging. See CLAUDE.md for details.",
+  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, read guard, post-write staging, and the precompact compaction driver (write validate, Stop arm, SessionStart(compact) resume). See CLAUDE.md for details.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -57,6 +57,22 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-rename.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-compact.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/stop-compact.sh",
+            "timeout": 10
           }
         ]
       }
@@ -69,6 +85,16 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/load-handoff.sh",
             "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/load-compact.sh",
+            "timeout": 10
           }
         ]
       }
