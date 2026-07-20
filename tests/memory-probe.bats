@@ -1,11 +1,14 @@
 #!/usr/bin/env bats
 # Tests for scripts/memory-probe.sh — the read-only gitlore-memory detector
-# the handoff skill runs at wrap-up. Builds a synthetic gitlore repo (a repo
-# with a gitlore-memory submodule registration in .gitmodules and a nested
-# memory git repo) and asserts the probe's stdout contract:
+# the handoff skill runs at wrap-up. Builds a synthetic gitlore repo (see
+# tests/probe-helpers.bash) and asserts the probe's stdout contract:
 #   not gitlore / clean / unmaterialized  -> silent (empty stdout)
-#   dirty + resolvable committer          -> directive naming `<abs> -F -`
-#   dirty + unresolvable committer        -> restart hint
+#   dirty                                 -> file-trigger directive naming
+#                                            the message + trigger paths
+#
+# The directive body itself lives in scripts/_probe-lib.sh and is shared with
+# the precompact probe; this suite pins handoff's composition of it (memory
+# directive alone, no SDD nudge).
 #
 # Run with: bats tests/memory-probe.bats   (from plugin root)
 
@@ -13,31 +16,7 @@ setup() {
     repo_root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     PROBE="$repo_root/scripts/memory-probe.sh"
     SHIM="$repo_root/bin/handoff-memory-probe"
-}
-
-# Build a synthetic gitlore-managed repo and echo its path. The memory
-# submodule is a nested git repo with one committed file (clean by default).
-# Pass a commitCommand path as $1 (defaults to an executable stub in the repo).
-make_gitlore_repo() {
-    local repo="$BATS_TEST_TMPDIR/glrepo"
-    rm -rf "$repo"; mkdir -p "$repo/memory"
-    git -C "$repo" init -q
-    cat > "$repo/.gitmodules" <<'EOF'
-[submodule "gitlore-memory"]
-	path = memory
-	url = ./memory
-EOF
-    git -C "$repo/memory" init -q
-    echo "seed" > "$repo/memory/seed.md"
-    git -C "$repo/memory" add -A
-    git -C "$repo/memory" -c user.email=t@t -c user.name=t commit -qm seed
-    cat > "$repo/fake-commit-memory.sh" <<'EOF'
-#!/usr/bin/env bash
-echo "COMMIT-MEMORY $*"
-EOF
-    chmod +x "$repo/fake-commit-memory.sh"
-    git -C "$repo" config gitlore.commitCommand "${1:-$repo/fake-commit-memory.sh}"
-    printf '%s\n' "$repo"
+    load probe-helpers
 }
 
 @test "probe: not gitlore-managed -> silent" {
@@ -65,36 +44,64 @@ EOF
 
 @test "probe: gitlore stanza but empty path -> silent" {
     repo="$(make_gitlore_repo)"
-    git -C "$repo" config --file "$repo/.gitmodules" --unset submodule.gitlore-memory.path
+    git -C "$repo" config --file "$repo/.gitmodules" \
+        --unset submodule.gitlore-memory.path
     run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
-@test "probe: dirty memory -> directive naming the abs commit command" {
+@test "probe: dirty memory -> directive naming both IPC file paths" {
     repo="$(make_gitlore_repo)"
-    echo "new entry" > "$repo/memory/feedback_x.md"
+    dirty_memory "$repo"
     run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
     [ "$status" -eq 0 ]
     echo "$output" | grep -q 'uncommitted changes'
     echo "$output" | grep -q 'feedback_x.md'
-    echo "$output" | grep -qF "$repo/fake-commit-memory.sh -F -"
-    echo "$output" | grep -qi 'approval'
+    echo "$output" | grep -qF "$repo/.claude/gitlore-memory-message"
+    echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
 }
 
-@test "probe: dirty memory + unresolvable committer -> restart hint" {
-    repo="$(make_gitlore_repo "/nonexistent/commit-memory.sh")"
-    echo "new entry" > "$repo/memory/feedback_x.md"
+@test "probe: dirty memory -> directive demands blockquote + approval" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
     run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qi 'restart'
-    echo "$output" | grep -q 'gitlore.commitCommand'
+    echo "$output" | grep -qi 'blockquote'
+    echo "$output" | grep -qi 'approv'
+}
+
+@test "probe: dirty memory -> no stale commit-memory Bash path" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"-F -"* ]]
+    [[ "$output" != *"commitCommand"* ]]
+}
+
+@test "probe: handoff composition carries no SDD nudge" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    add_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *".superpowers/sdd/progress.md"* ]]
+}
+
+@test "probe: detected from a subdirectory of the repo -> directive" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    mkdir -p "$repo/pkg/src"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo/pkg/src" "$PROBE"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
 }
 
 @test "shim: bin/handoff-memory-probe execs the probe (dirty -> directive)" {
     repo="$(make_gitlore_repo)"
-    echo "new entry" > "$repo/memory/feedback_x.md"
+    dirty_memory "$repo"
     run bash -c 'cd "$1" && "$2"' _ "$repo" "$SHIM"
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qF "$repo/fake-commit-memory.sh -F -"
+    echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
 }
