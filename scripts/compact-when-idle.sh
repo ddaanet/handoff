@@ -37,7 +37,7 @@ done
 
 # Load-bearing, not defensive: send-keys concatenates onto half-typed user text,
 # which is the principal corruption risk once the turn-boundary gate is in place.
-snap | is_typing && exit 0
+snap | is_typing && watcher_fail "the user was composing a prompt, so \`$LINE1\` was never typed"
 
 # Type-verify-submit. Send the command literally with NO Enter, then read back
 # whether the TUI recognized it before committing to a keystroke that runs it.
@@ -47,7 +47,7 @@ if snap | is_unknown_command; then
     # Clear the composer and leave the pane as we found it. Never Enter on a
     # command the TUI has already said it cannot run.
     tmux send-keys -t "$PANE" C-u
-    exit 1
+    watcher_fail "the TUI did not recognize \`$LINE1\`, so it was cleared unrun"
 fi
 
 # Recognized. Enter, then confirm the turn actually started; retry the Enter
@@ -59,4 +59,4 @@ for _ in 1 2 3; do
     sleep "$VERIFY_DELAY"
     snap | is_busy && exit 0
 done
-exit 1
+watcher_fail "\`$LINE1\` was typed but three Enters did not submit it"

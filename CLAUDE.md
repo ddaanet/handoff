@@ -47,7 +47,7 @@ re-injected again at the next `startup|clear`.
   itself. No rename.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
-- `hooks/hooks.json` — declares nine hooks.
+- `hooks/hooks.json` — declares ten hooks.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
   `additionalContext`.
@@ -129,10 +129,13 @@ re-injected again at the next `startup|clear`.
   `tmux send-keys -l` to type `/rename <title>` + Enter. Verifies the rename
   landed (status bar) and retries up to 3×. Spawned by `write-rename.sh`;
   outlives the agent turn.
-- `scripts/_rename-lib.sh` — sourced helper for `rename-when-idle.sh`.
-  Defines `is_busy` (spinner present) and `is_typing` (prompt has content)
-  over captured tmux pane text. Pure predicates; tested directly in
-  `tests/rename-test.sh`.
+- `scripts/_rename-lib.sh` — sourced helper for every detached watcher
+  (`rename-when-idle.sh` and both compaction watchers, despite the name).
+  Defines `is_busy` (spinner present), `is_typing` (prompt has content) and
+  `is_unknown_command` over captured tmux pane text — pure predicates, tested
+  directly in `tests/rename-test.bats`. Also `watcher_fail`, which records a
+  non-delivery reason to `$HANDOFF_FAIL_FILE` (set by the spawning hook, which
+  owns the path) and exits 1; unset is tolerated.
 - `scripts/write-rename.sh` — PostToolUse(Write|Edit) entry point for session
   renaming. Matches writes whose resolved path is `$cwd/.claude/autorename`,
   reads the title from that file, deletes it, then either spawns a detached
@@ -163,6 +166,15 @@ re-injected again at the next `startup|clear`.
   compaction-complete signal — no pane scraping. Silent when there is no
   pending file (auto-compaction fires the same hook). Reading the task file
   does not consume it.
+- `scripts/report-compact-failure.sh` — `UserPromptSubmit` entry point:
+  consumes `.claude/autocompact.failed` and reports the reason on both
+  channels, also clearing a stranded `autocompact.pending`. Detached watchers'
+  exit status is read by nothing, so this file is their only path back to the
+  agent — most of all on the line-1 recognition abort, which wipes the composer
+  and leaves the pane looking untouched. `UserPromptSubmit` rather than `Stop`
+  because a watcher runs *after* the Stop that spawned it. Reports only what a
+  watcher observed itself; a stale `.pending` alone is never treated as failure
+  (it is legitimate for the whole Stop → compaction window).
 - `scripts/compact-when-idle.sh` — detached watcher for line 1.
   Type-verify-submit: sends the command with `send-keys -l` and **no** Enter,
   reads back whether the TUI rendered command recognition, and only then
@@ -277,9 +289,9 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   recipes.
   The compaction driver is covered in the two existing suites rather than a
   new file: `tests/hook-test.bats` for `write-compact.sh` / `stop-compact.sh`
-  / `load-compact.sh`, `tests/rename-test.bats` for the two watchers and the
-  `is_unknown_command` predicate (they share `_rename-lib.sh` and the tmux
-  stub).
+  / `load-compact.sh` / `report-compact-failure.sh`, `tests/rename-test.bats`
+  for the two watchers, the `is_unknown_command` predicate and the
+  `watcher_fail` recording (they share `_rename-lib.sh` and the tmux stub).
 - `just py-test` — `pytest`: unit tests of `worktree_root.py`
   (`tests/test_worktree_root.py`) — the worktree-root resolver's branch
   matrix.

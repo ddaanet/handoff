@@ -1,5 +1,5 @@
 {
-  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, read guard, post-write staging, and the precompact compaction driver (write validate, Stop arm, SessionStart(compact) resume). See CLAUDE.md for details.",
+  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, read guard, post-write staging, and the precompact compaction driver (write validate, Stop arm, SessionStart(compact) resume, watcher-failure report). See CLAUDE.md for details.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,6 +7,11 @@
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/prompt-pre-hook.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/report-compact-failure.sh",
             "timeout": 5
           }
         ]

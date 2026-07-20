@@ -20,3 +20,15 @@ is_typing() { strip | grep -E '❯' | tail -n1 | grep -Eq '❯[[:space:]]+[^[:sp
 # the command or `No commands match "…"`. True on the latter: the composer holds
 # something the TUI will not run, so Enter must never follow.
 is_unknown_command() { strip | grep -Fq 'No commands match'; }
+
+# Record a non-delivery, then exit 1. Watchers run detached: nothing reads their
+# exit status, so a line that never lands is otherwise invisible — worst of all
+# on the compact watcher's C-u abort, which also wipes the composer and leaves
+# the pane looking untouched. The reason goes in $HANDOFF_FAIL_FILE (set by the
+# spawning hook, which owns the path) for report-compact-failure.sh to surface at
+# the next UserPromptSubmit. Unset is tolerated: recording is additive, never a
+# precondition for driving the pane.
+watcher_fail() {
+    [ -n "${HANDOFF_FAIL_FILE:-}" ] && printf '%s\n' "$1" > "$HANDOFF_FAIL_FILE"
+    exit 1
+}

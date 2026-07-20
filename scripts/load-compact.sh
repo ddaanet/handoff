@@ -55,6 +55,9 @@ if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
 fi
 
 PANE="$TMUX_PANE"
+# See stop-compact.sh: the detached watcher's exit status goes nowhere, so give
+# it somewhere to record a non-delivery.
+export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_COMPACT_FAILED"
 if command -v setsid >/dev/null 2>&1; then
     setsid bash "$script_dir/continue-when-idle.sh" "$PANE" "$COMPACT_L2" >/dev/null 2>&1 &
 else

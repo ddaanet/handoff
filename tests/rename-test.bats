@@ -188,10 +188,16 @@ esac
 STUB
     chmod +x "$STUBDIR/tmux"
 
-    PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=1 AUTONAME_POLL=0.01 \
-        bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compact' >/dev/null 2>&1
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=1 AUTONAME_POLL=0.01 \
+        HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compact'
 
+    # A bail is a non-delivery like any other: the line never lands, so it is
+    # reported rather than exiting 0 as it used to.
+    [ "$status" -ne 0 ]
     [ ! -s "$SENT" ]
+    grep -qi 'composing' "$fail_file"
 }
 
 # --- continue-when-idle.sh (line 2: prose, no recognition check) ---------------
@@ -263,8 +269,59 @@ esac
 STUB
     chmod +x "$STUBDIR/tmux"
 
-    PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=1 AUTONAME_POLL=0.01 \
-        bash "$SCRIPTS/continue-when-idle.sh" '%9' 'should not send' >/dev/null 2>&1
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=1 AUTONAME_POLL=0.01 \
+        HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/continue-when-idle.sh" '%9' 'should not send'
 
+    [ "$status" -ne 0 ]
     [ ! -s "$SENT" ]
+    grep -qi 'composing' "$fail_file"
+}
+
+# --- non-delivery is recorded (watchers are detached; exit status goes nowhere) -
+
+@test "continue watcher records the failure when the Enter is absorbed" {
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+    make_continue_stub absorbs
+    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
+        AUTONAME_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
+    [ "$status" -ne 0 ]
+
+    [ -s "$fail_file" ]
+    grep -qi 'continuation' "$fail_file"
+}
+
+@test "continue watcher records nothing on a confirmed submit" {
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+    make_continue_stub submits
+    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
+        AUTONAME_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
+    [ "$status" -eq 0 ]
+
+    [ ! -e "$fail_file" ]
+}
+
+@test "compact watcher records the failure on an unrecognized command" {
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+    make_compact_stub "'No commands match \"/compzzz\"'"
+    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
+        AUTONAME_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compzzz'
+    [ "$status" -ne 0 ]
+
+    [ -s "$fail_file" ]
+    grep -qi 'recognize' "$fail_file"
+}
+
+# Without a fail file configured the watcher must still behave — the recording is
+# additive, never a precondition for driving the pane.
+@test "watcher tolerates an unset HANDOFF_FAIL_FILE" {
+    make_continue_stub absorbs
+    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
+        AUTONAME_VERIFY_DELAY=0.01 \
+        bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
+    [ "$status" -ne 0 ]
 }

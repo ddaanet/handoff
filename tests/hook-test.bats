@@ -792,3 +792,62 @@ run_load_compact() {
     [ "$status" -eq 0 ]
     [ ! -e "$wt/.claude/autocompact.pending" ]
 }
+
+# --- report-compact-failure (UserPromptSubmit: surface a watcher non-delivery) ---
+#
+# Detached watchers have no channel back: a line that never lands is invisible to
+# the agent, and the compact watcher's C-u abort leaves the pane looking
+# untouched. The watcher drops a reason file; this hook is what reads it.
+
+run_report_failure() {
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, prompt:\"anything\"}" \
+        | bash scripts/report-compact-failure.sh
+    ' _ "$1"
+}
+
+@test "report-compact-failure (no failure file: silent no-op)" {
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "report-compact-failure (failure present: reports on both channels)" {
+    printf '%s\n' "the TUI did not recognize \`/compact\`" \
+        > "$tmp/.claude/autocompact.failed"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.systemMessage | test("did not recognize")' >/dev/null
+    echo "$output" | jq -e \
+        '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
+    echo "$output" | jq -e \
+        '.hookSpecificOutput.additionalContext | test("did not recognize")' >/dev/null
+}
+
+@test "report-compact-failure (consumes the file: reports once, not every prompt)" {
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
+    run_report_failure "$tmp"
+    [ ! -e "$tmp/.claude/autocompact.failed" ]
+
+    run_report_failure "$tmp"
+    [ "$output" = "" ]
+}
+
+# A line-1 failure leaves the armed file stranded as .pending: no compaction will
+# consume it, and Stop cannot re-arm from it. Clear it with the report.
+@test "report-compact-failure (clears a stranded pending file)" {
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
+    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact.pending" ]
+}
+
+@test "report-compact-failure (worktree cwd: reads the worktree file)" {
+    wt="$(make_worktree wtF)"
+    printf '%s\n' "typed but never submitted" > "$wt/.claude/autocompact.failed"
+    run_report_failure "$wt"
+    [ "$status" -eq 0 ]
+    [ ! -e "$wt/.claude/autocompact.failed" ]
+    echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
+}

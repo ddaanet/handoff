@@ -35,7 +35,7 @@ while (( SECONDS < deadline )); do
     sleep "$POLL"
 done
 
-snap | is_typing && exit 0
+snap | is_typing && watcher_fail "the user was composing a prompt, so the continuation was never typed"
 
 tmux send-keys -t "$PANE" -l "$LINE2"
 
@@ -54,4 +54,4 @@ for _ in 1 2 3; do
     sleep "$VERIFY_DELAY"
     snap | is_busy && exit 0
 done
-exit 1
+watcher_fail "the continuation prompt was typed but three Enters did not submit it"
