@@ -91,12 +91,13 @@ committed but the agent-authored task file.
 
 `PreToolUse(Write|Edit)` and `PreToolUse(Read)` hooks keep
 `handoff-task.md` inert outside the skill's control path.
-`handoff-task.md` is skill-owned: reads and writes are denied until the
-`handoff:handoff` skill has activated this session — detected
-statelessly by scraping the transcript for the same activation signals
-the wipe hooks key on (a `Skill` tool_use or a `/handoff:handoff` slash
-command). The write-guard additionally denies `handoff-task.md` writes
-whose `realpath` is not `$cwd/.claude/handoff-task.md`, catching
-multi-checkout confusion and absolute-path mistakes. The hooks
+`handoff-task.md` is skill-owned: reads and writes are denied until
+`handoff:handoff` or `handoff:precompact` has activated this session
+(both author the file) — detected statelessly by scraping the
+transcript for the same activation signals the wipe hooks key on (a
+`Skill` tool_use or a slash command). The write-guard additionally
+denies `handoff-task.md` writes whose `realpath` is not
+`$cwd/.claude/handoff-task.md`, catching multi-checkout confusion and
+absolute-path mistakes. The hooks
 themselves do plain filesystem I/O rather than agent tool calls, so
 they are never intercepted by these guards.

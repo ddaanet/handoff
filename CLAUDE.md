@@ -52,12 +52,12 @@ re-injected again at the next `startup|clear`.
   `load-handoff.sh` (header + inlined task file) and inject it via
   `additionalContext`.
   `PreToolUse(Skill)` and `UserPromptSubmit`: wipe prior handoff files
-  when `handoff:handoff` activates. The two together cover both
-  invocation paths — the `Skill` tool (agent-driven) and the slash
-  command `/handoff:handoff` (user-driven, which loads the skill body
-  directly without going through the `Skill` tool). Only `handoff`
-  wipes: `precompact` overwrites the task file in place, and a wipe
-  would drop the state it is about to carry across the compaction.
+  when `handoff:handoff` or `handoff:precompact` activates. The two
+  together cover both invocation paths — the `Skill` tool (agent-driven)
+  and the slash command (user-driven, which loads the skill body
+  directly without going through the `Skill` tool). Both skills wipe:
+  both author `handoff-task.md` from the conversation, never from the
+  file's prior contents, so each runs against a clean slate.
   `PreToolUse(Read)`: deny reads of this project's `handoff-task.md`
   until `handoff` or `precompact` has activated this session.
   `PreToolUse(Write|Edit)`: deny `handoff-task.md` writes before

@@ -328,6 +328,31 @@ $tmp" ]
     [ ! -e "$tmp/.claude/handoff.md" ]
 }
 
+# precompact authors the same handoff-task.md, so it resets on the same
+# terms — qualified and bare form, both invocation paths.
+@test "skill-pre-hook (handoff:precompact: wipe)" {
+    : > "$tmp/.claude/handoff-task.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:precompact\"}}" \
+        | bash scripts/skill-pre-hook.sh
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/handoff-task.md" ]
+    [ "$(echo "$output" | jq -r '.systemMessage // ""')" = "handoff: wiped prior handoff-task.md" ]
+}
+
+@test "skill-pre-hook (bare precompact: wipe)" {
+    : > "$tmp/.claude/handoff-task.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"precompact\"}}" \
+        | bash scripts/skill-pre-hook.sh >/dev/null
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/handoff-task.md" ]
+}
+
 # handoff-task.md is git-tracked (write-stage.sh force-adds it). When the
 # wipe deletes a committed task file, the deletion must be staged too — else
 # the write-side `git add -f` and the wipe-side rm are asymmetric and the
@@ -435,6 +460,30 @@ seed_tracked_task() {
     [ "$(echo "$output" | jq -r '.systemMessage // ""')" = "handoff: wiped prior handoff-task.md, handoff.md" ]
     [ "$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')" = "handoff activation hook wiped prior handoff files (handoff-task.md, handoff.md); they are absent." ]
     echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
+}
+
+@test "prompt-pre-hook (/handoff:precompact: wipe)" {
+    : > "$tmp/.claude/handoff-task.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, prompt:\"/handoff:precompact\"}" \
+        | bash scripts/prompt-pre-hook.sh
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/handoff-task.md" ]
+    [ "$(echo "$output" | jq -r '.systemMessage // ""')" = "handoff: wiped prior handoff-task.md" ]
+}
+
+# Prefix-only matching would fire on a longer sibling command.
+@test "prompt-pre-hook (/handoff:precompactish: no-op)" {
+    : > "$tmp/.claude/handoff-task.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, prompt:\"/handoff:precompactish\"}" \
+        | bash scripts/prompt-pre-hook.sh
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    [ -e "$tmp/.claude/handoff-task.md" ]
 }
 
 @test "prompt-pre-hook (/handoff:setup: no-op)" {
