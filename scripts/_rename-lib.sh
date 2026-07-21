@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# Pure predicates over captured tmux pane text (read stdin).
-# Sourced by rename-when-idle.sh; do not execute directly.
+# Shared machinery for every detached watcher (*-when-idle.sh): pure
+# predicates over captured tmux pane text (read stdin), the pane-polling
+# scaffold (snap / wait_for_idle / submit_or_fail, which expect the sourcing
+# watcher to have set PANE), and the shared tunables. Do not execute directly.
 # shellcheck disable=SC2034  # consumed by sourcing scripts
+
+# Tunables (overridden by the tests for speed).
+TIMEOUT="${HANDOFF_WATCHER_TIMEOUT:-30}"
+POLL="${HANDOFF_WATCHER_POLL:-0.1}"
+VERIFY_DELAY="${HANDOFF_WATCHER_VERIFY_DELAY:-0.5}"
 
 # Strip ANSI escapes and carriage returns. BSD/macOS sed honors neither
 # \x1B nor \r in a script, so feed sed a literal ESC (bash ANSI-C quote,
@@ -20,6 +27,42 @@ is_typing() { strip | grep -E '❯' | tail -n1 | grep -Eq '❯[[:space:]]+[^[:sp
 # the command or `No commands match "…"`. True on the latter: the composer holds
 # something the TUI will not run, so Enter must never follow.
 is_unknown_command() { strip | grep -Fq 'No commands match'; }
+
+# Read only the VISIBLE pane, never `capture-pane -S` history: a stale timer
+# glyph in scrollback matches is_busy long after the turn ended (spike,
+# 2026-07-19). $PANE is set by the sourcing watcher.
+# shellcheck disable=SC2154
+snap() { tmux capture-pane -p -t "$PANE" 2>/dev/null | tail -n 40; }
+
+# Wait until idle has been stable for ~3 consecutive polls, up to TIMEOUT.
+# Falls through on timeout — the caller's is_typing check is the real gate
+# against typing over a live composer.
+wait_for_idle() {
+    local deadline=$((SECONDS + TIMEOUT)) stable=0
+    while (( SECONDS < deadline )); do
+        if snap | is_busy; then stable=0; sleep "$POLL"; continue; fi
+        stable=$((stable + 1))
+        (( stable >= 3 )) && break
+        sleep "$POLL"
+    done
+    return 0
+}
+
+# Enter, then confirm the turn actually started; retry the Enter only —
+# re-sending the text would concatenate a second copy. Keyed on is_busy, not
+# is_typing: an Enter absorbed as a line break (the TUI's paste window) leaves
+# a multi-line composer whose last ❯ line reads empty, faking a successful
+# submit. Terminates the watcher either way — exit 0 on a confirmed submit,
+# watcher_fail with $1 after three misses — so only safe as a watcher's final
+# statement.
+submit_or_fail() {
+    for _ in 1 2 3; do
+        tmux send-keys -t "$PANE" Enter
+        sleep "$VERIFY_DELAY"
+        snap | is_busy && exit 0
+    done
+    watcher_fail "$1"
+}
 
 # Record a non-delivery, then exit 1. Watchers run detached: nothing reads their
 # exit status, so a line that never lands is otherwise invisible — worst of all

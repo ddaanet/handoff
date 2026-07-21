@@ -12,8 +12,6 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-script_dir="$(cd "$(dirname "$0")" && pwd)"
-
 # Stop input carries no tool_input; only .cwd is needed.
 hook_cwd="$(jq -r '.cwd // ""')"
 cwd="$(handoff_root "$hook_cwd")"
@@ -53,14 +51,7 @@ PANE="$TMUX_PANE"
 # Hand it the path to drop a reason at; report-compact-failure.sh picks it up.
 # The hook owns the path — the watcher stays ignorant of the layout.
 export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_COMPACT_FAILED"
-# setsid is Linux-only; nohup is the POSIX fallback so the watcher outlives the
-# hook on macOS too. Same detach dance as write-rename.sh.
-if command -v setsid >/dev/null 2>&1; then
-    setsid bash "$script_dir/compact-when-idle.sh" "$PANE" "$COMPACT_L1" >/dev/null 2>&1 &
-else
-    nohup bash "$script_dir/compact-when-idle.sh" "$PANE" "$COMPACT_L1" >/dev/null 2>&1 &
-fi
-disown 2>/dev/null || true
+handoff_spawn_detached compact-when-idle.sh "$PANE" "$COMPACT_L1"
 
 jq -nc --arg c "$COMPACT_L1" --arg p "$PANE" \
     '{systemMessage: ("handoff: will run \"" + $c + "\" once the prompt is idle (tmux pane " + $p + "), then resume.")}'

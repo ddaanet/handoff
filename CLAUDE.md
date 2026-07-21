@@ -47,7 +47,7 @@ re-injected again at the next `startup|clear`.
   itself. No rename.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
-- `hooks/hooks.json` — declares ten hooks.
+- `hooks/hooks.json` — declares eleven hooks.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
   `additionalContext`.
@@ -115,7 +115,18 @@ re-injected again at the next `startup|clear`.
   `handoff_root "<.cwd>"` shells out to `worktree_root.py`, returning the
   enclosing worktree root or `CLAUDE_PROJECT_DIR`. Every cwd-scoped hook
   anchors on this rather than `CLAUDE_PROJECT_DIR` directly, so worktree
-  sessions resolve to their own `.claude/`.
+  sessions resolve to their own `.claude/`. An empty or project-root cwd
+  short-circuits in bash (mirroring `worktree_root.py`'s trivial branches)
+  so the every-turn hooks (`Stop`, `UserPromptSubmit`) skip the python3
+  spawn in the common case.
+  `handoff_match_target()` is the shared preamble of every path-scoped
+  hook: one call does the jq field parse, basename fast-path, root
+  resolution, and resolved-path comparison against the expected
+  `$cwd/<rel>`, distinguishing "other file" (rc 1) from "basename matched
+  but cross-project" (rc 2, which only `write-guard.sh` denies).
+  `handoff_spawn_detached()` is the shared setsid-else-nohup detach used
+  by all three watcher-spawning hooks (setsid is Linux-only; nohup is the
+  macOS fallback).
 - `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
   this project's `handoff-task.md` until `handoff` or `precompact` has
   activated this session.
@@ -133,7 +144,12 @@ re-injected again at the next `startup|clear`.
   (`rename-when-idle.sh` and both compaction watchers, despite the name).
   Defines `is_busy` (spinner present), `is_typing` (prompt has content) and
   `is_unknown_command` over captured tmux pane text — pure predicates, tested
-  directly in `tests/rename-test.bats`. Also `watcher_fail`, which records a
+  directly in `tests/rename-test.bats`. Also the shared watcher scaffold:
+  the `HANDOFF_WATCHER_*` tunables, `snap` (visible-pane capture — never
+  scrollback), `wait_for_idle` (stable-idle poll loop) and `submit_or_fail`
+  (Enter-retry confirmed on `is_busy`; terminates the watcher either way).
+  Each watcher keeps only its distinct middle — rename-verify vs
+  type-verify-submit vs prose-settle. And `watcher_fail`, which records a
   non-delivery reason to `$HANDOFF_FAIL_FILE` (set by the spawning hook, which
   owns the path) and exits 1; unset is tolerated.
 - `scripts/write-rename.sh` — PostToolUse(Write|Edit) entry point for session

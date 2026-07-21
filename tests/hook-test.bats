@@ -105,6 +105,24 @@ make_worktree() {
     [ "$output" = "$tmp" ]
 }
 
+# The project-root and empty-cwd cases resolve in bash without spawning
+# python3 (they mirror worktree_root.py's trivial branches) — Stop and
+# UserPromptSubmit hit this on every turn. A broken python3 on PATH proves
+# the fast path never leaves the shell.
+@test "handoff_root: project-root or empty cwd -> fast path, no python3" {
+    run bash -c '
+        stub="$1/nopy"; mkdir -p "$stub"
+        printf "#!/usr/bin/env bash\nexit 97\n" > "$stub/python3"
+        chmod +x "$stub/python3"
+        PATH="$stub:$PATH"
+        source "$2/scripts/_lib.sh"
+        handoff_root "$CLAUDE_PROJECT_DIR" && handoff_root ""
+    ' _ "$BATS_TEST_TMPDIR" "$repo_root"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$tmp
+$tmp" ]
+}
+
 # --- _lib.sh: handoff_deny emitter ---
 # handoff_deny calls `exit 0`; `run` invokes it in a subshell so that exit
 # terminates only the subshell, not the test.

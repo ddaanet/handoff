@@ -7,18 +7,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-script_dir="$(cd "$(dirname "$0")" && pwd)"
-
-handoff_hook_fields "$(cat)"
-[[ -n "$HOOK_FILE_PATH" ]] || exit 0
-[[ "$(basename "$HOOK_FILE_PATH")" == "autorename" ]] || exit 0
-
-cwd="$(handoff_root "$HOOK_CWD")"
-[[ -n "$cwd" ]] || exit 0
-
-{ read -r target; read -r expected; } < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_RENAME")
-[[ "$target" == "$expected" ]] || exit 0
-
+handoff_match_target "$(cat)" "autorename" "$HANDOFF_REL_RENAME" || exit 0
 [[ -f "$target" ]] || exit 0
 title="$(tr -s '[:space:]' ' ' < "$target")"
 title="${title## }"; title="${title%% }"
@@ -41,14 +30,6 @@ if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
 fi
 
 PANE="$TMUX_PANE"
-# setsid fully detaches the watcher into its own session, but it is Linux-only
-# — macOS ships no setsid(1). Fall back to nohup (POSIX, ignores SIGHUP) so the
-# watcher outlives the hook turn on both platforms instead of silently dying.
-if command -v setsid >/dev/null 2>&1; then
-    setsid bash "$script_dir/rename-when-idle.sh" "$PANE" "$title" >/dev/null 2>&1 &
-else
-    nohup bash "$script_dir/rename-when-idle.sh" "$PANE" "$title" >/dev/null 2>&1 &
-fi
-disown 2>/dev/null || true
+handoff_spawn_detached rename-when-idle.sh "$PANE" "$title"
 jq -nc --arg t "$title" --arg p "$PANE" \
     '{systemMessage: ("handoff: will rename to \"" + $t + "\" once prompt is idle (tmux pane " + $p + ").")}'

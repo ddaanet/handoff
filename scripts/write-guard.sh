@@ -8,16 +8,12 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-handoff_hook_fields "$(cat)"
-[[ -n "$HOOK_FILE_PATH" ]] || exit 0
-[[ "$(basename "$HOOK_FILE_PATH")" == "handoff-task.md" ]] || exit 0
-
-cwd="$(handoff_root "$HOOK_CWD")"
-
-{ read -r target; read -r expected; } \
-    < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_TASK")
-
-if [[ "$target" != "$expected" ]]; then
+rc=0
+handoff_match_target "$(cat)" "handoff-task.md" "$HANDOFF_REL_TASK" || rc=$?
+if [[ "$rc" -eq 1 ]]; then
+    exit 0
+fi
+if [[ "$rc" -eq 2 ]]; then
     handoff_deny \
         "write blocked: handoff-task.md outside this project's .claude/. resolved: $target; expected: $expected." \
         "write-guard: blocked handoff-task.md write outside $cwd/.claude/"

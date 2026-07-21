@@ -5,7 +5,7 @@
 #
 # Usage: rename-when-idle.sh <pane-id> <title...>
 #
-# No `set -e`: arithmetic `(( ))` returning 0 would otherwise abort the loop.
+# No `set -e`: the sourced scaffold's `(( ))` arithmetic (wait_for_idle) returning 0 would abort under errexit.
 set -uo pipefail
 
 PANE="${1:?pane id required}"; shift
@@ -15,21 +15,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR source=_rename-lib.sh
 . "$DIR/_rename-lib.sh"
 
-# Tunables (overridden by the tests for speed).
-TIMEOUT="${AUTONAME_TIMEOUT:-30}"
-POLL="${AUTONAME_POLL:-0.1}"
-VERIFY_DELAY="${AUTONAME_VERIFY_DELAY:-0.5}"
-
-snap() { tmux capture-pane -p -t "$PANE" 2>/dev/null | tail -n 40; }
-
-# Wait until idle has been stable for ~3 consecutive polls, up to TIMEOUT.
-deadline=$((SECONDS + TIMEOUT)); stable=0
-while (( SECONDS < deadline )); do
-    if snap | is_busy; then stable=0; sleep "$POLL"; continue; fi
-    stable=$((stable + 1))
-    (( stable >= 3 )) && break
-    sleep "$POLL"
-done
+wait_for_idle
 
 # Never type over a prompt the user is editing.
 snap | is_typing && exit 0

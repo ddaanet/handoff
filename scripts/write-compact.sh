@@ -16,16 +16,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-handoff_hook_fields "$(cat)"
-[[ -n "$HOOK_FILE_PATH" ]] || exit 0
-[[ "$(basename "$HOOK_FILE_PATH")" == "autocompact" ]] || exit 0
-
-cwd="$(handoff_root "$HOOK_CWD")"
-[[ -n "$cwd" ]] || exit 0
-
-{ read -r target; read -r expected; } < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_COMPACT")
-[[ "$target" == "$expected" ]] || exit 0
-
+handoff_match_target "$(cat)" "autocompact" "$HANDOFF_REL_COMPACT" || exit 0
 [[ -f "$target" ]] || exit 0
 
 if handoff_compact_read "$target"; then

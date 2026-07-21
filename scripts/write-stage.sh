@@ -9,14 +9,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-handoff_hook_fields "$(cat)"
-[[ -n "$HOOK_FILE_PATH" ]] || exit 0
-[[ "$(basename "$HOOK_FILE_PATH")" == "handoff-task.md" ]] || exit 0
-
-cwd="$(handoff_root "$HOOK_CWD")"
-
-{ read -r target; read -r expected; } < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$HANDOFF_REL_TASK")
-[[ "$target" == "$expected" ]] || exit 0
+handoff_match_target "$(cat)" "handoff-task.md" "$HANDOFF_REL_TASK" || exit 0
 [[ -f "$target" ]] || exit 0
 
 if git -C "$cwd" add -f "$cwd/$HANDOFF_REL_TASK" 2>/dev/null; then

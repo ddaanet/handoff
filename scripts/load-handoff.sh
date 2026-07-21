@@ -13,9 +13,10 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-input="$(cat)"
-cwd="$(handoff_root "$(jq -r '.cwd // ""' <<<"$input")")"
-hook_event="$(jq -r '.hook_event_name // "SessionStart"' <<<"$input")"
+{ read -r hook_cwd; read -r hook_event; } < <(
+    jq -r '.cwd // "", .hook_event_name // "SessionStart"'
+)
+cwd="$(handoff_root "$hook_cwd")"
 
 task="$cwd/$HANDOFF_REL_TASK"
 

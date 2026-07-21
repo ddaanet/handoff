@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helpers for handoff hook scripts. Source-only; no shebang
 # execution. Source from siblings via:
-#   # shellcheck source=_lib.sh
+#   # shellcheck source-path=SCRIPTDIR source=_lib.sh
 #   source "$(dirname "$0")/_lib.sh"
 
 # Canonical relative paths inside the project. Changing these is a
@@ -103,8 +103,55 @@ handoff_hook_fields() {
 # this is the thin shell wrapper. See
 # plans/2026-06-09-per-worktree-handoff-root-design.md.
 handoff_root() {
+    local project="${CLAUDE_PROJECT_DIR:-$PWD}"
+    # Fast path: an empty cwd or one already at the project root is exactly
+    # worktree_root.py's trivial branches (`if not cwd` / `if d == project`).
+    # Skipping the interpreter matters because Stop and UserPromptSubmit call
+    # this on every turn, where python3 startup dominates the hook's cost.
+    if [[ -z "${1:-}" || "${1:-}" == "$project" ]]; then
+        printf '%s\n' "$project"
+        return 0
+    fi
     python3 "$(dirname "${BASH_SOURCE[0]}")/worktree_root.py" \
-        "${1:-}" "${CLAUDE_PROJECT_DIR:-$PWD}"
+        "$1" "$project"
+}
+
+# Match the hook-input JSON ($1) against one handoff-owned file: basename ($2)
+# as the cheap filter, then resolved-path equality with $cwd/$3 as the
+# cross-project guard. Populates the caller's HOOK_* fields (via
+# handoff_hook_fields) plus cwd, target and expected. Returns 0 when the event
+# resolves to this project's file, 1 when it is about some other file
+# (no file_path, basename mismatch, or the root cannot be resolved), and 2
+# when the basename matches but the resolved path is elsewhere
+# (cross-project) — write-guard.sh denies on 2, every other caller treats it
+# as 1.
+# shellcheck disable=SC2034  # cwd/target/expected assigned for the caller
+handoff_match_target() {
+    local json="$1" name="$2" rel="$3"
+    handoff_hook_fields "$json"
+    [[ -n "$HOOK_FILE_PATH" ]] || return 1
+    [[ "$(basename "$HOOK_FILE_PATH")" == "$name" ]] || return 1
+    cwd="$(handoff_root "$HOOK_CWD")"
+    [[ -n "$cwd" ]] || return 1
+    { read -r target; read -r expected; } \
+        < <(handoff_resolve "$HOOK_FILE_PATH" "$cwd/$rel")
+    [[ "$target" == "$expected" ]] || return 2
+}
+
+# Spawn a detached watcher (scripts/<$1>, remaining args passed through) so it
+# outlives the hook turn. setsid fully detaches it into its own session but is
+# Linux-only — macOS ships no setsid(1) — so fall back to nohup (POSIX, ignores
+# SIGHUP). An exported HANDOFF_FAIL_FILE propagates to the child; exporting it
+# stays with the caller, which owns the path.
+handoff_spawn_detached() {
+    local watcher
+    watcher="$(dirname "${BASH_SOURCE[0]}")/$1"; shift
+    if command -v setsid >/dev/null 2>&1; then
+        setsid bash "$watcher" "$@" >/dev/null 2>&1 &
+    else
+        nohup bash "$watcher" "$@" >/dev/null 2>&1 &
+    fi
+    disown 2>/dev/null || true
 }
 
 # Has a task-file-writing skill activated in this session? Stateless:

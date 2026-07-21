@@ -71,7 +71,7 @@ esac
 STUB
     chmod +x "$STUBDIR/tmux"
 
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 AUTONAME_VERIFY_DELAY=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
         bash "$SCRIPTS/rename-when-idle.sh" '%9' 'Demo Title Here'
     [ "$status" -eq 0 ]
 
@@ -94,7 +94,7 @@ esac
 STUB
     chmod +x "$STUBDIR/tmux"
 
-    PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=1 AUTONAME_POLL=0.01 \
+    PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
         bash "$SCRIPTS/rename-when-idle.sh" '%9' 'Should Not Send' >/dev/null 2>&1
 
     [ ! -s "$SENT" ]
@@ -150,8 +150,8 @@ STUB
 
 @test "compact watcher types line 1 literally, verifies recognition, then Enters" {
     make_compact_stub "'/compact  Compact the conversation'"
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
         bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compact keep the parser work'
     [ "$status" -eq 0 ]
 
@@ -166,8 +166,8 @@ STUB
 
 @test "compact watcher aborts on an unrecognized command: C-u, never Enter" {
     make_compact_stub "'No commands match \"/compzzz\"'"
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
         bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compzzz'
     [ "$status" -ne 0 ]
 
@@ -189,7 +189,7 @@ STUB
     chmod +x "$STUBDIR/tmux"
 
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=1 AUTONAME_POLL=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
         HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compact'
 
@@ -228,8 +228,8 @@ STUB
 
 @test "continue watcher types the prompt literally then Enters" {
     make_continue_stub submits
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -eq 0 ]
 
@@ -246,8 +246,8 @@ STUB
 # watcher exited 0 having submitted nothing. Verification keys on is_busy now.
 @test "continue watcher retries and fails when the Enter is absorbed" {
     make_continue_stub absorbs
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 
@@ -270,7 +270,7 @@ STUB
     chmod +x "$STUBDIR/tmux"
 
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=1 AUTONAME_POLL=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
         HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'should not send'
 
@@ -284,8 +284,8 @@ STUB
 @test "continue watcher records the failure when the Enter is absorbed" {
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
     make_continue_stub absorbs
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 
@@ -296,8 +296,8 @@ STUB
 @test "continue watcher records nothing on a confirmed submit" {
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
     make_continue_stub submits
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -eq 0 ]
 
@@ -307,8 +307,8 @@ STUB
 @test "compact watcher records the failure on an unrecognized command" {
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
     make_compact_stub "'No commands match \"/compzzz\"'"
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compzzz'
     [ "$status" -ne 0 ]
 
@@ -320,8 +320,8 @@ STUB
 # additive, never a precondition for driving the pane.
 @test "watcher tolerates an unset HANDOFF_FAIL_FILE" {
     make_continue_stub absorbs
-    run env PATH="$STUBDIR:$PATH" AUTONAME_TIMEOUT=5 AUTONAME_POLL=0.01 \
-        AUTONAME_VERIFY_DELAY=0.01 \
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 }

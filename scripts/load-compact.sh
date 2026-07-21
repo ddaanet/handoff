@@ -15,8 +15,6 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-script_dir="$(cd "$(dirname "$0")" && pwd)"
-
 hook_cwd="$(jq -r '.cwd // ""')"
 cwd="$(handoff_root "$hook_cwd")"
 [[ -n "$cwd" ]] || exit 0
@@ -58,12 +56,7 @@ PANE="$TMUX_PANE"
 # See stop-compact.sh: the detached watcher's exit status goes nowhere, so give
 # it somewhere to record a non-delivery.
 export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_COMPACT_FAILED"
-if command -v setsid >/dev/null 2>&1; then
-    setsid bash "$script_dir/continue-when-idle.sh" "$PANE" "$COMPACT_L2" >/dev/null 2>&1 &
-else
-    nohup bash "$script_dir/continue-when-idle.sh" "$PANE" "$COMPACT_L2" >/dev/null 2>&1 &
-fi
-disown 2>/dev/null || true
+handoff_spawn_detached continue-when-idle.sh "$PANE" "$COMPACT_L2"
 
 jq -nc --arg n "$COMPACT_L2" --arg p "$PANE" --arg f "$frame" \
     '{systemMessage: ("handoff: compacted — will resume with \"" + $n + "\" once the prompt is idle (tmux pane " + $p + ").")}
