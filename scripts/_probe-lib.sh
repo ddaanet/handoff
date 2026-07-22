@@ -103,14 +103,18 @@ probe_sdd_directive() {
 # session's task list. Silent otherwise — the common case, where handoff-todo.md
 # is the only ledger and the skill writes it normally.
 #
-# Composed by both probes: the ledger outlives a /clear exactly as it outlives a
-# compaction, so the handoff path needs the same suppression the precompact path
-# folds into its nudge.
+# The handoff path's counterpart to the stand-down that probe_sdd_directive
+# folds into its nudge: the ledger outlives a /clear exactly as it outlives a
+# compaction. The wording differs on one point, because the orderings differ.
+# precompact runs its probe BEFORE the writes, so "do not write it" lands in
+# time. handoff runs the probe in the SAME turn as the writes, so this always
+# arrives after the file exists — a bare prohibition is a no-op there, and the
+# directive has to name the cleanup instead.
 probe_todo_suppression() {
     local root="$1" ledger
 
     ledger=$(probe_ledger_path "$root") || return 0
 
     printf '%s\n' \
-"This session's task list lives in a workflow-owned progress ledger at $ledger, which survives the /clear. That file is the ledger: do not write .claude/handoff-todo.md. Bring the ledger current instead if it has drifted."
+"This session's task list lives in a workflow-owned progress ledger at $ledger, which survives the /clear. That file is the ledger: .claude/handoff-todo.md must not exist alongside it — delete it if you have already written it, and do not write it. Bring the ledger current instead if it has drifted."
 }

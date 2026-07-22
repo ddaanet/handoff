@@ -25,15 +25,21 @@ user whether to proceed.
    **exactly**. Nothing printed → nothing to do. The probe owns the
    decision; do not re-derive or verify it yourself.
 
-3. Write `./.claude/handoff-task.md` using the template in the `handoff`
-   skill. This is where the task state goes — see the seam below.
+3. Write `./.claude/handoff-task.md` — a `## Current task` section and,
+   when any remain, `## Open decisions`; no `#` heading. This is where the
+   task state goes — see the seam below.
 
    If you are tracking a task list with open items, write the remainder to
-   `./.claude/handoff-todo.md` as well, using the same skill's todo
-   template. That list lives in the context the compaction is about to
-   paraphrase. Putting it on disk now is what spares your post-compaction
-   self from inferring which items are still open — an inference that
-   fails silently by redoing finished work.
+   `./.claude/handoff-todo.md` as well — one `## Remaining` section, open
+   items only, a finished item dropped rather than checked off. That list
+   lives in the context the compaction is about to paraphrase. Putting it
+   on disk now is what spares your post-compaction self from inferring
+   which items are still open — an inference that fails silently by
+   redoing finished work.
+
+   The `handoff` skill holds the full templates and the rules behind them.
+   Do not invoke it to read them: activating `handoff` wipes both files,
+   the task file you just wrote included.
 
 4. Write `./.claude/autocompact` — **only once step 2 is fully complete**,
    never in the same turn as a question the directive told you to ask.

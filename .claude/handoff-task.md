@@ -1,32 +1,41 @@
 ## Current task
 
-Remediating a full-codebase code review, then cutting the release that ships
-`.claude/handoff-todo.md`. All findings, their failure scenarios, the fix shape
-for finding 1, and the two rejected findings with their disproof are recorded
-in `docs/2026-07-22-code-review-audit.md` — read it first; it is the source of
-truth for this work and nothing below restates it.
+Cutting the handoff release that ships `.claude/handoff-todo.md` plus the
+remediation of a full-codebase code review. All five audit findings are fixed
+and committed; only the release itself remains.
 
-Next action is finding 1: a stale `.claude/autocompact` survives a turn that
-never ends normally (Esc, crash, quit) and is armed by a later, unrelated
-`Stop` — possibly in a different session, driving a stale `/compact` and a
-stale continuation prompt into unrelated work.
+The audit is `docs/2026-07-22-code-review-audit.md` — the point-in-time record,
+including the two rejected findings with their disproof, so they are not
+re-investigated. It is not a checklist to work through: everything in it is
+done.
 
-Second thread: the `handoff-todo.md` ledger feature is now verified end to end
-in live use — the frame injection was confirmed at this session's start, and
-the wipe was confirmed by this precompact activation clearing both files. No
-verification work remains on it; only the release does.
+Fixes landed as `3052b08..HEAD` — `7f4c406` (sweep a stale `autocompact` at
+UserPromptSubmit), `9de3210` (line 1 confirms against the compaction, not the
+pane), `351e71e` (rename watcher gets a failure channel;
+`report-compact-failure.sh` became `report-watcher-failure.sh` and reads both
+`.failed` files), `c3afda2` (dead `.gitignore` entries, the stale
+`.claude/handoff-session` on disk, a stale CLAUDE.md sentence, and a false
+`set -e` rationale in three watcher headers). `just precommit` was green before
+each. DESIGN.md carries three new dated sections for the design changes.
+
+Three findings were fixed beyond what the audit recorded, each found while
+fixing something else, so they are not in that document: `autorename*` and
+`autocompact*` were never in `.gitignore` at all; `hook-test.bats` was driving
+the real tmux server, because `TMUX=fake` does not stop tmux falling back to the
+default socket and `%0` is a live pane; and finding 1's fix shape was changed
+from the audit's recommendation (a `session_id` sidecar misses the Esc case,
+which leaves the file in the *same* session).
+
+The working tree is clean apart from an uncommitted `memory` submodule pointer
+bump from this session's memory commit — it needs to ride a commit before or
+with the release.
 
 ## Open decisions
 
-- Fix shape for finding 1. Recommended and unchallenged, but not explicitly
-  confirmed: have `write-compact.sh` stamp a sidecar with the payload's
-  `session_id` at validation time, and have `stop-compact.sh` refuse to arm
-  when it does not match the current session. This keeps the agent-authored
-  two-line format intact (CLAUDE.md's contract for that file) and adds no
-  spawn and no delete to a validate-only hook. Adding `autocompact*` to
-  `_wipe-emit.sh`'s wipe list is a cheap complement, not a substitute — the
-  wipe only runs on skill re-activation, which the lingering-file scenario
-  does not involve.
-- Release size. `just release minor` (0.11.0) is the presumed call, since a
-  new output path is version-bumping under CLAUDE.md's conventions; patch if
-  the new file is judged additive enough not to count.
+- Release size. `just release minor` (0.11.0) is the presumed call: the release
+  ships a new output path (`.claude/handoff-todo.md`), which is version-bumping
+  under CLAUDE.md's conventions. Patch if the new file is judged additive
+  enough not to count. Not yet explicitly confirmed by the user.
+- The release needs `MARKETPLACE_DIR` from `.envrc` and bumps the marketplace
+  entry in the sibling `claude-plugins` repo, pushing both. Name both repos up
+  front so auto-mode auth covers the marketplace push.

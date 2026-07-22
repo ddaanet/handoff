@@ -104,6 +104,17 @@ setup() {
     [[ "$output" != *"gitlore-commit-memory"* ]]
 }
 
+# handoff runs the probe in the SAME turn as the writes, so the suppression
+# always arrives after the file it suppresses. A bare "do not write it" is a
+# no-op there; the directive has to name the cleanup.
+@test "probe: handoff suppression tells the agent to delete an already-written todo file" {
+    repo="$(make_gitlore_repo)"
+    add_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qiF 'delete'
+}
+
 # No ledger is the common case: nothing suppresses the todo file, so the
 # probe must not mention it at all.
 @test "probe: dirty memory, no ledger -> no todo suppression" {

@@ -1480,6 +1480,35 @@ showing no spinner, and now a compaction showing none either. `is_typing` and
 the pane is the only witness there is. Nothing that asks whether an action
 *took effect* should look at the pane again.
 
+## A directive must fit where in the turn it lands (2026-07-22)
+
+The todo-file suppression shipped as one sentence composed by both probes:
+*"do not write `.claude/handoff-todo.md`."* Correct for precompact, which runs
+its probe at step 2 and writes at step 3. A no-op for handoff, which runs the
+probe **in the same turn as the writes** — deliberately, so the snapshot costs
+one round trip — and therefore always reads the directive after the file
+exists. An agent following it exactly does nothing, and the session ends with
+the two ledgers the suppression exists to prevent, the losing one gitignored
+and re-injected next session as if it were current.
+
+So `probe_todo_suppression` now names the cleanup — delete it if already
+written — while `probe_sdd_directive` keeps the plain prohibition. The two
+still agree on what exists, which is what `probe_ledger_path` is for; they
+differ on the remedy, because a directive is only as good as its position in
+the turn. The general form: shared prompt text composed into two flows is only
+shared where the flows agree, and *when the agent reads it* is part of the
+contract, not an implementation detail of the caller.
+
+A skill that cross-references another skill's template has the same shape of
+bug. precompact said to use "the template in the `handoff` skill", which the
+agent has no path to: `CLAUDE_PLUGIN_ROOT` is unset in its Bash, and the one
+reachable route — invoking `handoff` — is the wipe trigger, firing between
+precompact's task-file write and its todo write and taking both with it.
+precompact now states the section shapes inline and says not to invoke
+`handoff` for them; the full templates and their rules stay in one place. The
+reference was never free: a pointer the reader cannot follow safely is a
+pointer to whatever it does instead.
+
 ## References
 
 - LangChain's context engineering framing:
