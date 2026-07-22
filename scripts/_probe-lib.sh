@@ -60,8 +60,25 @@ probe_memory_directive() {
 "gitlore's PostToolBatch hook commits the submodule and removes both files on success. If they remain, the commit did not run — report that rather than retrying."
 }
 
+# Registry of known workflow-owned progress ledgers, as project-relative paths.
+# Prints the first one that exists and returns 0; returns 1 when none does. One
+# row per workflow — the single place that knows a foreign ledger's layout, so
+# the nudge and the suppression below can never disagree about what exists.
+probe_ledger_path() {
+    local root="$1"
+
+    # superpowers SDD: .superpowers/sdd/progress.md (git-ignored scratch, so it
+    # never shows in `git status` — existence is the only signal).
+    if [ -f "$root/.superpowers/sdd/progress.md" ]; then
+        printf '.superpowers/sdd/progress.md\n'
+        return 0
+    fi
+
+    return 1
+}
+
 # Emit the durable-progress nudge when a known structured-workflow ledger
-# exists. Silent otherwise. Registry is the block below; add a row per workflow.
+# exists. Silent otherwise.
 #
 # The compaction summary paraphrases; a durable ledger does not, and workflows
 # like superpowers SDD trust their ledger over post-compaction recollection.
@@ -69,9 +86,7 @@ probe_memory_directive() {
 probe_sdd_directive() {
     local root="$1"
 
-    # superpowers SDD: .superpowers/sdd/progress.md (git-ignored scratch, so it
-    # never shows in `git status` — existence is the only signal).
-    [ -f "$root/.superpowers/sdd/progress.md" ] || return 0
+    probe_ledger_path "$root" >/dev/null || return 0
 
     printf '%s\n' \
 "You are running superpowers SDD. Before compacting, bring the ledger current at .superpowers/sdd/progress.md — after compaction the SDD skill trusts the ledger over recollection. Ensure:" \
@@ -79,5 +94,23 @@ probe_sdd_directive() {
 "  - every task whose review came back clean has its \`Task N: complete (commits <base>..<head>, review clean)\` line" \
 "  - any Minor findings seen so far are recorded for the final whole-branch review" \
 "" \
-"A task that completed but is missing from the ledger can be re-dispatched after compaction — the most expensive SDD failure."
+"A task that completed but is missing from the ledger can be re-dispatched after compaction — the most expensive SDD failure." \
+"" \
+"That ledger is this session's task list. Do not also write .claude/handoff-todo.md — two ledgers drift, and the stale one gets believed."
+}
+
+# Emit the todo-file suppression when a workflow-owned ledger already tracks the
+# session's task list. Silent otherwise — the common case, where handoff-todo.md
+# is the only ledger and the skill writes it normally.
+#
+# Composed by both probes: the ledger outlives a /clear exactly as it outlives a
+# compaction, so the handoff path needs the same suppression the precompact path
+# folds into its nudge.
+probe_todo_suppression() {
+    local root="$1" ledger
+
+    ledger=$(probe_ledger_path "$root") || return 0
+
+    printf '%s\n' \
+"This session's task list lives in a workflow-owned progress ledger at $ledger, which survives the /clear. That file is the ledger: do not write .claude/handoff-todo.md. Bring the ledger current instead if it has drifted."
 }

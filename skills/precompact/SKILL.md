@@ -28,6 +28,13 @@ user whether to proceed.
 3. Write `./.claude/handoff-task.md` using the template in the `handoff`
    skill. This is where the task state goes — see the seam below.
 
+   If you are tracking a task list with open items, write the remainder to
+   `./.claude/handoff-todo.md` as well, using the same skill's todo
+   template. That list lives in the context the compaction is about to
+   paraphrase. Putting it on disk now is what spares your post-compaction
+   self from inferring which items are still open — an inference that
+   fails silently by redoing finished work.
+
 4. Write `./.claude/autocompact` — **only once step 2 is fully complete**,
    never in the same turn as a question the directive told you to ask.
    Writing it arms compaction at the *next* turn boundary, and a question
@@ -48,11 +55,13 @@ silent probe call and two file writes.
 
 ## The seam: task file vs. prompt
 
-The task file is re-injected verbatim once the compaction finishes. The
-prompt is one line typed into a composer. So they carry different things:
+The task file and the todo remainder are re-injected verbatim once the
+compaction finishes. The prompt is one line typed into a composer. So they
+carry different things:
 
 - **Task file** — everything that must survive exactly: in-flight threads,
   open questions, identifiers, commit ranges, paths a decision hinges on.
+- **Todo file** — the open items of an active task list, and only those.
 - **Prompt** — a handle to that context plus the next concrete action.
   Nothing else.
 

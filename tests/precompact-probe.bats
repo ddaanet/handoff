@@ -53,6 +53,25 @@ setup() {
     [[ "$output" != *"gitlore-commit-memory"* ]]
 }
 
+# The ledger is the session's task list, so the nudge must also stand
+# handoff-todo.md down — two ledgers drift and the stale one gets believed.
+@test "probe: SDD nudge suppresses the todo file" {
+    repo="$BATS_TEST_TMPDIR/sddsupp"; mkdir -p "$repo"
+    git -C "$repo" init -q
+    add_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF 'handoff-todo.md'
+}
+
+@test "probe: no ledger -> no todo suppression" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"handoff-todo.md"* ]]
+}
+
 @test "probe: dirty memory only -> memory directive, no SDD nudge" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"

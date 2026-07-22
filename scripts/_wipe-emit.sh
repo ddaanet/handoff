@@ -25,7 +25,12 @@ mkdir -p "$cwd/.claude"
 task="$cwd/$HANDOFF_REL_TASK"
 removed=()
 task_removed=0
-for f in "$task" "$cwd/.claude/handoff.md" "$cwd/.claude/autorename"; do
+# handoff-todo.md is wiped alongside the task file. Both loaders inject it into
+# context at SessionStart, so the remainder is in front of the agent when it
+# re-authors — and without the wipe a finished list would linger on disk
+# forever, re-injecting done items as outstanding (the re-dispatch failure).
+for f in "$task" "$cwd/$HANDOFF_REL_TODO" \
+         "$cwd/.claude/handoff.md" "$cwd/.claude/autorename"; do
     if [[ -f "$f" ]]; then
         rm -f "$f"
         removed+=("$(basename "$f")")

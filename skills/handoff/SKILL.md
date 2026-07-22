@@ -26,14 +26,17 @@ First, decide both of the following without making any tool calls:
 - **Task snapshot** — whether there's an active task with specific next
   steps, unmade decisions, or non-obvious context worth preserving; if so,
   draft the content using the template below.
+- **Remaining items** — whether you are tracking a task list that still has
+  open items; if so, draft the remainder using the todo template below.
 
 Then, in the **same turn**, issue the writes and run the memory probe:
 - Write `./.claude/autorename` — sole line is the session title (always)
 - Write `./.claude/handoff-task.md` — only if there's an active task
+- Write `./.claude/handoff-todo.md` — only if open items remain
 - Run `handoff-memory-probe` (Bash) — deterministic memory check
 
-If there's no active task, omit `handoff-task.md` — the activation hook
-already finalized the session.
+Omit either file when it has nothing to say — the activation hook already
+wiped both, and an absent file is the honest "nothing pending".
 
 ### Step 3: Follow the probe
 
@@ -49,10 +52,11 @@ do not re-derive or verify it yourself.
 
 <What was in progress — task state, what needs to resume when a fresh
 agent picks up. Usually one sentence. Where work genuinely spans several
-in-flight threads, list them; a session under pressure carries what it
-carries, and cramming it into one line loses the thing worth keeping. Not
-a recap. Not git bookkeeping: whether work is committed/pushed is
-reconstructable from `git status` at load time, so never write it here.>
+concurrent threads, name them; a session under pressure carries what it
+carries. Threads, not steps — a list of steps is a task list, and that
+goes in `handoff-todo.md`. Not a recap. Not git bookkeeping: whether work
+is committed/pushed is reconstructable from `git status` at load time, so
+never write it here.>
 
 ## Open decisions
 
@@ -77,12 +81,34 @@ Task file rules:
 - No location other than `./.claude/handoff-task.md` — the hook reads
   this exact path.
 
+**Todo file template** (`./.claude/handoff-todo.md`):
+
+```markdown
+## Remaining
+
+- <Open item, one line, phrased as work still to do.>
+```
+
+Todo file rules:
+
+- **Open items only.** A finished item is dropped, never checked off.
+  What landed is reconstructable from `git log`; a done item still listed
+  reads as outstanding and gets redone.
+- No `#` heading and no other sections — same shape as the task file.
+- No location other than `./.claude/handoff-todo.md`.
+- It is a remainder, not a plan of record: this file is gitignored and
+  carries no history.
+
 ## Anti-patterns
 
 - Padding "Current task" to look thorough. Length should track how many
   threads are genuinely in flight, not effort.
+- A task list in `## Current task`. Steps go to `handoff-todo.md`; the
+  task file says what is in progress, not the checklist to get there.
+- Completion state in `handoff-todo.md` — `- [x]` lines, "done:" prefixes,
+  a struck-through item. The file holds the remainder and nothing else.
 - Durable lessons in `## Open decisions`. Those go to feedback memory.
-- Extra sections in `handoff-task.md`. The template is fixed.
+- Extra sections in either file. Both templates are fixed.
 - Commit/push status anywhere in the file ("work is uncommitted",
   "ready to commit"). It's reconstructable from `git status`/`git log`
   at load time and goes stale the moment the user commits after handoff.

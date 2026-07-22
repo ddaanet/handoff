@@ -80,13 +80,38 @@ setup() {
     [[ "$output" != *"commitCommand"* ]]
 }
 
-@test "probe: handoff composition carries no SDD nudge" {
+# A workflow ledger outlives a /clear exactly as it outlives a compaction, so
+# handoff carries the todo-file suppression — but NOT the precompact-only
+# bring-the-ledger-current nudge.
+@test "probe: handoff composition carries the todo suppression, not the SDD nudge" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
     add_sdd_ledger "$repo"
     run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
     [ "$status" -eq 0 ]
-    [[ "$output" != *".superpowers/sdd/progress.md"* ]]
+    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF 'handoff-todo.md'
+    [[ "$output" != *"Minor findings"* ]]
+    [[ "$output" != *"re-dispatched"* ]]
+}
+
+@test "probe: clean memory + SDD ledger -> suppression alone" {
+    repo="$(make_gitlore_repo)"
+    add_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF 'handoff-todo.md'
+    [[ "$output" != *"gitlore-commit-memory"* ]]
+}
+
+# No ledger is the common case: nothing suppresses the todo file, so the
+# probe must not mention it at all.
+@test "probe: dirty memory, no ledger -> no todo suppression" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"handoff-todo.md"* ]]
 }
 
 @test "probe: detected from a subdirectory of the repo -> directive" {

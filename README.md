@@ -17,7 +17,8 @@ Install the plugin:
 
 That's it. No per-project setup step. A `SessionStart(startup|clear)`
 hook assembles the handoff frame in memory at session start — stamping
-a header onto `./.claude/handoff-task.md` — and injects the result into
+a header onto `./.claude/handoff-task.md` and the todo remainder beside
+it, when either exists — and injects the result into
 the fresh agent's context. No generated file is involved, and the
 transcript is never touched: the live working set is the harness's own
 git status.
@@ -63,6 +64,15 @@ Both skills write the same `.claude/handoff-task.md`. That is the durable side
 of the seam — it carries whatever must survive verbatim, at whatever length
 the work demands. The continuation prompt is only a handle to it.
 
+When the session is working through a task list, both skills also write the
+**remainder** — the still-open items, never the finished ones — to
+`.claude/handoff-todo.md`, which is injected alongside the task file. That
+file is the ledger; a todo panel in the UI, when there is one, is a cache of
+it. Finished items are dropped rather than ticked off: `git log` already
+records what landed, and a done item still listed reads as outstanding and
+gets redone. It is gitignored, unlike the task file — it is working state,
+not a trail worth versioning.
+
 Driving the prompt needs tmux; outside it, the two lines are printed for you to
 paste. If a line fails to land — the pane was busy, you were mid-sentence, the
 command was not recognized — the watcher records why, and you and the agent are
@@ -72,7 +82,7 @@ compaction happened.
 Use `precompact` when the work continues and `handoff` when it ends. Compacting
 right before `/clear` throws away what the compaction just paid for.
 
-A `PreToolUse(Skill)` hook wipes any prior handoff files the moment the skill activates, so the slate is always clean — and tells the agent so it doesn't redundantly verify. The agent then updates auto-memory with any durable learnings, and in a single turn writes a short task snapshot (if anything is outstanding) and a session title to `.claude/autorename`. A `PostToolUse(Write|Edit)` hook stages `handoff-task.md` for commit. A second hook picks up `autorename` and renames the session via tmux `send-keys` once the prompt goes idle (or emits a `/rename` line to paste if not in tmux). Guards prevent the agent from reading or writing `.claude/handoff-task.md` outside the handoff flow. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently.
+A `PreToolUse(Skill)` hook wipes any prior handoff files the moment the skill activates, so the slate is always clean — and tells the agent so it doesn't redundantly verify. The agent then updates auto-memory with any durable learnings, and in a single turn writes a short task snapshot (if anything is outstanding), the remaining todo items (if a task list is in flight), and a session title to `.claude/autorename`. A `PostToolUse(Write|Edit)` hook stages `handoff-task.md` for commit. A second hook picks up `autorename` and renames the session via tmux `send-keys` once the prompt goes idle (or emits a `/rename` line to paste if not in tmux). Guards prevent the agent from reading or writing `.claude/handoff-task.md` or `.claude/handoff-todo.md` outside the handoff flow. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently.
 
 In a gitlore-managed repository, handoff also offers to commit your memory:
 when the memory submodule has uncommitted changes, it summarizes them, asks
@@ -123,6 +133,8 @@ Per project, under `./.claude/`. The PostToolUse hook runs `git add -f`
 on `handoff-task.md` so it appears staged for your next commit.
 
 - `handoff-task.md` — agent-written task + open decisions; staged for git automatically (track this).
+- `handoff-todo.md` — agent-written remainder of an in-flight task list;
+  gitignored, never staged (working state, not a trail).
 - `autorename` — transient trigger file; written by the agent with the
   session title, consumed and deleted immediately by the PostToolUse
   hook.
@@ -133,7 +145,7 @@ on `handoff-task.md` so it appears staged for your next commit.
 - `autocompact.failed` — written only when a line could not be delivered,
   and consumed when you are told about it at your next prompt.
 
-`handoff-task.md` is wiped at activation (the "finalize" case): invoke the skill again with nothing outstanding and the next session starts clean. Nothing outside the current project is modified.
+Both `handoff-task.md` and `handoff-todo.md` are wiped at activation (the "finalize" case): invoke the skill again with nothing outstanding and the next session starts clean. Nothing outside the current project is modified.
 
 ## Uninstall
 

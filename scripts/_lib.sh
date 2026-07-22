@@ -8,6 +8,12 @@
 # breaking change (see CLAUDE.md conventions).
 # shellcheck disable=SC2034  # consumed by sourcing scripts
 HANDOFF_REL_TASK=".claude/handoff-task.md"
+# The remainder ledger: open todo items only, never completion state. Unlike
+# the task file it is gitignored — it is working state, with none of the
+# paired-with-gitlore-memory value that earns handoff-task.md its place in
+# history. See DESIGN.md, "A place for the todo list".
+# shellcheck disable=SC2034
+HANDOFF_REL_TODO=".claude/handoff-todo.md"
 # shellcheck disable=SC2034
 HANDOFF_REL_RENAME=".claude/autorename"
 # shellcheck disable=SC2034
@@ -22,16 +28,29 @@ HANDOFF_REL_COMPACT_PENDING=".claude/autocompact.pending"
 # shellcheck disable=SC2034
 HANDOFF_REL_COMPACT_FAILED=".claude/autocompact.failed"
 
-# Assemble the injectable frame for a task file ($1): a timestamp header plus
-# the file inlined verbatim. Prints nothing and returns 1 when the file is
-# missing or empty, so callers can gate on the exit status. Shared by
+# Assemble the injectable frame from the task file ($1) and the optional todo
+# remainder ($2): a timestamp header plus each file inlined verbatim, in that
+# order. Either file alone is enough; prints nothing and returns 1 only when
+# both are missing or empty, so callers can gate on the exit status. Shared by
 # load-handoff.sh (startup|clear) and load-compact.sh (compact) — one frame
-# shape for both transitions, since both inject the same file.
+# shape for both transitions, since both inject the same files.
+#
+# The hook does not re-state either template: each file carries its own `##`
+# section headings (SKILL.md is the single source of truth) and is concatenated
+# verbatim under the one `#` header prepended here.
 handoff_frame() {
-    local task="$1"
-    [[ -s "$task" ]] || return 1
-    printf '# Task — %s\n\n%s\n' \
-        "$(date '+%Y-%m-%d %H:%M:%S %z')" "$(cat "$task")"
+    local task="$1" todo="${2:-}" out=""
+    if [[ ! -s "$task" && ( -z "$todo" || ! -s "$todo" ) ]]; then
+        return 1
+    fi
+    out="# Task — $(date '+%Y-%m-%d %H:%M:%S %z')"
+    if [[ -s "$task" ]]; then
+        out+=$'\n\n'"$(cat "$task")"
+    fi
+    if [[ -n "$todo" && -s "$todo" ]]; then
+        out+=$'\n\n'"$(cat "$todo")"
+    fi
+    printf '%s\n' "$out"
 }
 
 # Parse and validate an autocompact file ($1) into the caller's COMPACT_L1
@@ -116,21 +135,35 @@ handoff_root() {
         "$1" "$project"
 }
 
-# Match the hook-input JSON ($1) against one handoff-owned file: basename ($2)
-# as the cheap filter, then resolved-path equality with $cwd/$3 as the
-# cross-project guard. Populates the caller's HOOK_* fields (via
-# handoff_hook_fields) plus cwd, target and expected. Returns 0 when the event
-# resolves to this project's file, 1 when it is about some other file
-# (no file_path, basename mismatch, or the root cannot be resolved), and 2
-# when the basename matches but the resolved path is elsewhere
-# (cross-project) — write-guard.sh denies on 2, every other caller treats it
-# as 1.
-# shellcheck disable=SC2034  # cwd/target/expected assigned for the caller
+# Match the hook-input JSON ($1) against one or more handoff-owned files, given
+# as (basename, project-relative-path) pairs: the basename is the cheap filter,
+# then resolved-path equality with $cwd/<rel> is the cross-project guard. Pairs
+# are tried in order and the first basename hit wins. Populates the caller's
+# HOOK_* fields (via handoff_hook_fields) plus cwd, target, expected and
+# MATCHED_NAME (the basename that matched, so a caller guarding several files
+# can name the right one in a deny). Returns 0 when the event resolves to this
+# project's file, 1 when it is about some other file (no file_path, no basename
+# hit, or the root cannot be resolved), and 2 when a basename matched but the
+# resolved path is elsewhere (cross-project) — write-guard.sh denies on 2,
+# every other caller treats it as 1.
+#
+# Variadic rather than one call per file because the JSON parse is a jq spawn
+# on the Write/Edit hot path: guarding N files must stay one parse, not N.
+# shellcheck disable=SC2034  # cwd/target/expected/MATCHED_NAME for the caller
 handoff_match_target() {
-    local json="$1" name="$2" rel="$3"
+    local json="$1"; shift
+    local base rel=""
     handoff_hook_fields "$json"
     [[ -n "$HOOK_FILE_PATH" ]] || return 1
-    [[ "$(basename "$HOOK_FILE_PATH")" == "$name" ]] || return 1
+    base="$(basename "$HOOK_FILE_PATH")"
+    MATCHED_NAME=""
+    while (( $# >= 2 )); do
+        if [[ "$base" == "$1" ]]; then
+            MATCHED_NAME="$1"; rel="$2"; break
+        fi
+        shift 2
+    done
+    [[ -n "$MATCHED_NAME" ]] || return 1
     cwd="$(handoff_root "$HOOK_CWD")"
     [[ -n "$cwd" ]] || return 1
     { read -r target; read -r expected; } \

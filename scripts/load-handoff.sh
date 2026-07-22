@@ -19,15 +19,14 @@ source "$(dirname "$0")/_lib.sh"
 cwd="$(handoff_root "$hook_cwd")"
 
 task="$cwd/$HANDOFF_REL_TASK"
+todo="$cwd/$HANDOFF_REL_TODO"
 
-# Gate on the agent-authored task file. No task file → nothing to inject.
-[[ -s "$task" ]] || exit 0
-
-# The frame is the header plus the task file inlined verbatim. The prior
-# session's working set is served by the harness's own gitStatus block,
-# not reproduced here (see DESIGN.md, "Task frame drops the transcript
-# and file list").
-assembled="$(handoff_frame "$task")"
+# The frame is the header plus the agent-authored files inlined verbatim, and
+# it gates itself: either file alone is enough, neither means nothing to
+# inject. The prior session's working set is served by the harness's own
+# gitStatus block, not reproduced here (see DESIGN.md, "Task frame drops the
+# transcript and file list").
+assembled="$(handoff_frame "$task" "$todo")" || exit 0
 
 bytes=${#assembled}
 if (( bytes < 1024 )); then
@@ -36,7 +35,11 @@ else
     size=$(awk -v b="$bytes" 'BEGIN { printf "%.1f KiB", b/1024 }')
 fi
 
-mtime=$(python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$task")
+# Age of the frame is the newest of whichever files it drew on — the frame
+# assembled, so at least one of them exists.
+mtime=$(python3 -c 'import os,sys
+print(int(max(os.path.getmtime(p) for p in sys.argv[1:] if os.path.exists(p))))' \
+    "$task" "$todo")
 now=$(date +%s)
 delta=$(( now - mtime ))
 if (( delta < 60 )); then age="just now"

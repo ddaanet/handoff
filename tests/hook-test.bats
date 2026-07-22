@@ -136,6 +136,56 @@ $tmp" ]
     [ "$(echo "$output" | jq -r '.systemMessage')" = "system text" ]
 }
 
+# --- _lib.sh: handoff_frame assembly ---
+# One header, then whichever of the two agent-authored files have content,
+# task first. Either alone is enough; neither means no frame at all.
+
+@test "handoff_frame: task + todo -> one header, both inlined, task first" {
+    fr="$BATS_TEST_TMPDIR/frame"; mkdir -p "$fr"
+    printf '## Current task\n\ntask body\n' > "$fr/task.md"
+    printf '## Remaining\n\n- todo body\n' > "$fr/todo.md"
+    run handoff_frame "$fr/task.md" "$fr/todo.md"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | grep -c '^# Task — ')" -eq 1 ]
+    echo "$output" | grep -q 'task body'
+    echo "$output" | grep -q '^- todo body'
+    # Task section precedes the remainder.
+    [ "$(echo "$output" | grep -n 'task body' | cut -d: -f1)" \
+      -lt "$(echo "$output" | grep -n 'todo body' | cut -d: -f1)" ]
+}
+
+@test "handoff_frame: todo alone -> frame still assembles" {
+    fr="$BATS_TEST_TMPDIR/frame-todo"; mkdir -p "$fr"
+    printf '## Remaining\n\n- lone remainder\n' > "$fr/todo.md"
+    run handoff_frame "$fr/task.md" "$fr/todo.md"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q '^# Task — '
+    echo "$output" | grep -q 'lone remainder'
+}
+
+@test "handoff_frame: task alone -> unchanged single-file shape" {
+    fr="$BATS_TEST_TMPDIR/frame-task"; mkdir -p "$fr"
+    printf '## Current task\n\nsolo task\n' > "$fr/task.md"
+    run handoff_frame "$fr/task.md" "$fr/todo.md"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q 'solo task'
+    [ "$(echo "$output" | grep -c '^# Task — ')" -eq 1 ]
+}
+
+@test "handoff_frame: neither file -> rc 1, no output" {
+    fr="$BATS_TEST_TMPDIR/frame-none"; mkdir -p "$fr"
+    run handoff_frame "$fr/task.md" "$fr/todo.md"
+    [ "$status" -eq 1 ]
+    [ "$output" = "" ]
+}
+
+@test "handoff_frame: empty files count as absent" {
+    fr="$BATS_TEST_TMPDIR/frame-empty"; mkdir -p "$fr"
+    : > "$fr/task.md"; : > "$fr/todo.md"
+    run handoff_frame "$fr/task.md" "$fr/todo.md"
+    [ "$status" -eq 1 ]
+}
+
 # --- write-stage ---
 # Stages handoff-task.md with `git add -f` and does NOT create handoff.md.
 
@@ -165,6 +215,24 @@ $tmp" ]
         | bash scripts/write-stage.sh
     ' _ "$tmp"
     [ "$status" -eq 0 ]
+}
+
+# The remainder ledger is gitignored working state: write-stage must not
+# force-add it the way it does the task file.
+@test "write-stage (handoff-todo.md: not staged)" {
+    git_tmp="$BATS_TEST_TMPDIR/git-todo"
+    mkdir -p "$git_tmp/.claude"
+    git -C "$git_tmp" init -q
+    printf '## Remaining\n\n- item\n' > "$git_tmp/.claude/handoff-todo.md"
+    run bash -c '
+        jq -nc --arg fp "$1/.claude/handoff-todo.md" \
+            "{tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/write-stage.sh
+    ' _ "$git_tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    staged="$(git -C "$git_tmp" diff --cached --name-only)"
+    [[ "$staged" != *handoff-todo.md* ]]
 }
 
 # --- write-guard ---
@@ -297,6 +365,75 @@ $tmp" ]
     echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 }
 
+# --- guards: handoff-todo.md ---
+# The remainder ledger is skill-owned on the same terms as the task file:
+# the defect these guards exist for was the agent co-opting a handoff file
+# as a scratch todo list before any skill ran.
+
+@test "write-guard (handoff-todo.md, not activated: deny, names the todo file)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/not-activated.jsonl"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
+        | test("handoff-todo.md")' >/dev/null
+}
+
+@test "write-guard (handoff-todo.md, activated: allow)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "write-guard (handoff-todo.md, precompact activated: allow)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/activated-precompact-skill.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "write-guard (cross-project handoff-todo.md: deny)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$3/.claude/handoff-todo.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl" "$other"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
+        | test("handoff-todo.md")' >/dev/null
+}
+
+@test "read-guard (handoff-todo.md, not activated: deny)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/read-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/not-activated.jsonl"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "read-guard (handoff-todo.md, activated: allow)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
+            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/read-guard.sh
+    ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
 # --- skill-pre-hook ---
 
 @test "skill-pre-hook (handoff:handoff: wipe)" {
@@ -351,6 +488,33 @@ $tmp" ]
     ' _ "$tmp"
     [ "$status" -eq 0 ]
     [ ! -e "$tmp/.claude/handoff-task.md" ]
+}
+
+# The remainder ledger resets on the same terms: both loaders put it back in
+# front of the agent at SessionStart, so re-authoring is from context, and
+# without the wipe a finished list would linger and re-inject done items.
+@test "skill-pre-hook (handoff-todo.md: wiped and named)" {
+    : > "$tmp/.claude/handoff-task.md"
+    printf '## Remaining\n\n- stale item\n' > "$tmp/.claude/handoff-todo.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
+        | bash scripts/skill-pre-hook.sh
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/handoff-todo.md" ]
+    echo "$output" | jq -e '.systemMessage | test("handoff-todo.md")' >/dev/null
+}
+
+@test "prompt-pre-hook (handoff-todo.md: wiped)" {
+    printf '## Remaining\n\n- stale item\n' > "$tmp/.claude/handoff-todo.md"
+    run bash -c '
+        jq -nc --arg cwd "$1" \
+            "{cwd:\$cwd, prompt:\"/handoff:precompact\"}" \
+        | bash scripts/prompt-pre-hook.sh >/dev/null
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/handoff-todo.md" ]
 }
 
 # handoff-task.md is git-tracked (write-stage.sh force-adds it). When the
@@ -541,6 +705,35 @@ ASMTASK
     ' _ "$asm_tmp"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
+}
+
+@test "load-handoff (read-time assembly): injects the todo remainder too" {
+    asm_tmp="$BATS_TEST_TMPDIR/asm-todo"; mkdir -p "$asm_tmp/.claude"
+    printf '## Current task\n\ntask body\n' > "$asm_tmp/.claude/handoff-task.md"
+    printf '## Remaining\n\n- wire the loader\n' > "$asm_tmp/.claude/handoff-todo.md"
+    run bash -c '
+        jq -nc --arg e "clear" "{hook_event_name:\$e}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/load-handoff.sh
+    ' _ "$asm_tmp"
+    [ "$status" -eq 0 ]
+    ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    echo "$ctx" | grep -q 'task body'
+    echo "$ctx" | grep -q '^- wire the loader'
+    [ "$(echo "$ctx" | grep -c '^# Task — ')" -eq 1 ]
+}
+
+# A remainder with no active task still has to cross: the todo file alone
+# must not read as "nothing pending".
+@test "load-handoff (read-time assembly): todo alone still injects" {
+    asm_tmp="$BATS_TEST_TMPDIR/asm-todo-only"; mkdir -p "$asm_tmp/.claude"
+    printf '## Remaining\n\n- lone remainder\n' > "$asm_tmp/.claude/handoff-todo.md"
+    run bash -c '
+        jq -nc --arg e "clear" "{hook_event_name:\$e}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/load-handoff.sh
+    ' _ "$asm_tmp"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -r '.hookSpecificOutput.additionalContext' \
+        | grep -q 'lone remainder'
 }
 
 @test "load-handoff (size formatting: KiB threshold)" {

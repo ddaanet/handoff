@@ -38,6 +38,16 @@ timestamp header plus the inlined task content — and injects it into
 context. No generated file, no `@`-ref or project-CLAUDE.md setup
 required.
 
+A third field joins them when the session is working a task list: the
+**remainder** of that list, in `handoff-todo.md`, inlined into the same
+frame. It looks derivable — and its *finished* half is, from `git log`,
+so that half is dropped. The open half is not: reconstructing it after a
+compaction means the model inferring, from a paraphrase, which items are
+still outstanding, and that inference fails silently by redoing work.
+Reconstructable-by-harness (`git status`, files touched) is free and
+correct; reconstructable-only-by-inference is neither. The undone half of
+a task list is a decomposition, which is judgment.
+
 ## Why no verbatim transcript or file list
 
 The frame is the task file alone; the transcript is never read.
@@ -90,14 +100,16 @@ committed but the agent-authored task file.
 ## File guards
 
 `PreToolUse(Write|Edit)` and `PreToolUse(Read)` hooks keep
-`handoff-task.md` inert outside the skill's control path.
-`handoff-task.md` is skill-owned: reads and writes are denied until
+`handoff-task.md` and `handoff-todo.md` inert outside the skill's control
+path. Both are skill-owned: reads and writes are denied until
 `handoff:handoff` or `handoff:precompact` has activated this session
-(both author the file) — detected statelessly by scraping the
+(both author them) — detected statelessly by scraping the
 transcript for the same activation signals the wipe hooks key on (a
 `Skill` tool_use or a slash command). The write-guard additionally
-denies `handoff-task.md` writes whose `realpath` is not
-`$cwd/.claude/handoff-task.md`, catching multi-checkout confusion and
-absolute-path mistakes. The hooks
+denies writes whose `realpath` is not `$cwd/.claude/<file>`, catching
+multi-checkout confusion and absolute-path mistakes. The todo file is
+gated on the same terms because the defect that motivated these guards
+was the agent co-opting a handoff file as a scratch todo list before any
+skill had run. The hooks
 themselves do plain filesystem I/O rather than agent tool calls, so
 they are never intercepted by these guards.

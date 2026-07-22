@@ -27,9 +27,18 @@ only a handle to it. Consequently `handoff_activated()` treats either skill as
 an activation signal, and the file persists across the compaction to be
 re-injected again at the next `startup|clear`.
 
+Both skills also write `.claude/handoff-todo.md` when an active task list has
+open items: the **remainder** only, never completion state. It is the ledger;
+whatever todo tracker the harness happens to expose is a cache, and nothing in
+the plugin names one (the tool is behind a server-side flag and has already
+changed generations once). Same wipe, same guards, same frame — but
+**gitignored**, where the task file is force-added. See DESIGN.md, "A place
+for the todo list (2026-07-22)".
+
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
-  contains the markdown template for `handoff-task.md`
+  contains the markdown templates for `handoff-task.md` and
+  `handoff-todo.md` (both are the single source of truth for their shape)
 - `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
   session title from the conversation (no tool calls) and writes it to
   `.claude/autorename`; the same `write-rename.sh` PostToolUse hook that
@@ -40,8 +49,10 @@ re-injected again at the next `startup|clear`.
   Drives **commit memory → compact → continue**: capture durable
   learnings in auto-memory, run `handoff-precompact-probe` and follow
   its directives (memory commit and/or ledger flush), then write
-  `handoff-task.md` (per the handoff skill's template) and
-  `.claude/autocompact` (line 1 the literal `/compact [directive]`,
+  `handoff-task.md` (and `handoff-todo.md` when a task list has open
+  items — with no tracker the list is context-resident, and context is
+  exactly what compaction paraphrases), per the handoff skill's templates,
+  and `.claude/autocompact` (line 1 the literal `/compact [directive]`,
   line 2 a single-line continuation prompt that is only a handle to the
   task file). The hooks do the rest; the skill never runs `/compact`
   itself. No rename.
@@ -58,11 +69,12 @@ re-injected again at the next `startup|clear`.
   directly without going through the `Skill` tool). Both skills wipe:
   both author `handoff-task.md` from the conversation, never from the
   file's prior contents, so each runs against a clean slate.
-  `PreToolUse(Read)`: deny reads of this project's `handoff-task.md`
-  until `handoff` or `precompact` has activated this session.
-  `PreToolUse(Write|Edit)`: deny `handoff-task.md` writes before
-  activation; deny `handoff-task.md` writes whose resolved path is not
-  `$cwd/.claude/handoff-task.md` (cross-project guard).
+  `PreToolUse(Read)`: deny reads of this project's `handoff-task.md` and
+  `handoff-todo.md` until `handoff` or `precompact` has activated this
+  session.
+  `PreToolUse(Write|Edit)`: deny `handoff-task.md` / `handoff-todo.md`
+  writes before activation; deny them when the resolved path is not
+  `$cwd/.claude/<file>` (cross-project guard).
   `PostToolUse(Write|Edit)`: stage `handoff-task.md` for commit when
   it is written; rename the session on an `autorename` write; validate
   an `autocompact` write.
@@ -87,8 +99,12 @@ re-injected again at the next `startup|clear`.
   `UserPromptSubmit` does not support the `matcher` field, so the
   script does its own prefix check on the `prompt` JSON field.
 - `scripts/_wipe-emit.sh` — shared helper used by both entry scripts.
-  Removes `.claude/handoff-task.md`, `.claude/autorename`, and (as legacy
-  cleanup for ≤0.4.x upgrades) `.claude/handoff.md` if present.
+  Removes `.claude/handoff-task.md`, `.claude/handoff-todo.md`,
+  `.claude/autorename`, and (as legacy cleanup for ≤0.4.x upgrades)
+  `.claude/handoff.md` if present. The todo file is wiped despite being
+  input carried forward: both loaders re-inject it at SessionStart, so the
+  agent re-authors from context, and without the wipe a finished list would
+  linger and keep re-injecting done items as outstanding.
   If anything was removed, emits dual-channel JSON: `systemMessage`
   (user-facing) and `hookSpecificOutput.additionalContext` (agent-facing,
   so the agent knows the wipe happened and doesn't redundantly verify).
@@ -106,8 +122,10 @@ re-injected again at the next `startup|clear`.
   activated this session, scanning both invocation signals for each;
   either opens the guards, since both skills write the task file),
   `handoff_frame()` (assembles the injectable frame — timestamp header
-  plus inlined task file — shared by `load-handoff.sh` and
-  `load-compact.sh` so the two transitions cannot drift) and
+  plus the inlined task file and todo remainder, task first; either alone
+  is enough, rc 1 only when both are missing or empty — shared by
+  `load-handoff.sh` and `load-compact.sh` so the two transitions cannot
+  drift) and
   `handoff_deny()` (shared PreToolUse deny emitter; calls `exit 0`
   after printing the deny JSON, so only safe from a standalone hook
   script).
@@ -123,18 +141,23 @@ re-injected again at the next `startup|clear`.
   hook: one call does the jq field parse, basename fast-path, root
   resolution, and resolved-path comparison against the expected
   `$cwd/<rel>`, distinguishing "other file" (rc 1) from "basename matched
-  but cross-project" (rc 2, which only `write-guard.sh` denies).
+  but cross-project" (rc 2, which only `write-guard.sh` denies). It is
+  variadic over (basename, rel) pairs and sets `MATCHED_NAME` — the guards
+  cover two files, and the jq parse is on the Write/Edit hot path, so N
+  files must stay one parse.
   `handoff_spawn_detached()` is the shared setsid-else-nohup detach used
   by all three watcher-spawning hooks (setsid is Linux-only; nohup is the
   macOS fallback).
 - `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
-  this project's `handoff-task.md` until `handoff` or `precompact` has
-  activated this session.
+  this project's `handoff-task.md` and `handoff-todo.md` until `handoff`
+  or `precompact` has activated this session.
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies
-  `handoff-task.md` writes whose resolved path is not
-  `$cwd/.claude/handoff-task.md` (catches cross-project misfires).
-  Denies `handoff-task.md` writes before `handoff` or `precompact` has
-  activated this session.
+  `handoff-task.md` / `handoff-todo.md` writes whose resolved path is not
+  `$cwd/.claude/<file>` (catches cross-project misfires). Denies them
+  before `handoff` or `precompact` has activated this session. The todo
+  file is gated on the same terms as the task file: the defect these
+  guards exist for was the agent co-opting a handoff file as a scratch
+  todo list before any skill ran.
 - `scripts/rename-when-idle.sh` — detached watcher. Polls for the Claude TUI
   spinner to be absent (idle), checks the user isn't composing, then fires
   `tmux send-keys -l` to type `/rename <title>` + Enter. Verifies the rename
@@ -224,10 +247,13 @@ re-injected again at the next `startup|clear`.
   the agent's Bash, so the shim is the entry point.
 - `scripts/memory-probe.sh` — read-only gitlore-memory detector run by the
   handoff skill at wrap-up. Owns the dirty-or-not branch and prints the
-  agent's next action or stays silent. Composes the memory directive from
-  `_probe-lib.sh` alone (no SDD nudge — that is a precompact concern).
-- `scripts/_probe-lib.sh` — sourced helper holding both probe directives, so
-  the memory-commit prompt is authored once and composed twice.
+  agent's next action or stays silent. Composes the memory directive plus
+  the todo-file suppression from `_probe-lib.sh`. No SDD *nudge* — the
+  bring-the-ledger-current prompt is a precompact concern — but the
+  suppression does apply here, since a workflow ledger outlives a `/clear`
+  exactly as it outlives a compaction.
+- `scripts/_probe-lib.sh` — sourced helper holding the probe directives, so
+  each prompt is authored once and composed twice.
   `probe_memory_directive` gates on the `gitlore-memory` submodule
   registration (FR12) and a dirty worktree, then instructs the agent to
   summarize → get approval → write `.claude/gitlore-memory-message` and
@@ -235,7 +261,12 @@ re-injected again at the next `startup|clear`.
   `git config gitlore.commitCommand` + `commit-memory.sh -F -` Bash path:
   all file writes, so it sidesteps the sandbox and the auto-mode classifier.
   Couples only to the two IPC filenames — never gitlore internals.
-  `probe_sdd_directive` holds the structured-workflow ledger nudge.
+  `probe_ledger_path` is the one-row registry of known workflow-owned
+  progress ledgers (currently superpowers SDD), so the nudge and the
+  suppression can never disagree about what exists. `probe_sdd_directive`
+  holds the structured-workflow ledger nudge (precompact only) and ends by
+  standing `handoff-todo.md` down; `probe_todo_suppression` is that
+  stand-down alone, for the handoff path.
 - `bin/handoff-precompact-probe` — PATH-resident shim that execs
   `scripts/precompact-probe.sh`. Invoked by the precompact skill body by
   bare name (same pattern as `handoff-memory-probe`).
@@ -276,11 +307,16 @@ re-injected again at the next `startup|clear`.
   judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
-- Output path: `.claude/handoff-task.md` (agent-written, git-tracked).
-  Changing it is a breaking change and requires a version bump.
-- The markdown template lives in `SKILL.md` (single source of truth).
-  `load-handoff.sh` does not re-state the template — it just inlines
-  whatever the agent wrote.
+- Output paths: `.claude/handoff-task.md` (agent-written, git-tracked via
+  `git add -f`) and `.claude/handoff-todo.md` (agent-written, gitignored —
+  working state, no pairing with a memory commit to earn it history).
+  Changing either is a breaking change and requires a version bump.
+- Both markdown templates live in `SKILL.md` (single source of truth).
+  Neither loader re-states them — each file carries its own `##` headings
+  and is inlined verbatim under the one `#` header the frame prepends.
+- `handoff-todo.md` holds **open items only**. A finished item is dropped,
+  never checked off: what landed is reconstructable from `git log`, and a
+  done item still listed reads as outstanding and gets redone.
 - Sourced helpers (`_lib.sh`, `_wipe-emit.sh`) need
   `# shellcheck source-path=SCRIPTDIR source=<file>.sh` above the
   `source` line so `shellcheck -x` follows them. Add
@@ -337,9 +373,10 @@ transcript; fictional shapes mislead.
 ## Frame assembly
 
 Neither loader touches the transcript. The frame is a timestamp header
-plus the inlined agent-authored `handoff-task.md`, assembled by
-`handoff_frame()` and injected at both transitions — `load-handoff.sh`
-on `startup|clear`, `load-compact.sh` on `compact`.
+plus the inlined agent-authored `handoff-task.md` and `handoff-todo.md`
+(task first; either alone is enough), assembled by `handoff_frame()` and
+injected at both transitions — `load-handoff.sh` on `startup|clear`,
+`load-compact.sh` on `compact`.
 There is no session id, no files-touched list, and no verbatim prompt
 transcript — the working set is the harness's own `gitStatus` block at
 load time, and reproducing prior exchanges verbatim manufactured false

@@ -1,6 +1,11 @@
 # Runtime handoff artifacts (regenerated each session)
 .claude/handoff.md
+# Listed but force-added by write-stage.sh: the task frame IS tracked, as a
+# versioned trail paired with gitlore memory commits.
 .claude/handoff-task.md
+# Not force-added anywhere: the remainder ledger is working state, with none of
+# that pairing value. Ignored means ignored.
+.claude/handoff-todo.md
 .claude/handoff-error.log
 .claude/handoff-session
 

@@ -33,11 +33,13 @@ fi
 # Consume unconditionally: the continuation fires at most once per compaction.
 rm -f "$pending"
 
-# The task file carries the content across the compaction; the typed prompt is
-# only a handle to it. Inject the frame here so the handle resolves against the
-# real thing rather than the summariser's paraphrase. Not consumed by reading —
-# it stays on disk for the next SessionStart(startup|clear).
-frame="$(handoff_frame "$cwd/$HANDOFF_REL_TASK")" || frame=""
+# The task file and the todo remainder carry the content across the compaction;
+# the typed prompt is only a handle to it. Inject the frame here so the handle
+# resolves against the real thing rather than the summariser's paraphrase. Not
+# consumed by reading — both stay on disk for the next
+# SessionStart(startup|clear).
+frame="$(handoff_frame "$cwd/$HANDOFF_REL_TASK" "$cwd/$HANDOFF_REL_TODO")" \
+    || frame=""
 
 if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
     jq -nc --arg n "$COMPACT_L2" --arg f "$frame" '{
