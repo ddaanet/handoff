@@ -112,7 +112,6 @@ for the todo list (2026-07-22)".
   deletion with `git add -f` on the now-absent path, mirroring
   `write-stage.sh`'s write-side staging so the removal rides the next commit
   (suppressed no-op outside a git repo / when untracked).
-  The session pointer is NOT written here — see `write-stage.sh`.
 - `scripts/_lib.sh` — sourced helper for the write and read hooks.
   Defines the `HANDOFF_REL_*` path constants and `handoff_resolve()`,
   which canonicalizes multiple paths in one `python3` subprocess

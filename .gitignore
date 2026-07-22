@@ -6,13 +6,16 @@
 # Not force-added anywhere: the remainder ledger is working state, with none of
 # that pairing value. Ignored means ignored.
 .claude/handoff-todo.md
-.claude/handoff-error.log
-.claude/handoff-session
+
+# Driver files for the rename and compaction watchers. Each exists for part of
+# one turn (or one Stop -> compaction window) and is consumed by a hook.
+.claude/autorename*
+.claude/autocompact*
 
 # Local-only Claude Code settings
 .claude/settings.local.json
 
-# Python bytecode (extract.py)
+# Python bytecode
 __pycache__/
 *.pyc
 

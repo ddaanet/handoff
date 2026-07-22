@@ -9,7 +9,10 @@
 # Completion is NOT this watcher's problem: SessionStart(compact) owns firing
 # the continuation. This script types one line and exits.
 #
-# No `set -e`: the sourced scaffold's `(( ))` arithmetic (wait_for_idle) returning 0 would abort under errexit.
+# No `set -e`: a watcher must reach its watcher_fail line rather than die
+# part-way through on any non-zero command — a transient tmux call, a grep
+# that does not match. Under errexit that death is silent, which is the one
+# outcome these scripts exist to prevent.
 set -uo pipefail
 
 PANE="${1:?pane id required}"; shift
