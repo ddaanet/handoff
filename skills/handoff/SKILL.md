@@ -26,8 +26,10 @@ First, decide both of the following without making any tool calls:
 - **Task snapshot** — whether there's an active task with specific next
   steps, unmade decisions, or non-obvious context worth preserving; if so,
   draft the content using the template below.
-- **Remaining items** — whether you are tracking a task list that still has
-  open items; if so, draft the remainder using the todo template below.
+- **Remaining items** — whether a task list with open items is in play; if
+  so, draft the remainder using the todo template below. A `/clear` does not
+  paraphrase that list the way a compaction would — it discards it, so disk
+  is the only place it survives.
 
 Then, in the **same turn**, issue the writes and run the memory probe:
 - Write `./.claude/autorename` — sole line is the session title (always)

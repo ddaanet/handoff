@@ -1500,14 +1500,20 @@ shared where the flows agree, and *when the agent reads it* is part of the
 contract, not an implementation detail of the caller.
 
 A skill that cross-references another skill's template has the same shape of
-bug. precompact said to use "the template in the `handoff` skill", which the
-agent has no path to: `CLAUDE_PLUGIN_ROOT` is unset in its Bash, and the one
-reachable route — invoking `handoff` — is the wipe trigger, firing between
-precompact's task-file write and its todo write and taking both with it.
-precompact now states the section shapes inline and says not to invoke
-`handoff` for them; the full templates and their rules stay in one place. The
-reference was never free: a pointer the reader cannot follow safely is a
-pointer to whatever it does instead.
+bug. precompact said to use "the template in the `handoff` skill" and stopped
+there. A path existed — the harness loads a skill body with its own absolute
+base directory, so `../handoff/SKILL.md` was always one Read away — but the
+skill never named it, and the route that *looks* available from inside a turn
+is invoking `handoff`, which is the wipe trigger, firing between precompact's
+task-file write and its todo write and taking both with it. precompact now
+states the section shapes inline for the common case, names the relative path
+for the full rules, and forbids the invocation explicitly. Naming the safe
+route is the load-bearing half: a prohibition with no alternative just moves
+the guess.
+
+Both fixes are the same lesson at two scales. Guidance is not a statement of
+fact to be checked for truth; it is read at a particular moment by a reader
+with particular reach, and it is correct only if it works from there.
 
 ## References
 

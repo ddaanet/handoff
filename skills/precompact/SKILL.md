@@ -37,9 +37,11 @@ user whether to proceed.
    which items are still open — an inference that fails silently by
    redoing finished work.
 
-   The `handoff` skill holds the full templates and the rules behind them.
-   Do not invoke it to read them: activating `handoff` wipes both files,
-   the task file you just wrote included.
+   The `handoff` skill holds the full templates and the rules behind them,
+   in the `SKILL.md` beside this one — `../handoff/SKILL.md`, relative to
+   this skill's own directory. Read that file when the rules matter. Never
+   invoke the skill to reach it: activating `handoff` wipes both files,
+   the task file just written included.
 
 4. Write `./.claude/autocompact` — **only once step 2 is fully complete**,
    never in the same turn as a question the directive told you to ask.
