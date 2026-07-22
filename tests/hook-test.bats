@@ -25,6 +25,26 @@ hook smoke test
 - none
 TASK
 
+    # Three hooks here (write-rename, stop-compact, load-compact) spawn a
+    # detached watcher, which drives tmux. Without a stub they reach the real
+    # server: TMUX=fake does not stop tmux falling back to the default socket,
+    # so `%0` is somebody's actual pane. Stub it to an idle, empty composer —
+    # the spawned watchers then find nothing to do and exit on their own
+    # timeouts, which the tunables below cut to ~1s.
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    cat > "$BATS_TEST_TMPDIR/bin/tmux" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  capture-pane) printf '%s\n' '──── x ──' '❯ ' ;;
+esac
+STUB
+    chmod +x "$BATS_TEST_TMPDIR/bin/tmux"
+    PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+    export PATH
+    export HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
+           HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
+           HANDOFF_WATCHER_CONSUME_TIMEOUT=1 HANDOFF_WATCHER_CONSUME_POLL=0.05
+
     # shellcheck source-path=SCRIPTDIR source=../scripts/_lib.sh disable=SC1091
     source "$repo_root/scripts/_lib.sh"
 }

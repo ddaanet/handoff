@@ -55,6 +55,9 @@ PANE="$TMUX_PANE"
 # Hand it the path to drop a reason at; report-compact-failure.sh picks it up.
 # The hook owns the path — the watcher stays ignorant of the layout.
 export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_COMPACT_FAILED"
+# Same arrangement for the other direction: the watcher confirms its submit by
+# watching this file disappear, which SessionStart(compact) is what does.
+export HANDOFF_PENDING_FILE="$pending"
 handoff_spawn_detached compact-when-idle.sh "$PANE" "$COMPACT_L1"
 
 jq -nc --arg c "$COMPACT_L1" --arg p "$PANE" \

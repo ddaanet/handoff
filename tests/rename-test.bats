@@ -180,16 +180,21 @@ STUB
 
 # tmux stub whose capture-pane output depends on what has been sent so far.
 # $1 = pane text to render after the literal send (recognized vs not).
+# $2 = pane text to render after the Enter; defaults to busy chrome. The real
+#      TUI does not reliably show any within the confirm window — that is the
+#      whole reason line 1 no longer keys on it — so tests that exercise the
+#      confirmation pass a quiet pane here.
 make_compact_stub() {
     SENT="$STUBDIR/sent.log"; : > "$SENT"
     STATE_L="$STUBDIR/sent_l"; STATE_E="$STUBDIR/sent_enter"
     rm -f "$STATE_L" "$STATE_E"
+    local after_enter="${2:-"'✻ Compacting… (3s · esc to interrupt)' '❯ '"}"
     cat > "$STUBDIR/tmux" <<STUB
 #!/usr/bin/env bash
 sub="\$1"; shift
 case "\$sub" in
   capture-pane)
-    if [ -f "$STATE_E" ]; then printf '%s\n' '✻ Compacting… (3s · esc to interrupt)' '❯ '
+    if [ -f "$STATE_E" ]; then printf '%s\n' $after_enter
     elif [ -f "$STATE_L" ]; then printf '%s\n' $1 '❯ /compact'
     else printf '%s\n' '──── x ──' '❯ '
     fi ;;
@@ -254,6 +259,63 @@ STUB
     [ "$status" -ne 0 ]
     [ ! -s "$SENT" ]
     grep -qi 'composing' "$fail_file"
+}
+
+# Confirming line 1. Submitting `/compact` starts a compaction, but the TUI
+# shows no chrome is_busy matches within the confirm window — observed live
+# 2026-07-22, where the compaction ran for 103s and the watcher still reported
+# "three Enters did not submit it". The authoritative signal is the one
+# SessionStart(compact) acts on: it consumes .claude/autocompact.pending. So the
+# watcher waits for that file to go, and never guesses from the pane.
+
+# A quiet pane after Enter: no spinner, no timer, empty composer.
+QUIET_AFTER_ENTER="'──── x ──' '❯ '"
+
+@test "compact watcher confirms line 1 by the pending file being consumed" {
+    make_compact_stub "'/compact  Compact the conversation'" "$QUIET_AFTER_ENTER"
+    pending="$BATS_TEST_TMPDIR/autocompact.pending"
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+    : > "$pending"
+    # Stand in for SessionStart(compact), which consumes the file when the
+    # compaction completes — well after any pane-chrome window would close.
+    ( sleep 0.3; rm -f "$pending" ) &
+
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_WATCHER_CONSUME_POLL=0.05 \
+        HANDOFF_WATCHER_CONSUME_TIMEOUT=5 \
+        HANDOFF_PENDING_FILE="$pending" HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compact keep the parser work'
+    [ "$status" -eq 0 ]
+    [ ! -e "$fail_file" ]
+}
+
+@test "compact watcher reports line 1 when no compaction ever consumes it" {
+    make_compact_stub "'/compact  Compact the conversation'" "$QUIET_AFTER_ENTER"
+    pending="$BATS_TEST_TMPDIR/autocompact.pending"
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+    : > "$pending"
+
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_WATCHER_CONSUME_POLL=0.05 \
+        HANDOFF_WATCHER_CONSUME_TIMEOUT=1 \
+        HANDOFF_PENDING_FILE="$pending" HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compact keep the parser work'
+    [ "$status" -ne 0 ]
+    grep -qi 'no compaction' "$fail_file"
+}
+
+# Recording a failure is additive, never a precondition — and an unconfirmable
+# submit must not be reported as a failed one.
+@test "compact watcher stays silent when there is nothing to confirm against" {
+    make_compact_stub "'/compact  Compact the conversation'" "$QUIET_AFTER_ENTER"
+    fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
+
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_WATCHER_CONSUME_TIMEOUT=1 \
+        HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/compact-when-idle.sh" '%9' '/compact'
+    [ "$status" -eq 0 ]
+    [ ! -e "$fail_file" ]
 }
 
 # --- continue-when-idle.sh (line 2: prose, no recognition check) ---------------

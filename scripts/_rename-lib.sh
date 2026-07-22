@@ -2,14 +2,19 @@
 # shellcheck shell=bash
 # Shared machinery for every detached watcher (*-when-idle.sh): pure
 # predicates over captured tmux pane text (read stdin), the pane-polling
-# scaffold (snap / wait_for_idle / submit_or_fail, which expect the sourcing
-# watcher to have set PANE), and the shared tunables. Do not execute directly.
+# scaffold (snap / wait_for_idle / the submit confirmations, which expect the
+# sourcing watcher to have set PANE), and the shared tunables. Do not execute
+# directly.
 # shellcheck disable=SC2034  # consumed by sourcing scripts
 
 # Tunables (overridden by the tests for speed).
 TIMEOUT="${HANDOFF_WATCHER_TIMEOUT:-30}"
 POLL="${HANDOFF_WATCHER_POLL:-0.1}"
 VERIFY_DELAY="${HANDOFF_WATCHER_VERIFY_DELAY:-0.5}"
+# A compaction is minutes-scale work, so its confirmation gets its own budget
+# and its own unhurried poll.
+CONSUME_TIMEOUT="${HANDOFF_WATCHER_CONSUME_TIMEOUT:-300}"
+CONSUME_POLL="${HANDOFF_WATCHER_CONSUME_POLL:-1}"
 
 # Strip ANSI escapes and carriage returns. BSD/macOS sed honors neither
 # \x1B nor \r in a script, so feed sed a literal ESC (bash ANSI-C quote,
@@ -48,25 +53,44 @@ wait_for_idle() {
     return 0
 }
 
-# Enter, then confirm the turn actually started; retry the Enter only —
-# re-sending the text would concatenate a second copy. Keyed on is_busy, not
-# is_typing: an Enter absorbed as a line break (the TUI's paste window) leaves
-# a multi-line composer whose last ❯ line reads empty, faking a successful
-# submit. Terminates the watcher either way — exit 0 on a confirmed submit,
-# watcher_fail with $1 after three misses — so only safe as a watcher's final
-# statement.
+# Enter, then confirm the compaction actually happened; retry the Enter only —
+# re-sending the text would concatenate a second copy. Terminates the watcher
+# either way — exit 0 on a confirmed compaction, watcher_fail with $1 on the
+# timeout — so only safe as a watcher's final statement.
 #
-# Used by the compact watcher (line 1). Its `/compact` is typed at Stop, when
-# the session is idle, and submitting it starts the compaction — a long,
-# reliably-busy operation. So is_busy confirms it within the window. The
-# continuation watcher (line 2) cannot use this: see submit_confirmed_or_fail.
-submit_or_fail() {
+# Used by the compact watcher (line 1). Confirmation is the disappearance of
+# $HANDOFF_PENDING_FILE, which SessionStart(compact) consumes: the same signal
+# DESIGN.md calls the authoritative compaction-complete one. Nothing on the pane
+# is consulted. is_busy was the original criterion and false-fails here — on
+# 2026-07-22 a live `/compact` submitted, compacted for 103s, and was still
+# reported as never submitted, because the TUI shows no chrome is_busy matches
+# in the ~1.5s after the keystroke. is_typing is no better: an Enter absorbed as
+# a line break (the TUI's paste window) leaves a multi-line composer whose last
+# ❯ line reads empty, faking a successful submit.
+#
+# The cost is latency — a genuine non-delivery is reported one CONSUME_TIMEOUT
+# late, not at once. That is the right trade: the report surfaces at the next
+# UserPromptSubmit either way, and a false alarm is worse than a slow one. With
+# no file to confirm against, exit 0: an unconfirmable submit is not a failed
+# one. The continuation watcher (line 2) has no such file and keys on the
+# transcript instead — see submit_confirmed_or_fail.
+submit_consumed_or_fail() {
+    local reason="$1" pending="${HANDOFF_PENDING_FILE:-}"
+    if [ -z "$pending" ]; then
+        tmux send-keys -t "$PANE" Enter
+        exit 0
+    fi
     for _ in 1 2 3; do
         tmux send-keys -t "$PANE" Enter
         sleep "$VERIFY_DELAY"
-        snap | is_busy && exit 0
+        [ -e "$pending" ] || exit 0
     done
-    watcher_fail "$1"
+    local deadline=$((SECONDS + CONSUME_TIMEOUT))
+    while (( SECONDS < deadline )); do
+        [ -e "$pending" ] || exit 0
+        sleep "$CONSUME_POLL"
+    done
+    watcher_fail "$reason"
 }
 
 # Count genuine user-prompt entries in the transcript ($1) whose decoded text

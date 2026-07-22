@@ -36,5 +36,6 @@ if snap | is_unknown_command; then
     watcher_fail "the TUI did not recognize \`$LINE1\`, so it was cleared unrun"
 fi
 
-# Recognized. Submit and confirm the turn actually started.
-submit_or_fail "\`$LINE1\` was typed but three Enters did not submit it"
+# Recognized. Submit, then confirm against the compaction itself rather than
+# against the pane — see submit_consumed_or_fail.
+submit_consumed_or_fail "\`$LINE1\` was typed and Entered, but no compaction followed"

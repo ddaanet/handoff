@@ -170,8 +170,15 @@ for the todo list (2026-07-22)".
   directly in `tests/rename-test.bats`. Also the shared watcher scaffold:
   the `HANDOFF_WATCHER_*` tunables, `snap` (visible-pane capture — never
   scrollback), `wait_for_idle` (stable-idle poll loop) and two submit
-  confirmations. `submit_or_fail` (Enter-retry confirmed on `is_busy`) is for
-  line 1: `/compact` at Stop starts a reliably-busy compaction. The continuation
+  confirmations, neither of which reads the pane. `submit_consumed_or_fail` is
+  for line 1: it Enters, then waits for `$HANDOFF_PENDING_FILE` (exported by
+  `stop-compact.sh`) to disappear, which `SessionStart(compact)` is what does —
+  confirming the compaction rather than the keystroke. `is_busy` was the
+  original criterion and false-fails here: the TUI shows no matching chrome in
+  the ~1.5s after the keystroke, so a live 103-second compaction was reported as
+  never submitted. The trade is latency, since a real non-delivery now waits out
+  `CONSUME_TIMEOUT`; with no file to confirm against it exits 0, because an
+  unconfirmable submit is not a failed one. The continuation
   watcher instead uses `submit_confirmed_or_fail` + `transcript_prompt_count`,
   which confirm via the session transcript (`$HANDOFF_TRANSCRIPT`, exported by
   `load-compact.sh`) rather than the spinner — line 2 fires into the
@@ -354,6 +361,11 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   scripts (and the rename scripts) against synthetic tool-event payloads. `bats run` captures
   exit codes/output without the `set +e` dance. `version-guard.sh` is
   tested in the toolkit, not here.
+  `hook-test.bats` stubs `tmux` on `PATH` in `setup()` and shortens the
+  `HANDOFF_WATCHER_*` tunables. Three of the hooks it exercises spawn a
+  detached watcher, and `TMUX=fake` does not stop tmux falling back to the
+  default socket — unstubbed, those watchers drive a real pane belonging to
+  whoever is running the suite.
   `tests/memory-probe.bats` covers `scripts/memory-probe.sh` and the
   `bin/` shim against a synthetic gitlore repo; `tests/precompact-probe.bats`
   covers `scripts/precompact-probe.sh` and its shim, including the composed
