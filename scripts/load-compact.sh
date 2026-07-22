@@ -15,7 +15,8 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-hook_cwd="$(jq -r '.cwd // ""')"
+input="$(cat)"
+hook_cwd="$(jq -r '.cwd // ""' <<<"$input")"
 cwd="$(handoff_root "$hook_cwd")"
 [[ -n "$cwd" ]] || exit 0
 
@@ -56,6 +57,11 @@ PANE="$TMUX_PANE"
 # See stop-compact.sh: the detached watcher's exit status goes nowhere, so give
 # it somewhere to record a non-delivery.
 export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_COMPACT_FAILED"
+# The watcher confirms delivery by watching this session's transcript for the
+# accepted prompt (submit_confirmed_or_fail), which tolerates a queued submit
+# that shows no spinner yet. Every hook payload carries transcript_path.
+HANDOFF_TRANSCRIPT="$(jq -r '.transcript_path // ""' <<<"$input")"
+export HANDOFF_TRANSCRIPT
 handoff_spawn_detached continue-when-idle.sh "$PANE" "$COMPACT_L2"
 
 jq -nc --arg n "$COMPACT_L2" --arg p "$PANE" --arg f "$frame" \

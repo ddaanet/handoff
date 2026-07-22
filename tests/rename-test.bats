@@ -46,6 +46,62 @@ setup() {
     [ "$status" -ne 0 ]
 }
 
+# --- transcript_prompt_count ---------------------------------------------------
+# The queued-submit signal: a genuine user-prompt entry whose text contains the
+# marker. is_busy times the spinner and false-fails on a queued submit whose turn
+# starts seconds later; the transcript records the accepted prompt at once. This
+# helper counts only real submissions — harness-injected user entries (isMeta
+# frame, isCompactSummary) and assistant echoes must not count, or a prompt that
+# is merely *quoted* in the summary would read as submitted.
+
+MARKER='run code-review per the task file'
+
+# Write one JSONL entry: <type> <flags-json-fragment-or-empty> <content>.
+tp_entry() {
+    local type="$1" extra="$2" content="$3"
+    if [ "$type" = assistant ]; then
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"%s"}]}}\n' "$content"
+    else
+        printf '{"type":"%s"%s,"message":{"role":"user","content":"%s"}}\n' "$type" "$extra" "$content"
+    fi
+}
+
+@test "transcript_prompt_count: 0 for a missing transcript" {
+    run transcript_prompt_count "$BATS_TEST_TMPDIR/nope.jsonl" "$MARKER"
+    [ "$status" -eq 0 ]
+    [ "$output" = 0 ]
+}
+
+@test "transcript_prompt_count: 0 for an empty/unset path" {
+    run transcript_prompt_count "" "$MARKER"
+    [ "$output" = 0 ]
+}
+
+@test "transcript_prompt_count: counts a genuine user prompt containing the marker" {
+    tr="$BATS_TEST_TMPDIR/t.jsonl"
+    tp_entry user "" "please $MARKER now" > "$tr"
+    run transcript_prompt_count "$tr" "$MARKER"
+    [ "$output" = 1 ]
+}
+
+@test "transcript_prompt_count: ignores isMeta, isCompactSummary, and assistant echoes" {
+    tr="$BATS_TEST_TMPDIR/t.jsonl"
+    {
+        tp_entry user ',"isMeta":true'          "frame quoting $MARKER"
+        tp_entry user ',"isCompactSummary":true' "summary quoting $MARKER"
+        tp_entry assistant ""                    "I will $MARKER"
+    } > "$tr"
+    run transcript_prompt_count "$tr" "$MARKER"
+    [ "$output" = 0 ]
+}
+
+@test "transcript_prompt_count: does not match a non-containing prompt" {
+    tr="$BATS_TEST_TMPDIR/t.jsonl"
+    tp_entry user "" "something else entirely" > "$tr"
+    run transcript_prompt_count "$tr" "$MARKER"
+    [ "$output" = 0 ]
+}
+
 # --- rename-when-idle.sh end-to-end via a tmux stub ----------------------------
 
 @test "watcher sends /rename with title (-l) then a separate Enter, exits 0 after verify" {
@@ -202,52 +258,59 @@ STUB
 
 # --- continue-when-idle.sh (line 2: prose, no recognition check) ---------------
 
-# tmux stub for the continue watcher. $1 = "submits" (the Enter starts a turn,
-# so the pane goes busy) or "absorbs" (the Enter lands inside the TUI's paste
-# window and becomes a literal newline — the pane stays idle, composer occupied).
+# tmux stub for the continue watcher. $1 = "submits" (the Enter is accepted —
+# the harness appends the prompt to the transcript) or "absorbs" (the Enter lands
+# inside the TUI's paste window and becomes a literal newline — nothing is
+# submitted, the transcript does not grow). The pane is ALWAYS idle with an empty
+# composer: a queued submit shows no spinner even on success, so the transcript,
+# not the pane, is the confirmation signal (submit_confirmed_or_fail). The
+# transcript is seeded with a stale pre-compaction copy of the same prompt, so a
+# passing confirmation must detect a NEW entry, not the marker's mere presence.
 make_continue_stub() {
     SENT="$STUBDIR/sent.log"; : > "$SENT"
-    STATE_E="$STUBDIR/sent_enter"; rm -f "$STATE_E"
-    local busy="'✻ Thinking… (3s · esc to interrupt)' '❯ '"
-    [ "$1" = absorbs ] && busy="'──── x ──' '❯ '"
+    TRANSCRIPT="$STUBDIR/transcript.jsonl"
+    printf '{"type":"user","message":{"role":"user","content":"continue with task 3 (stale pre-compact copy)"}}\n' \
+        > "$TRANSCRIPT"
+    local mode="$1"
     cat > "$STUBDIR/tmux" <<STUB
 #!/usr/bin/env bash
 sub="\$1"; shift
 case "\$sub" in
-  capture-pane)
-    if [ -f "$STATE_E" ]; then printf '%s\n' $busy
-    else printf '%s\n' '──── x ──' '❯ '
-    fi ;;
+  capture-pane) printf '%s\n' '──── x ──' '❯ ' ;;
   send-keys)
     printf '%s|' "\$@" >> "$SENT"; printf '\n' >> "$SENT"
-    case "\$*" in *Enter*) touch "$STATE_E" ;; esac ;;
+    case "\$*" in *Enter*)
+      [ "$mode" = submits ] && \
+        printf '{"type":"user","message":{"role":"user","content":"continue with task 3"}}\n' >> "$TRANSCRIPT"
+      ;; esac ;;
 esac
 STUB
     chmod +x "$STUBDIR/tmux"
 }
 
-@test "continue watcher types the prompt literally then Enters" {
+# Regression (session 8e39f620): the accepted continuation was queued behind
+# post-compaction settling, so no spinner showed in the confirm window and the
+# is_busy check reported non-delivery for a line that arrived. The pane here
+# never goes busy, yet the transcript gains the entry — confirmation must pass.
+@test "continue watcher confirms a queued submit that shows no spinner" {
     make_continue_stub submits
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -eq 0 ]
 
     sent="$(cat "$SENT")"
     [[ "$sent" == *"-l|continue with task 3|"* ]]
-    [[ "$sent" == *"Enter|"* ]]
-    # Exactly one Enter: a pane that went busy is a confirmed submit.
+    # Exactly one Enter: the transcript gained the entry on the first submit.
     [ "$(grep -c 'Enter|' "$SENT")" -eq 1 ]
 }
 
-# Regression: line 2 used to Enter with no settle after a long literal send, so
-# the TUI absorbed the Enter as a newline. `is_typing` then read the resulting
-# multi-line composer as empty (it only inspects the last ❯ line) and the
-# watcher exited 0 having submitted nothing. Verification keys on is_busy now.
+# The other side: the Enter is absorbed, no transcript entry ever appears, so the
+# watcher retries three times and then reports non-delivery.
 @test "continue watcher retries and fails when the Enter is absorbed" {
     make_continue_stub absorbs
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 
@@ -285,7 +348,8 @@ STUB
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
     make_continue_stub absorbs
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
+        HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 
@@ -297,7 +361,8 @@ STUB
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
     make_continue_stub submits
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
+        HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -eq 0 ]
 
@@ -321,7 +386,7 @@ STUB
 @test "watcher tolerates an unset HANDOFF_FAIL_FILE" {
     make_continue_stub absorbs
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 }

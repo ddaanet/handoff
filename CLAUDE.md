@@ -146,10 +146,19 @@ re-injected again at the next `startup|clear`.
   `is_unknown_command` over captured tmux pane text — pure predicates, tested
   directly in `tests/rename-test.bats`. Also the shared watcher scaffold:
   the `HANDOFF_WATCHER_*` tunables, `snap` (visible-pane capture — never
-  scrollback), `wait_for_idle` (stable-idle poll loop) and `submit_or_fail`
-  (Enter-retry confirmed on `is_busy`; terminates the watcher either way).
-  Each watcher keeps only its distinct middle — rename-verify vs
-  type-verify-submit vs prose-settle. And `watcher_fail`, which records a
+  scrollback), `wait_for_idle` (stable-idle poll loop) and two submit
+  confirmations. `submit_or_fail` (Enter-retry confirmed on `is_busy`) is for
+  line 1: `/compact` at Stop starts a reliably-busy compaction. The continuation
+  watcher instead uses `submit_confirmed_or_fail` + `transcript_prompt_count`,
+  which confirm via the session transcript (`$HANDOFF_TRANSCRIPT`, exported by
+  `load-compact.sh`) rather than the spinner — line 2 fires into the
+  post-compaction settle where a submit is *queued* (accepted, transcript-logged
+  at once) but shows no spinner until the queued turn starts seconds later, so
+  `is_busy` would false-fail it. The count keys on the same structural flags as
+  `handoff_activated` and is baselined before the first Enter, so neither a
+  quoted echo in the summary/frame nor a stale pre-compaction copy reads as a
+  submit. Each watcher keeps only its distinct middle — rename-verify vs
+  type-verify-submit vs prose-settle-confirm. And `watcher_fail`, which records a
   non-delivery reason to `$HANDOFF_FAIL_FILE` (set by the spawning hook, which
   owns the path) and exits 1; unset is tolerated.
 - `scripts/write-rename.sh` — PostToolUse(Write|Edit) entry point for session
@@ -178,10 +187,11 @@ re-injected again at the next `startup|clear`.
 - `scripts/load-compact.sh` — `SessionStart(compact)` entry point: consumes
   `autocompact.pending`, injects the task-file frame via `additionalContext`
   (`handoff_frame`; omitted when there is no task file), and spawns
-  `continue-when-idle.sh`. `source: "compact"` is the authoritative
-  compaction-complete signal — no pane scraping. Silent when there is no
-  pending file (auto-compaction fires the same hook). Reading the task file
-  does not consume it.
+  `continue-when-idle.sh` with the session `transcript_path` exported as
+  `$HANDOFF_TRANSCRIPT` (the watcher's delivery-confirmation signal).
+  `source: "compact"` is the authoritative compaction-complete signal — no pane
+  scraping. Silent when there is no pending file (auto-compaction fires the same
+  hook). Reading the task file does not consume it.
 - `scripts/report-compact-failure.sh` — `UserPromptSubmit` entry point:
   consumes `.claude/autocompact.failed` and reports the reason on both
   channels, also clearing a stranded `autocompact.pending`. Detached watchers'
@@ -198,7 +208,10 @@ re-injected again at the next `startup|clear`.
   Retries the Enter alone (re-sending the text would concatenate a copy).
 - `scripts/continue-when-idle.sh` — detached watcher for line 2. Same idle
   wait, no recognition check: line 2 is prose, and prose at idle is the safe
-  class. Both watchers read only the **visible** pane — a `capture-pane -S`
+  class. Confirms delivery via the transcript (`submit_confirmed_or_fail`), not
+  `is_busy`: it fires into the post-compaction settle, where the submit is
+  queued and shows no spinner in the confirm window even though it was accepted.
+  Both watchers read only the **visible** pane — a `capture-pane -S`
   history read matches a stale timer and reports busy long after `Stop`.
 - `scripts/worktree_root.py` — pure resolver `worktree_root(cwd, project)`:
   walks up from the session cwd via on-disk `.git` linkage to the enclosing

@@ -33,4 +33,8 @@ tmux send-keys -t "$PANE" -l "$LINE2"
 # redundant — the prose path has no other protection.
 sleep "$VERIFY_DELAY"
 
-submit_or_fail "the continuation prompt was typed but three Enters did not submit it"
+# Confirm via the transcript, not is_busy: this fires right after compaction, so
+# the submit is often queued behind the session's post-compaction settling —
+# accepted at once, but no spinner until the queued turn starts seconds later.
+# is_busy would false-fail it. HANDOFF_TRANSCRIPT is exported by load-compact.sh.
+submit_confirmed_or_fail "$LINE2" "the continuation prompt was typed but three Enters did not submit it"
