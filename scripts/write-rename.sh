@@ -30,6 +30,10 @@ if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
 fi
 
 PANE="$TMUX_PANE"
+# The watcher is detached, so a failed delivery has no way back to the agent.
+# Hand it the path to drop a reason at; report-watcher-failure.sh picks it up.
+# The hook owns the path — the watcher stays ignorant of the layout.
+export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_RENAME_FAILED"
 handoff_spawn_detached rename-when-idle.sh "$PANE" "$title"
 jq -nc --arg t "$title" --arg p "$PANE" \
     '{systemMessage: ("handoff: will rename to \"" + $t + "\" once prompt is idle (tmux pane " + $p + ").")}'

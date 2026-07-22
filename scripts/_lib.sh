@@ -22,11 +22,14 @@ HANDOFF_REL_COMPACT=".claude/autocompact"
 # later Stop in the same session cannot re-arm; SessionStart(compact) consumes it.
 # shellcheck disable=SC2034
 HANDOFF_REL_COMPACT_PENDING=".claude/autocompact.pending"
-# Where a detached watcher records a line it could not deliver. Its exit status
-# goes nowhere, so this file is the only path back to the agent; consumed and
-# reported by report-compact-failure.sh at the next UserPromptSubmit.
+# Where a detached watcher records a line it could not deliver, one file per
+# driven line. A watcher's exit status goes nowhere, so these are the only path
+# back to the agent; both are consumed and reported by report-watcher-failure.sh
+# at the next UserPromptSubmit.
 # shellcheck disable=SC2034
 HANDOFF_REL_COMPACT_FAILED=".claude/autocompact.failed"
+# shellcheck disable=SC2034
+HANDOFF_REL_RENAME_FAILED=".claude/autorename.failed"
 
 # Assemble the injectable frame from the task file ($1) and the optional todo
 # remainder ($2): a timestamp header plus each file inlined verbatim, in that

@@ -11,7 +11,7 @@
           },
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/report-compact-failure.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/report-watcher-failure.sh",
             "timeout": 5
           }
         ]

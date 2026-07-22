@@ -1119,7 +1119,7 @@ wiping the composer, so the pane looks untouched, no compaction happens, and the
 agent continues on a full context believing it armed one.
 
 So the watchers write the reason to `.claude/autocompact.failed` and
-`report-compact-failure.sh` surfaces it on both channels at the next
+`report-watcher-failure.sh` surfaces it on both channels at the next
 `UserPromptSubmit`. `UserPromptSubmit` rather than `Stop`: a watcher runs *after*
 the Stop that spawned it, so the next Stop is a full turn later, while the next
 prompt is the first moment anything can act on the news.
@@ -1397,7 +1397,7 @@ at the `Stop` of the turn that writes it, and `Stop` renames it away. A turn
 begins with a `UserPromptSubmit`. So a `UserPromptSubmit` that can *see* a bare
 `autocompact` is by construction a turn later than the one that wrote it, and
 that file never armed. No timestamp, no session id, no heuristic: the sweep
-lives in `report-compact-failure.sh`, which already owns compaction-state
+lives in `report-watcher-failure.sh`, which already owns compaction-state
 reconciliation at prompt time, and reports on both channels like the watcher
 failures it sits beside.
 
@@ -1415,6 +1415,31 @@ Adding `autocompact` to `_wipe-emit.sh`'s list was considered as a complement
 and dropped. The wipe runs on skill re-activation, which the lingering-file
 scenario does not involve, and a second mechanism covering a strict subset is
 the vestigial half-measure the cleanup rule exists to prevent.
+
+## The rename watcher joins the failure channel (2026-07-22)
+
+The 2026-07-20 pass gave the compaction watchers a way to report a line that
+never landed and left the rename watcher out, even while naming its `is_typing`
+bail as the archetype of "the same shape [that] used to `exit 0`,
+indistinguishable from success". It was written first and the retrofit did not
+reach back to it: both its non-delivery paths — the composing-bail and three
+failed verifies — ended in a bare exit nobody reads, `write-rename.sh` never
+exported `HANDOFF_FAIL_FILE` for it to write to, and no consumer existed on the
+rename side. So the hook announced "will rename to X once idle" and nothing ever
+contradicted it.
+
+The fix is entirely existing parts: `watcher_fail` at both exits,
+`HANDOFF_FAIL_FILE` exported by `write-rename.sh` as `stop-compact.sh` already
+does, and one more file for the consumer to read. The consumer did not need
+duplicating — `report-compact-failure.sh` becomes `report-watcher-failure.sh`
+and reads both files, joining whatever it finds into a single message. They
+differ only in which line never landed; a second `UserPromptSubmit` hook doing
+the same work under a different name would be the vestigial half-measure, not
+the general one.
+
+`.pending` stays coupled to the compaction failure alone. A rename says nothing
+about a compaction, so clearing it on that evidence would race a live
+`SessionStart(compact)` — the same reasoning as the stale-`autocompact` sweep.
 
 ## The submit signal, a third time: confirm the compaction, not the keystroke (2026-07-22)
 

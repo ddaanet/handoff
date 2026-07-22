@@ -161,7 +161,7 @@ submit_confirmed_or_fail() {
 # exit status, so a line that never lands is otherwise invisible — worst of all
 # on the compact watcher's C-u abort, which also wipes the composer and leaves
 # the pane looking untouched. The reason goes in $HANDOFF_FAIL_FILE (set by the
-# spawning hook, which owns the path) for report-compact-failure.sh to surface at
+# spawning hook, which owns the path) for report-watcher-failure.sh to surface at
 # the next UserPromptSubmit. Unset is tolerated: recording is additive, never a
 # precondition for driving the pane.
 watcher_fail() {

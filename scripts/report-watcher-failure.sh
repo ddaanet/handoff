@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# UserPromptSubmit: reconcile compaction state at the start of a turn, and
-# report anything that went wrong in the last one. Two independent checks.
+# UserPromptSubmit: reconcile watcher and compaction state at the start of a
+# turn, and report anything that went wrong in the last one.
 #
 # 1. A watcher's non-delivery. The watchers are detached, so their exit status
 #    goes nowhere. Left alone, a line that never lands is silent — worst on the
 #    compact watcher's C-u abort, which wipes the composer and leaves the pane
 #    looking untouched while the agent carries on believing it armed a
-#    compaction. The watcher writes the reason to .claude/autocompact.failed;
-#    this reads it at the first moment anything can act on it. The file is
-#    written only on paths the watcher observed itself — never inferred from a
-#    stale .pending, whose presence is legitimate for the whole Stop ->
-#    compaction window.
+#    compaction, and on the rename watcher's composing-bail, which leaves
+#    write-rename.sh's "will rename once idle" promise standing forever. Each
+#    watcher writes its reason to a file named for the line it was driving
+#    (.claude/autocompact.failed, .claude/autorename.failed); this reads them at
+#    the first moment anything can act on them. They are written only on paths a
+#    watcher observed itself — never inferred from a stale .pending, whose
+#    presence is legitimate for the whole Stop -> compaction window.
 #
 # 2. An autocompact that outlived its turn. The file is armed at the Stop of
 #    the turn that writes it, and Stop renames it to .pending. So one still
@@ -35,24 +37,33 @@ hook_cwd="$(jq -r '.cwd // ""')"
 cwd="$(handoff_root "$hook_cwd")"
 [[ -n "$cwd" ]] || exit 0
 
-failed="$cwd/$HANDOFF_REL_COMPACT_FAILED"
+compact_failed="$cwd/$HANDOFF_REL_COMPACT_FAILED"
+rename_failed="$cwd/$HANDOFF_REL_RENAME_FAILED"
 armed="$cwd/$HANDOFF_REL_COMPACT"
-[[ -f "$failed" || -f "$armed" ]] || exit 0
+[[ -f "$compact_failed" || -f "$rename_failed" || -f "$armed" ]] || exit 0
 
 msgs=()
 notes=()
 
-if [[ -f "$failed" ]]; then
-    reason="$(head -n1 "$failed")"
-    rm -f "$failed"
+if [[ -f "$compact_failed" ]]; then
+    reason="$(head -n1 "$compact_failed")"
+    rm -f "$compact_failed"
     # A line-1 failure strands the armed file as .pending: nothing will consume
     # it (SessionStart(compact) never fires) and Stop cannot re-arm from it,
     # since it gates on .claude/autocompact. Clear it with the report. Only
-    # here — a stale autocompact says nothing about a .pending, and sweeping one
-    # on that evidence would race a live SessionStart(compact).
+    # here — neither a rename failure nor a stale autocompact says anything
+    # about a .pending, and sweeping one on that evidence would race a live
+    # SessionStart(compact).
     rm -f "$cwd/$HANDOFF_REL_COMPACT_PENDING"
     msgs+=("compaction watcher did not deliver — $reason")
     notes+=("The handoff compaction watcher failed to deliver its line: $reason. The compaction or continuation it was driving did not happen.")
+fi
+
+if [[ -f "$rename_failed" ]]; then
+    reason="$(head -n1 "$rename_failed")"
+    rm -f "$rename_failed"
+    msgs+=("rename watcher did not deliver — $reason")
+    notes+=("The handoff rename watcher failed to deliver its line: $reason. The session was not renamed.")
 fi
 
 if [[ -f "$armed" ]]; then

@@ -17,8 +17,10 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 wait_for_idle
 
-# Never type over a prompt the user is editing.
-snap | is_typing && exit 0
+# Never type over a prompt the user is editing. A bail is a non-delivery like
+# any other: write-rename.sh has already told the user the rename is coming, so
+# leaving silently would leave that promise standing.
+snap | is_typing && watcher_fail "the user was composing a prompt, so \`/rename $TITLE\` was never typed"
 
 # Send literally (-l) so the title is not read as tmux key names; Enter is a
 # separate keystroke. Verify the title shows (status bar) and retry up to 3×.
@@ -29,4 +31,4 @@ for _ in 1 2 3; do
     sleep "$VERIFY_DELAY"
     snap | grep -Fq "$needle" && exit 0
 done
-exit 1
+watcher_fail "\`/rename $TITLE\` was typed three times and the title never appeared"

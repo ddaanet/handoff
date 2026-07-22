@@ -150,10 +150,40 @@ esac
 STUB
     chmod +x "$STUBDIR/tmux"
 
-    PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
-        bash "$SCRIPTS/rename-when-idle.sh" '%9' 'Should Not Send' >/dev/null 2>&1
+    fail_file="$BATS_TEST_TMPDIR/autorename.failed"
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/rename-when-idle.sh" '%9' 'Should Not Send'
 
     [ ! -s "$SENT" ]
+    # The bail is a non-delivery like any other. It used to exit 0 — the exact
+    # shape DESIGN.md calls indistinguishable from success.
+    [ "$status" -ne 0 ]
+    grep -qi 'composing' "$fail_file"
+}
+
+@test "watcher records a rename that never took" {
+    SENT="$STUBDIR/sent.log"
+    : > "$SENT"
+
+    # Idle and empty, but the title never appears: the rename did not land.
+    cat > "$STUBDIR/tmux" <<STUB
+#!/usr/bin/env bash
+sub="\$1"; shift
+case "\$sub" in
+  capture-pane) printf '%s\n' '──── x ──' '❯ ' ;;
+  send-keys) printf '%s|' "\$@" >> "$SENT"; printf '\n' >> "$SENT" ;;
+esac
+STUB
+    chmod +x "$STUBDIR/tmux"
+
+    fail_file="$BATS_TEST_TMPDIR/autorename.failed"
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_FAIL_FILE="$fail_file" \
+        bash "$SCRIPTS/rename-when-idle.sh" '%9' 'Demo Title Here'
+
+    [ "$status" -ne 0 ]
+    grep -q 'Demo Title Here' "$fail_file"
 }
 
 # --- _rename-lib.sh: command-recognition predicate -----------------------------

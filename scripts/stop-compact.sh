@@ -8,7 +8,7 @@
 # Stop does NOT fire on an Esc interrupt, so an interrupted turn cannot arm the
 # compaction — but the file it wrote outlives it, and a later Stop would arm
 # that. Existence alone is therefore not enough evidence to arm on; what makes
-# it enough is report-compact-failure.sh sweeping any autocompact still visible
+# it enough is report-watcher-failure.sh sweeping any autocompact still visible
 # at the next UserPromptSubmit, so one reaching this hook is always the current
 # turn's own.
 set -euo pipefail
@@ -52,7 +52,7 @@ fi
 
 PANE="$TMUX_PANE"
 # The watcher is detached, so a failed delivery has no way back to the agent.
-# Hand it the path to drop a reason at; report-compact-failure.sh picks it up.
+# Hand it the path to drop a reason at; report-watcher-failure.sh picks it up.
 # The hook owns the path — the watcher stays ignorant of the layout.
 export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_COMPACT_FAILED"
 # Same arrangement for the other direction: the watcher confirms its submit by

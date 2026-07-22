@@ -162,7 +162,10 @@ for the todo list (2026-07-22)".
   spinner to be absent (idle), checks the user isn't composing, then fires
   `tmux send-keys -l` to type `/rename <title>` + Enter. Verifies the rename
   landed (status bar) and retries up to 3×. Spawned by `write-rename.sh`;
-  outlives the agent turn.
+  outlives the agent turn. Both non-delivery paths — the composing-bail and
+  three failed verifies — end in `watcher_fail`, so neither is silent. The bail
+  is the shape DESIGN.md calls indistinguishable from success: it used to
+  `exit 0` while `write-rename.sh` had already promised the user a rename.
 - `scripts/_rename-lib.sh` — sourced helper for every detached watcher
   (`rename-when-idle.sh` and both compaction watchers, despite the name).
   Defines `is_busy` (spinner present), `is_typing` (prompt has content) and
@@ -197,6 +200,9 @@ for the todo list (2026-07-22)".
   `rename-when-idle.sh` watcher (in tmux) or emits a `/rename <title>` line
   for the user to paste (outside tmux). Running as a hook rather than via the
   Bash tool means the tmux socket is accessible with no sandbox bypass.
+  Exports `HANDOFF_FAIL_FILE` (`.claude/autorename.failed`) before spawning,
+  the same arrangement `stop-compact.sh` uses: the hook owns the path, the
+  watcher stays ignorant of the layout.
 - `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point:
   matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`,
   then stages the file with `git add -f`.
@@ -222,11 +228,13 @@ for the todo list (2026-07-22)".
   `source: "compact"` is the authoritative compaction-complete signal — no pane
   scraping. Silent when there is no pending file (auto-compaction fires the same
   hook). Reading the task file does not consume it.
-- `scripts/report-compact-failure.sh` — `UserPromptSubmit` entry point:
-  reconciles compaction state at the start of a turn. Two independent checks.
-  It consumes `.claude/autocompact.failed` and reports the reason on both
-  channels, also clearing a stranded `autocompact.pending`. Detached watchers'
-  exit status is read by nothing, so this file is their only path back to the
+- `scripts/report-watcher-failure.sh` — `UserPromptSubmit` entry point:
+  reconciles watcher and compaction state at the start of a turn.
+  It consumes `.claude/autocompact.failed` and `.claude/autorename.failed` —
+  one file per driven line, differing only in which line never landed — and
+  reports the reasons on both channels in a single message, also clearing a
+  stranded `autocompact.pending` (compaction failure only). Detached watchers'
+  exit status is read by nothing, so these files are their only path back to the
   agent — most of all on the line-1 recognition abort, which wipes the composer
   and leaves the pane looking untouched. `UserPromptSubmit` rather than `Stop`
   because a watcher runs *after* the Stop that spawned it. Reports only what a
@@ -375,7 +383,7 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   recipes.
   The compaction driver is covered in the two existing suites rather than a
   new file: `tests/hook-test.bats` for `write-compact.sh` / `stop-compact.sh`
-  / `load-compact.sh` / `report-compact-failure.sh`, `tests/rename-test.bats`
+  / `load-compact.sh` / `report-watcher-failure.sh`, `tests/rename-test.bats`
   for the two watchers, the `is_unknown_command` predicate and the
   `watcher_fail` recording (they share `_rename-lib.sh` and the tmux stub).
 - `just py-test` — `pytest`: unit tests of `worktree_root.py`

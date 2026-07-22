@@ -1073,7 +1073,7 @@ run_load_compact() {
     [ ! -e "$wt/.claude/autocompact.pending" ]
 }
 
-# --- report-compact-failure (UserPromptSubmit: surface a watcher non-delivery) ---
+# --- report-watcher-failure (UserPromptSubmit: surface a watcher non-delivery) ---
 #
 # Detached watchers have no channel back: a line that never lands is invisible to
 # the agent, and the compact watcher's C-u abort leaves the pane looking
@@ -1082,17 +1082,17 @@ run_load_compact() {
 run_report_failure() {
     run bash -c '
         jq -nc --arg cwd "$1" "{cwd:\$cwd, prompt:\"anything\"}" \
-        | bash scripts/report-compact-failure.sh
+        | bash scripts/report-watcher-failure.sh
     ' _ "$1"
 }
 
-@test "report-compact-failure (no failure file: silent no-op)" {
+@test "report-watcher-failure (no failure file: silent no-op)" {
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
-@test "report-compact-failure (failure present: reports on both channels)" {
+@test "report-watcher-failure (failure present: reports on both channels)" {
     printf '%s\n' "the TUI did not recognize \`/compact\`" \
         > "$tmp/.claude/autocompact.failed"
     run_report_failure "$tmp"
@@ -1104,7 +1104,7 @@ run_report_failure() {
         '.hookSpecificOutput.additionalContext | test("did not recognize")' >/dev/null
 }
 
-@test "report-compact-failure (consumes the file: reports once, not every prompt)" {
+@test "report-watcher-failure (consumes the file: reports once, not every prompt)" {
     printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
     run_report_failure "$tmp"
     [ ! -e "$tmp/.claude/autocompact.failed" ]
@@ -1115,7 +1115,7 @@ run_report_failure() {
 
 # A line-1 failure leaves the armed file stranded as .pending: no compaction will
 # consume it, and Stop cannot re-arm from it. Clear it with the report.
-@test "report-compact-failure (clears a stranded pending file)" {
+@test "report-watcher-failure (clears a stranded pending file)" {
     printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
     printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
     run_report_failure "$tmp"
@@ -1123,7 +1123,7 @@ run_report_failure() {
     [ ! -e "$tmp/.claude/autocompact.pending" ]
 }
 
-@test "report-compact-failure (worktree cwd: reads the worktree file)" {
+@test "report-watcher-failure (worktree cwd: reads the worktree file)" {
     wt="$(make_worktree wtF)"
     printf '%s\n' "typed but never submitted" > "$wt/.claude/autocompact.failed"
     run_report_failure "$wt"
@@ -1137,7 +1137,7 @@ run_report_failure() {
 # never armed — its turn ended abnormally (Esc, crash, quit). Left alone it is
 # armed by the next normal Stop, days later and possibly in another session,
 # driving a stale /compact into unrelated work.
-@test "report-compact-failure (stale autocompact: discards it and reports)" {
+@test "report-watcher-failure (stale autocompact: discards it and reports)" {
     printf '%s\n' "/compact keep the parser work" "continue with task 3" \
         > "$tmp/.claude/autocompact"
     run_report_failure "$tmp"
@@ -1150,7 +1150,7 @@ run_report_failure() {
         '.hookSpecificOutput.additionalContext | test("autocompact")' >/dev/null
 }
 
-@test "report-compact-failure (stale autocompact: reports once, not every prompt)" {
+@test "report-watcher-failure (stale autocompact: reports once, not every prompt)" {
     printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
@@ -1164,7 +1164,7 @@ run_report_failure() {
 # window contains the watcher's own /compact submit — a UserPromptSubmit. Only
 # a watcher-observed failure may clear it; a stale autocompact must not, or the
 # sweep would race SessionStart(compact) and kill a live continuation.
-@test "report-compact-failure (stale autocompact leaves .pending alone)" {
+@test "report-watcher-failure (stale autocompact leaves .pending alone)" {
     printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact"
     printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
     run_report_failure "$tmp"
@@ -1173,7 +1173,7 @@ run_report_failure() {
     [ -f "$tmp/.claude/autocompact.pending" ]
 }
 
-@test "report-compact-failure (failure and stale file: one report covering both)" {
+@test "report-watcher-failure (failure and stale file: one report covering both)" {
     printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
     printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact"
     run_report_failure "$tmp"
@@ -1183,7 +1183,44 @@ run_report_failure() {
     echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
 }
 
-@test "report-compact-failure (worktree cwd: sweeps the worktree file)" {
+# The rename watcher is detached on the same terms as the compaction ones, so
+# its non-deliveries need the same path back. One hook reads both files: they
+# differ only in which line never landed.
+@test "report-watcher-failure (rename failure: reports on both channels)" {
+    printf '%s\n' "the user was composing a prompt" \
+        > "$tmp/.claude/autorename.failed"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autorename.failed" ]
+    echo "$output" | jq -e '.systemMessage | test("composing")' >/dev/null
+    echo "$output" | jq -e \
+        '.hookSpecificOutput.additionalContext | test("rename")' >/dev/null
+}
+
+@test "report-watcher-failure (both watchers failed: one report covering both)" {
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
+    printf '%s\n' "the user was composing a prompt" \
+        > "$tmp/.claude/autorename.failed"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -sr 'length')" = "1" ]
+    echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("composing")' >/dev/null
+}
+
+# A rename failure says nothing about a compaction, so it must not clear the
+# armed file — same reasoning as the stale-autocompact sweep.
+@test "report-watcher-failure (rename failure leaves .pending alone)" {
+    printf '%s\n' "the user was composing a prompt" \
+        > "$tmp/.claude/autorename.failed"
+    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autorename.failed" ]
+    [ -f "$tmp/.claude/autocompact.pending" ]
+}
+
+@test "report-watcher-failure (worktree cwd: sweeps the worktree file)" {
     wt="$(make_worktree wtG)"
     printf '%s\n' "/compact" "continue" > "$wt/.claude/autocompact"
     run_report_failure "$wt"
