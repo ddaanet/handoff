@@ -1111,3 +1111,63 @@ run_report_failure() {
     [ ! -e "$wt/.claude/autocompact.failed" ]
     echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
 }
+
+# An autocompact is armed at the Stop of the turn that writes it, and Stop
+# renames it away. So one still present at a *later* turn's UserPromptSubmit
+# never armed — its turn ended abnormally (Esc, crash, quit). Left alone it is
+# armed by the next normal Stop, days later and possibly in another session,
+# driving a stale /compact into unrelated work.
+@test "report-compact-failure (stale autocompact: discards it and reports)" {
+    printf '%s\n' "/compact keep the parser work" "continue with task 3" \
+        > "$tmp/.claude/autocompact"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact" ]
+    echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
+    echo "$output" | jq -e \
+        '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
+    echo "$output" | jq -e \
+        '.hookSpecificOutput.additionalContext | test("autocompact")' >/dev/null
+}
+
+@test "report-compact-failure (stale autocompact: reports once, not every prompt)" {
+    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+
+    run_report_failure "$tmp"
+    [ "$output" = "" ]
+}
+
+# .pending is legitimate for the whole Stop -> compaction window, and that
+# window contains the watcher's own /compact submit — a UserPromptSubmit. Only
+# a watcher-observed failure may clear it; a stale autocompact must not, or the
+# sweep would race SessionStart(compact) and kill a live continuation.
+@test "report-compact-failure (stale autocompact leaves .pending alone)" {
+    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact"
+    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autocompact" ]
+    [ -f "$tmp/.claude/autocompact.pending" ]
+}
+
+@test "report-compact-failure (failure and stale file: one report covering both)" {
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
+    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -sr 'length')" = "1" ]
+    echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
+}
+
+@test "report-compact-failure (worktree cwd: sweeps the worktree file)" {
+    wt="$(make_worktree wtG)"
+    printf '%s\n' "/compact" "continue" > "$wt/.claude/autocompact"
+    run_report_failure "$wt"
+    [ "$status" -eq 0 ]
+    [ ! -e "$wt/.claude/autocompact" ]
+    echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
+}

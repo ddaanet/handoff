@@ -1,20 +1,31 @@
 #!/usr/bin/env bash
-# UserPromptSubmit: surface a compaction watcher's non-delivery.
+# UserPromptSubmit: reconcile compaction state at the start of a turn, and
+# report anything that went wrong in the last one. Two independent checks.
 #
-# The watchers are detached, so their exit status goes nowhere. Left alone, a
-# line that never lands is silent — worst on the compact watcher's C-u abort,
-# which wipes the composer and leaves the pane looking untouched while the agent
-# carries on believing it armed a compaction. The watcher writes the reason to
-# .claude/autocompact.failed; this reads it at the first moment anything can act
-# on it.
+# 1. A watcher's non-delivery. The watchers are detached, so their exit status
+#    goes nowhere. Left alone, a line that never lands is silent — worst on the
+#    compact watcher's C-u abort, which wipes the composer and leaves the pane
+#    looking untouched while the agent carries on believing it armed a
+#    compaction. The watcher writes the reason to .claude/autocompact.failed;
+#    this reads it at the first moment anything can act on it. The file is
+#    written only on paths the watcher observed itself — never inferred from a
+#    stale .pending, whose presence is legitimate for the whole Stop ->
+#    compaction window.
+#
+# 2. An autocompact that outlived its turn. The file is armed at the Stop of
+#    the turn that writes it, and Stop renames it to .pending. So one still
+#    present when a *later* turn begins never armed: that turn ended abnormally
+#    (Esc — Stop does not fire on an interrupt — or a crash, or a quit). Left on
+#    disk it is armed by the next Stop that does fire, days later and possibly
+#    in an unrelated session, driving a stale /compact and a stale continuation
+#    prompt into work they were never written for. UserPromptSubmit is the exact
+#    discriminator: it cannot fire between the write and that turn's own Stop.
+#    (Prose injected into a still-running turn is the one exception, and it
+#    fails safe — the compaction is cancelled and said so, not deferred.)
 #
 # UserPromptSubmit rather than Stop: a watcher runs *after* the Stop that spawned
 # it, so the next Stop is a whole turn later. It also fires on every prompt, so
 # the no-file path must be silent and cheap.
-#
-# The file is written only on paths the watcher observed itself — never inferred
-# from a stale .pending, whose presence is legitimate for the whole Stop ->
-# compaction window.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
@@ -25,20 +36,38 @@ cwd="$(handoff_root "$hook_cwd")"
 [[ -n "$cwd" ]] || exit 0
 
 failed="$cwd/$HANDOFF_REL_COMPACT_FAILED"
-[[ -f "$failed" ]] || exit 0
+armed="$cwd/$HANDOFF_REL_COMPACT"
+[[ -f "$failed" || -f "$armed" ]] || exit 0
 
-reason="$(head -n1 "$failed")"
-rm -f "$failed"
+msgs=()
+notes=()
 
-# A line-1 failure strands the armed file as .pending: nothing will consume it
-# (SessionStart(compact) never fires) and Stop cannot re-arm from it, since it
-# gates on .claude/autocompact. Clear it with the report.
-rm -f "$cwd/$HANDOFF_REL_COMPACT_PENDING"
+if [[ -f "$failed" ]]; then
+    reason="$(head -n1 "$failed")"
+    rm -f "$failed"
+    # A line-1 failure strands the armed file as .pending: nothing will consume
+    # it (SessionStart(compact) never fires) and Stop cannot re-arm from it,
+    # since it gates on .claude/autocompact. Clear it with the report. Only
+    # here — a stale autocompact says nothing about a .pending, and sweeping one
+    # on that evidence would race a live SessionStart(compact).
+    rm -f "$cwd/$HANDOFF_REL_COMPACT_PENDING"
+    msgs+=("compaction watcher did not deliver — $reason")
+    notes+=("The handoff compaction watcher failed to deliver its line: $reason. The compaction or continuation it was driving did not happen.")
+fi
 
-jq -nc --arg r "$reason" '{
-    systemMessage: ("handoff: compaction watcher did not deliver — " + $r + "."),
+if [[ -f "$armed" ]]; then
+    rm -f "$armed"
+    msgs+=("stale autocompact discarded — its turn ended without arming")
+    notes+=("A .claude/autocompact file was still on disk when this turn began. It is armed at the Stop of the turn that writes it, so one surviving into a later turn never armed — that turn ended on an interrupt, a crash or a quit. It has been discarded, so the compaction it described did not happen and cannot fire into unrelated work later.")
+fi
+
+printf -v msg '%s; ' "${msgs[@]}"
+printf -v note '%s ' "${notes[@]}"
+
+jq -nc --arg m "${msg%; }" --arg n "${note% }" '{
+    systemMessage: ("handoff: " + $m + "."),
     hookSpecificOutput: {
         hookEventName: "UserPromptSubmit",
-        additionalContext: ("The handoff compaction watcher failed to deliver its line: " + $r + ". The compaction or continuation it was driving did not happen.")
+        additionalContext: $n
     }
 }'

@@ -6,7 +6,11 @@
 #
 # Stop fires on every turn, so the no-file path must be silent and cheap.
 # Stop does NOT fire on an Esc interrupt, so an interrupted turn cannot arm the
-# compaction — the fail-safe direction, for free.
+# compaction — but the file it wrote outlives it, and a later Stop would arm
+# that. Existence alone is therefore not enough evidence to arm on; what makes
+# it enough is report-compact-failure.sh sweeping any autocompact still visible
+# at the next UserPromptSubmit, so one reaching this hook is always the current
+# turn's own.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_lib.sh

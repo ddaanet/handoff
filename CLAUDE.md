@@ -216,7 +216,8 @@ for the todo list (2026-07-22)".
   scraping. Silent when there is no pending file (auto-compaction fires the same
   hook). Reading the task file does not consume it.
 - `scripts/report-compact-failure.sh` — `UserPromptSubmit` entry point:
-  consumes `.claude/autocompact.failed` and reports the reason on both
+  reconciles compaction state at the start of a turn. Two independent checks.
+  It consumes `.claude/autocompact.failed` and reports the reason on both
   channels, also clearing a stranded `autocompact.pending`. Detached watchers'
   exit status is read by nothing, so this file is their only path back to the
   agent — most of all on the line-1 recognition abort, which wipes the composer
@@ -224,6 +225,14 @@ for the todo list (2026-07-22)".
   because a watcher runs *after* the Stop that spawned it. Reports only what a
   watcher observed itself; a stale `.pending` alone is never treated as failure
   (it is legitimate for the whole Stop → compaction window).
+  It also sweeps a bare `.claude/autocompact`: the file is armed at the `Stop`
+  of the turn that writes it and renamed away, so one still present when a
+  later turn begins never armed, and would otherwise be armed by the next
+  `Stop` — days later, possibly in another session. `UserPromptSubmit` is the
+  exact discriminator; it cannot fire between the write and that turn's own
+  `Stop`. Only the failure branch touches `.pending` — sweeping it on a stale
+  `autocompact` would race a live `SessionStart(compact)`. See DESIGN.md, "A
+  stale autocompact is one a later turn can see (2026-07-22)".
 - `scripts/compact-when-idle.sh` — detached watcher for line 1.
   Type-verify-submit: sends the command with `send-keys -l` and **no** Enter,
   reads back whether the TUI rendered command recognition, and only then

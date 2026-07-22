@@ -1,29 +1,32 @@
 ## Current task
 
-Built the `handoff-todo.md` remainder ledger end to end: `handoff_frame`
-assembly, both skill templates, the activation wipe, read/write guards (via a
-now-variadic `handoff_match_target`), `probe_ledger_path` +
-`probe_todo_suppression` for SDD suppression, and docs across DESIGN.md,
-CLAUDE.md, README and `skills/handoff/references/design.md`. `just precommit`
-green — 140 bats, 9 pytest.
+Remediating a full-codebase code review, then cutting the release that ships
+`.claude/handoff-todo.md`. All findings, their failure scenarios, the fix shape
+for finding 1, and the two rejected findings with their disproof are recorded
+in `docs/2026-07-22-code-review-audit.md` — read it first; it is the source of
+truth for this work and nothing below restates it.
 
-Nothing built this session is live *in* it: plugin skill bodies and hooks are
-snapshotted at session start, so the feature has never actually run. No real
-handoff or precompact has exercised the new frame, wipe, or guards. First
-verification needs `/reload-plugins` or a fresh session. The remaining items
-are in `handoff-todo.md`, which is itself the first live test of the feature.
+Next action is finding 1: a stale `.claude/autocompact` survives a turn that
+never ends normally (Esc, crash, quit) and is armed by a later, unrelated
+`Stop` — possibly in a different session, driving a stale `/compact` and a
+stale continuation prompt into unrelated work.
+
+Second thread: the `handoff-todo.md` ledger feature is now verified end to end
+in live use — the frame injection was confirmed at this session's start, and
+the wipe was confirmed by this precompact activation clearing both files. No
+verification work remains on it; only the release does.
 
 ## Open decisions
 
-- Whether `handoff-todo.md` should be wiped at activation. I reversed my
-  stated position mid-build, and it currently **is** wiped. Reasons: nothing
-  else ever deletes a finished list — the skill writes the file only when
-  items remain, so a completed list would linger on disk and keep re-injecting
-  done items as outstanding — and both loaders re-inject the file, so
-  re-authoring is from context rather than from disk, the same guarantee the
-  task file has. Cost accepted: an abandoned flow (stalling at the FR11
-  approval gate) leaves no todo file where a stale one used to sit. Flipping
-  it back is two lines in `_wipe-emit.sh` plus the two wipe tests.
-- Release size. A new output path is a version-bumping change under CLAUDE.md's
-  conventions; `just release minor` is the presumed call, patch if the new file
-  is judged additive enough not to count.
+- Fix shape for finding 1. Recommended and unchallenged, but not explicitly
+  confirmed: have `write-compact.sh` stamp a sidecar with the payload's
+  `session_id` at validation time, and have `stop-compact.sh` refuse to arm
+  when it does not match the current session. This keeps the agent-authored
+  two-line format intact (CLAUDE.md's contract for that file) and adds no
+  spawn and no delete to a validate-only hook. Adding `autocompact*` to
+  `_wipe-emit.sh`'s wipe list is a cheap complement, not a substitute — the
+  wipe only runs on skill re-activation, which the lingering-file scenario
+  does not involve.
+- Release size. `just release minor` (0.11.0) is the presumed call, since a
+  new output path is version-bumping under CLAUDE.md's conventions; patch if
+  the new file is judged additive enough not to count.
