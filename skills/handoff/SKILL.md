@@ -7,7 +7,7 @@ description: Snapshot the in-progress task and still-open decisions before a `/c
 
 Preserve the irreducible residual across `/clear`: what was in
 progress and what's still undecided. Hooks handle wipe-before-write
-and stage-after-write — your job is the task file.
+and stage-after-write — this skill's job is the task file.
 
 ## Protocol
 
@@ -45,7 +45,7 @@ wiped both, and an absent file is the honest "nothing pending".
 `handoff-memory-probe` prints nothing when there is nothing to do —
 finish normally. If it prints a directive, follow it exactly; the
 directive carries its own instructions. The probe owns the decision —
-do not re-derive or verify it yourself.
+do not re-derive or verify it.
 
 **Task file template:**
 

@@ -23,13 +23,13 @@ user whether to proceed.
 
 2. Run `handoff-precompact-probe` (Bash) and follow any directive it prints
    **exactly**. Nothing printed → nothing to do. The probe owns the
-   decision; do not re-derive or verify it yourself.
+   decision; do not re-derive or verify it.
 
 3. Write `./.claude/handoff-task.md` — a `## Current task` section and,
    when any remain, `## Open decisions`; no `#` heading. This is where the
    task state goes — see the seam below.
 
-   If you are tracking a task list with open items, write the remainder to
+   When a task list with open items is in play, write the remainder to
    `./.claude/handoff-todo.md` as well — one `## Remaining` section, open
    items only, a finished item dropped rather than checked off. That list
    lives in the context the compaction is about to paraphrase. Putting it
@@ -44,7 +44,7 @@ user whether to proceed.
    the task file just written included.
 
 4. Write `./.claude/autocompact` — **only once step 2 is fully complete**,
-   never in the same turn as a question the directive told you to ask.
+   never in the same turn as a question the directive requires.
    Writing it arms compaction at the *next* turn boundary, and a question
    ends the turn — so an autocompact written alongside an approval request
    compacts away the very conversation the answer applies to. When a
@@ -85,17 +85,17 @@ conversation. Name the next action, not the topic.
 - Good: `continue with the watcher tests per the task file`
 - Bad: `continue` / `keep going with the plugin work`
 
-Author it **silently**. Do not reprint it in your message: it gets typed
+Author it **silently**. Do not reprint it in the reply: it gets typed
 visibly into the prompt and lands in scrollback, so echoing it shows the
 same text twice with no veto value. At most one line confirming the
 compaction is armed.
 
 ## What happens next
 
-Nothing further is yours to do. Writing `autocompact` arms the machinery:
+Nothing further remains. Writing `autocompact` arms the machinery:
 the compaction runs at the end of this turn, the task file is re-injected
-once it completes, and the continuation prompt is submitted for you. Do
-not run `/compact` yourself, do not tell the user to run it, and do not
+once it completes, and the continuation prompt is submitted automatically.
+Do not run `/compact` directly, do not tell the user to run it, and do not
 end with a handoff-style summary — the turn simply ends.
 
 ## Anti-patterns
