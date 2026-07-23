@@ -1,15 +1,22 @@
 import 'plugin-dev/release.just'
 
 # handoff plugin — dev recipes
+#
+# `precommit` is the gate that runs before every commit: it lints the
+# manifests + settings, syntax-checks and lint/type-checks the Python
+# (mypy AND ty — ty catches Any-narrowing holes mypy launders through;
+# its version is locked, so gating it can't break the build
+# spontaneously), and runs the hook + pytest suites.
+#
+# `prerelease` is the gate the imported `release` recipe depends on.
+# Here it is exactly `precommit`; widen it if the release ever needs
+# checks too slow or too costly to fire on every commit.
 
 # Default: list recipes
 _default:
     @just --list
 
-# Lint manifests + settings, syntax-check + lint/type-check the Python
-# (mypy AND ty — ty catches Any-narrowing holes mypy launders through;
-# its version is locked, so gating it can't break the build spontaneously),
-# run hook + pytest suites. Imported `release` recipe depends on this name.
+# Lint manifests + settings, lint/type-check the Python, run hook + pytest suites
 precommit:
     jq . .claude-plugin/plugin.json > /dev/null
     jq . hooks/hooks.json > /dev/null
@@ -23,6 +30,9 @@ precommit:
     bats tests/hook-test.bats tests/rename-test.bats tests/memory-probe.bats tests/precompact-probe.bats
     pytest
     @echo "ok"
+
+# Gate the imported `release` recipe depends on
+prerelease: precommit
 
 # Ruff + docformatter over the Python (lint/format only, no type check).
 lint:

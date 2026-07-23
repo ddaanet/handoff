@@ -301,11 +301,11 @@ for the todo list (2026-07-22)".
   and must commit while context is still full, before the summariser runs.
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
-  toolkit (currently `v0.2.0`). Provides:
+  toolkit (currently `v0.4.0`). Provides:
   - `release.just` — shared `release` recipe imported by the top-level
     justfile. Owns version bumps, tagging, push, GH release, and the
-    marketplace bump in `$MARKETPLACE_DIR`. The plugin's own
-    `precommit` recipe is its dependency.
+    marketplace bump in `$MARKETPLACE_DIR`. It depends on the plugin's
+    own `prerelease` recipe, which here is just `precommit`.
   - `version-guard.sh` — PreToolUse(Write|Edit) hook wired in
     `.claude/settings.json` that refuses agent edits that change
     `plugin.json`'s `.version` (release recipe is the only path).
