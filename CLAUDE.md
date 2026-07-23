@@ -57,9 +57,15 @@ Tags only; never expect consumers to track `main`. See DESIGN.md
 
 ## Conventions
 
-- **The consumer-defined gate is `precommit`**, not `validate`. All
-  documentation, example justfiles, and recipe dependencies must use
-  this name. See DESIGN.md "Recipe naming".
+- **The consumer-defined commit gate is `precommit`**, not `validate`.
+  All documentation and example justfiles must use this name. See
+  DESIGN.md "Recipe naming".
+- **`release` depends on `prerelease`, never on `precommit` directly.**
+  Consumers define both; `prerelease: precommit` is the usual body, and
+  a consumer with slow or paid checks widens it. Don't "simplify" the
+  indirection away — see DESIGN.md "Release gate". Any change to the
+  binding must keep `_import-check`'s three stub shapes passing (plain,
+  widened, and missing-`prerelease`).
 - **Hook output is dual-channel.** When `version-guard.sh` denies an
   edit, `permissionDecisionReason` carries the verbose agent-facing
   message (no escape hatches the agent can self-authorise);
@@ -76,6 +82,12 @@ Tags only; never expect consumers to track `main`. See DESIGN.md
   the heredoc body get parsed as command substitution by bash. Avoid
   decorative backticks in those heredocs — they are not rendered as
   markdown anywhere.
+- **Recipe doc comments must be a single line.** just uses only the
+  *last* comment line above a recipe as its `--list` doc string, so a
+  two-line comment lists as a sentence fragment. Applies to `justfile`,
+  `release.just`, and the example justfile `install.sh` generates. Put
+  longer explanation in a file header or inside the recipe body — but
+  never above a shebang recipe's `#!` line, which must come first.
 - **Update `DESIGN.md` when design decisions change.** The History
   section accretes; overturned decisions are rewritten in place with
   the new reasoning, not struck through.

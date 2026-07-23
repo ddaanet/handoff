@@ -4,7 +4,22 @@
 #
 #     import 'plugin-dev/release.just'
 #
-# The plugin must define its own `precommit` recipe; `release` depends on it.
+# The plugin must define two recipes of its own:
+#
+#     precommit:  ...        # the gate that runs before every commit
+#     prerelease: precommit  # the gate `release` depends on
+#
+# `release` depends on `prerelease`, never on `precommit` directly. For most
+# plugins the two are the same and `prerelease: precommit` is the whole
+# recipe. A plugin whose release gate is larger — slow or paid checks that
+# shouldn't fire on every commit — widens it there:
+#
+#     prerelease: precommit evals
+#
+# `prerelease` is mandatory: just rejects the whole justfile if a dependency
+# names a recipe that doesn't exist, so a plugin that hasn't defined it finds
+# out immediately, not at release time.
+#
 # `.claude-plugin/plugin.json` must exist with a semver `.version` field.
 #
 # Required env (typically set via .envrc):
@@ -20,9 +35,8 @@
 toolkit_url := "git@github.com:ddaanet/claude-plugin-dev.git"
 toolkit_prefix := "plugin-dev"
 
-# Create release: bump plugin.json version, commit, tag, push main + tag,
-# create GitHub release, then bump the marketplace entry and push.
-release bump='patch': precommit
+# Bump plugin.json, commit, tag, push, GitHub release, bump marketplace.
+release bump='patch': prerelease
     #!/usr/bin/env bash
     set -euo pipefail
     manifest=".claude-plugin/plugin.json"
@@ -120,8 +134,7 @@ release bump='patch': precommit
       fi
     fi
 
-# Update the vendored plugin-dev toolkit to a specific tag (recommended)
-# or branch. Run from the consumer plugin root, on a clean tree.
+# Pull the vendored plugin-dev toolkit up to a tag. Plugin root, clean tree.
 update-plugin-dev ref:
     #!/usr/bin/env bash
     set -euo pipefail

@@ -11,9 +11,11 @@ precommit: whitespace
     bash tests/hook-test.sh
     @echo ok
 
-# Cut a new toolkit release: bump VERSION, commit, tag, push main + tag,
-# create GitHub release.
-release bump='patch': precommit
+# Checks that run before a release. Add slow or paid checks here.
+prerelease: precommit
+
+# Cut a toolkit release: bump VERSION, commit, tag, push, GitHub release.
+release bump='patch': prerelease
     #!/usr/bin/env bash
     set -euo pipefail
     git diff --quiet HEAD || { echo "error: uncommitted changes" >&2; exit 1; }
@@ -47,8 +49,7 @@ release bump='patch': precommit
     gh release create "$tag" --title "Release $new_version" --generate-notes
     echo "Release $tag complete"
 
-# Apply `git stripspace` to cached text files. Prints each file
-# modified; never blocks the recipe.
+# Apply git stripspace to cached text files. Never blocks the recipe.
 whitespace:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -64,8 +65,7 @@ whitespace:
         fi
     done < <(git ls-files | grep -E '(^justfile$|\.(sh|md|just)$)')
 
-# Install .git/hooks/pre-commit so `git commit` runs `just precommit`
-# automatically. Idempotent: overwrites any existing hook.
+# Install .git/hooks/pre-commit to run just precommit. Idempotent.
 install-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -77,13 +77,51 @@ install-hooks:
     chmod +x "$hook"
     echo "installed $hook"
 
-# Import release.just into a stub consumer to catch justfile syntax errors.
+# Import release.just into stub consumers to catch justfile syntax errors,
+# and check that `release` reaches the consumer's gate through `prerelease`
+# in both shapes: the plain `prerelease: precommit` and a widened one.
+# --dry-run prints the resolved dependency chain without executing anything,
+# so the destructive release body never runs. A third stub pins the contract
+# from the other side: omitting `prerelease` must fail, and say so.
 [private]
 _import-check:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
-    printf "import '%s/release.just'\n\nprecommit:\n    @echo stub\n" "$PWD" > "$tmp/justfile"
-    just --justfile "$tmp/justfile" --list >/dev/null
-    echo "release.just import: ok"
+
+    stub() {
+        mkdir "$tmp/$1"
+        printf "import '%s/release.just'\n\nprecommit:\n    @echo stub-precommit\n\nevals:\n    @echo stub-evals\n\n%b" \
+            "$PWD" "$2" > "$tmp/$1/justfile"
+    }
+
+    check() {
+        local name="$1" out
+        just --justfile "$tmp/$name/justfile" --list >/dev/null
+        out=$(just --justfile "$tmp/$name/justfile" --dry-run release 2>&1)
+        shift
+        for marker in "$@"; do
+            grep -q "$marker" <<< "$out" \
+                || { echo "error: $name gate did not run $marker" >&2; exit 1; }
+        done
+    }
+
+    # Plain shape: release gate and commit gate are the same.
+    stub plain "prerelease: precommit\n"
+    check plain stub-precommit
+
+    # Widened shape: release gate runs more than the commit gate.
+    stub widened "prerelease: precommit evals\n"
+    check widened stub-precommit stub-evals
+
+    # Missing `prerelease` must be a hard error naming the missing recipe --
+    # this is the contract consumers are told about, so test it, don't assume.
+    stub missing ""
+    if err=$(just --justfile "$tmp/missing/justfile" --list 2>&1); then
+        echo "error: justfile without 'prerelease' was accepted" >&2; exit 1
+    fi
+    grep -q 'unknown dependency `prerelease`' <<< "$err" \
+        || { echo "error: missing 'prerelease' did not name the recipe: $err" >&2; exit 1; }
+
+    echo "release.just import: ok (plain + widened + missing gate)"
