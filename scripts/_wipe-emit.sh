@@ -23,29 +23,30 @@ hook_event="${2:?hook_event_name required}"
 mkdir -p "$cwd/.claude"
 
 task="$cwd/$HANDOFF_REL_TASK"
+todo="$cwd/$HANDOFF_REL_TODO"
 removed=()
-task_removed=0
+tracked_removed=()
 # handoff-todo.md is wiped alongside the task file. Both loaders inject it into
 # context at SessionStart, so the remainder is in front of the agent when it
 # re-authors — and without the wipe a finished list would linger on disk
 # forever, re-injecting done items as outstanding (the re-dispatch failure).
-for f in "$task" "$cwd/$HANDOFF_REL_TODO" \
+for f in "$task" "$todo" \
          "$cwd/.claude/handoff.md" "$cwd/.claude/autorename"; do
     if [[ -f "$f" ]]; then
         rm -f "$f"
         removed+=("$(basename "$f")")
-        [[ "$f" == "$task" ]] && task_removed=1
+        [[ "$f" == "$task" || "$f" == "$todo" ]] && tracked_removed+=("$f")
     fi
 done
 
-# handoff-task.md is the one tracked artifact (write-stage.sh force-adds it).
-# Stage its deletion too, mirroring the write-side `git add -f`, so a
-# finalized/transitioned task rides the user's next commit instead of
-# lingering as an unstaged removal. `git add` on the now-absent path stages
-# the deletion of a tracked file; suppressed no-op when it was never tracked
-# or $cwd isn't a git repo.
-if (( task_removed )); then
-    git -C "$cwd" add -f "$task" 2>/dev/null || true
+# handoff-task.md and handoff-todo.md are the tracked artifacts (write-stage.sh
+# force-adds both). Stage their deletions too, mirroring the write-side
+# `git add -f`, so a finalized/transitioned task rides the user's next commit
+# instead of lingering as an unstaged removal. `git add` on the now-absent path
+# stages the deletion of a tracked file; suppressed no-op when it was never
+# tracked or $cwd isn't a git repo.
+if (( ${#tracked_removed[@]} > 0 )); then
+    git -C "$cwd" add -f "${tracked_removed[@]}" 2>/dev/null || true
 fi
 
 (( ${#removed[@]} > 0 )) || exit 0

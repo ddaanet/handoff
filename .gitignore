@@ -1,10 +1,9 @@
 # Runtime handoff artifacts (regenerated each session)
 .claude/handoff.md
-# Listed but force-added by write-stage.sh: the task frame IS tracked, as a
-# versioned trail paired with gitlore memory commits.
+# Listed but force-added by write-stage.sh: both halves of the task frame ARE
+# tracked, as a versioned trail paired with gitlore memory commits. The listing
+# keeps them out of an incidental `git add .` — only the hook adds them.
 .claude/handoff-task.md
-# Not force-added anywhere: the remainder ledger is working state, with none of
-# that pairing value. Ignored means ignored.
 .claude/handoff-todo.md
 
 # Driver files for the rename and compaction watchers. Each exists for part of

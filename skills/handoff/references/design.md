@@ -32,7 +32,9 @@ That leaves two fields only the agent can fill:
 
 These are the irreducible residual. They live in `handoff-task.md`
 (agent-authored from the template in `SKILL.md`). A
-`PostToolUse(Write|Edit)` hook stages the file. Next session, a
+`PostToolUse(Write|Edit)` hook stages it — and the todo remainder below on
+the same terms, since a trail whose decomposition is untracked records only
+half of what was in flight. Next session, a
 `SessionStart(startup|clear)` hook assembles the frame in memory — a
 timestamp header plus the inlined task content — and injects it into
 context. No generated file, no `@`-ref or project-CLAUDE.md setup

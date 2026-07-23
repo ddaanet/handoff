@@ -98,8 +98,8 @@ Todo file rules:
   reads as outstanding and gets redone.
 - No `#` heading and no other sections — same shape as the task file.
 - No location other than `./.claude/handoff-todo.md`.
-- It is a remainder, not a plan of record: this file is gitignored and
-  carries no history.
+- It is a remainder, not a plan of record — but it is versioned like the
+  task file, so write it as something that reads well in history.
 
 ## Anti-patterns
 

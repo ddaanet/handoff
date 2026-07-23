@@ -8,10 +8,10 @@
 # breaking change (see CLAUDE.md conventions).
 # shellcheck disable=SC2034  # consumed by sourcing scripts
 HANDOFF_REL_TASK=".claude/handoff-task.md"
-# The remainder ledger: open todo items only, never completion state. Unlike
-# the task file it is gitignored — it is working state, with none of the
-# paired-with-gitlore-memory value that earns handoff-task.md its place in
-# history. See DESIGN.md, "A place for the todo list".
+# The remainder ledger: open todo items only, never completion state. Tracked
+# on the same terms as the task file (write-stage.sh force-adds both) — it is
+# overflow from that file, so it earns the same persistence. See DESIGN.md,
+# "A place for the todo list" and "Overflow deserves the same persistence".
 # shellcheck disable=SC2034
 HANDOFF_REL_TODO=".claude/handoff-todo.md"
 # shellcheck disable=SC2034

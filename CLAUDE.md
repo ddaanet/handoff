@@ -31,9 +31,10 @@ Both skills also write `.claude/handoff-todo.md` when an active task list has
 open items: the **remainder** only, never completion state. It is the ledger;
 whatever todo tracker the harness happens to expose is a cache, and nothing in
 the plugin names one (the tool is behind a server-side flag and has already
-changed generations once). Same wipe, same guards, same frame — but
-**gitignored**, where the task file is force-added. See DESIGN.md, "A place
-for the todo list (2026-07-22)".
+changed generations once). Same wipe, same guards, same frame, same
+force-added staging as the task file — it is overflow from it. See DESIGN.md,
+"A place for the todo list (2026-07-22)" and "Overflow deserves the same
+persistence (2026-07-23)".
 
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
@@ -108,10 +109,10 @@ for the todo list (2026-07-22)".
   If anything was removed, emits dual-channel JSON: `systemMessage`
   (user-facing) and `hookSpecificOutput.additionalContext` (agent-facing,
   so the agent knows the wipe happened and doesn't redundantly verify).
-  When `handoff-task.md` (the one tracked artifact) is wiped, stages the
-  deletion with `git add -f` on the now-absent path, mirroring
-  `write-stage.sh`'s write-side staging so the removal rides the next commit
-  (suppressed no-op outside a git repo / when untracked).
+  When `handoff-task.md` or `handoff-todo.md` (the tracked artifacts) is
+  wiped, stages the deletion with `git add -f` on the now-absent path,
+  mirroring `write-stage.sh`'s write-side staging so the removal rides the
+  next commit (suppressed no-op outside a git repo / when untracked).
 - `scripts/_lib.sh` — sourced helper for the write and read hooks.
   Defines the `HANDOFF_REL_*` path constants and `handoff_resolve()`,
   which canonicalizes multiple paths in one `python3` subprocess
@@ -203,8 +204,10 @@ for the todo list (2026-07-22)".
   the same arrangement `stop-compact.sh` uses: the hook owns the path, the
   watcher stays ignorant of the layout.
 - `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point:
-  matches writes/edits that resolve to `$cwd/.claude/handoff-task.md`,
-  then stages the file with `git add -f`.
+  matches writes/edits that resolve to `$cwd/.claude/handoff-task.md` or
+  `$cwd/.claude/handoff-todo.md`, then stages the matched file with
+  `git add -f`. One `handoff_match_target` call covers both, so the two
+  tracked halves of the frame cost one jq parse.
 - `scripts/write-compact.sh` — PostToolUse(Write|Edit) entry point for the
   compaction driver. Matches writes resolving to `$cwd/.claude/autocompact`
   and **validates only**: exactly two lines, line 1 begins `/compact`. Never
@@ -330,10 +333,10 @@ for the todo list (2026-07-22)".
   judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
-- Output paths: `.claude/handoff-task.md` (agent-written, git-tracked via
-  `git add -f`) and `.claude/handoff-todo.md` (agent-written, gitignored —
-  working state, no pairing with a memory commit to earn it history).
-  Changing either is a breaking change and requires a version bump.
+- Output paths: `.claude/handoff-task.md` and `.claude/handoff-todo.md`, both
+  agent-written and both git-tracked via `git add -f` (listed in `.gitignore`
+  so only the hook adds them). Changing either is a breaking change and
+  requires a version bump.
 - Both markdown templates live in `SKILL.md` (single source of truth).
   Neither loader re-states them — each file carries its own `##` headings
   and is inlined verbatim under the one `#` header the frame prepends.

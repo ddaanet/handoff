@@ -237,9 +237,10 @@ $tmp" ]
     [ "$status" -eq 0 ]
 }
 
-# The remainder ledger is gitignored working state: write-stage must not
-# force-add it the way it does the task file.
-@test "write-stage (handoff-todo.md: not staged)" {
+# The remainder is overflow from the task file, so it is force-added on the
+# same terms — a frame split across a tracked and an untracked half would enter
+# history with its decomposition missing.
+@test "write-stage (handoff-todo.md: staged)" {
     git_tmp="$BATS_TEST_TMPDIR/git-todo"
     mkdir -p "$git_tmp/.claude"
     git -C "$git_tmp" init -q
@@ -250,9 +251,11 @@ $tmp" ]
         | CLAUDE_PROJECT_DIR="$1" bash scripts/write-stage.sh
     ' _ "$git_tmp"
     [ "$status" -eq 0 ]
-    [ "$output" = "" ]
+    echo "$output" | jq -e '.systemMessage == "handoff — staged for commit"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext
+        | test("handoff-todo.md")' >/dev/null
     staged="$(git -C "$git_tmp" diff --cached --name-only)"
-    [[ "$staged" != *handoff-todo.md* ]]
+    [[ "$staged" == *handoff-todo.md* ]]
 }
 
 # --- write-guard ---
@@ -537,22 +540,23 @@ $tmp" ]
     [ ! -e "$tmp/.claude/handoff-todo.md" ]
 }
 
-# handoff-task.md is git-tracked (write-stage.sh force-adds it). When the
-# wipe deletes a committed task file, the deletion must be staged too — else
-# the write-side `git add -f` and the wipe-side rm are asymmetric and the
-# removal never rides the user's next commit. Seed a committed task file in a
-# throwaway repo, wipe, assert the index shows a staged deletion (porcelain
-# first column `D`, not the unstaged ` D`).
+# Both handoff files are git-tracked (write-stage.sh force-adds them). When the
+# wipe deletes a committed one, the deletion must be staged too — else the
+# write-side `git add -f` and the wipe-side rm are asymmetric and the removal
+# never rides the user's next commit. Seed both files committed in a throwaway
+# repo, wipe, assert the index shows a staged deletion (porcelain first column
+# `D`, not the unstaged ` D`).
 seed_tracked_task() {
     local repo="$1"
     mkdir -p "$repo/.claude"
     printf 'seed task body\n' > "$repo/.claude/handoff-task.md"
+    printf '## Remaining\n\n- seed item\n' > "$repo/.claude/handoff-todo.md"
     git -C "$repo" init -q
-    git -C "$repo" add -f .claude/handoff-task.md
+    git -C "$repo" add -f .claude/handoff-task.md .claude/handoff-todo.md
     git -C "$repo" -c user.email=t@t -c user.name=t commit -qm seed
 }
 
-@test "skill-pre-hook (git staging): stages handoff-task.md deletion on wipe" {
+@test "skill-pre-hook (git staging): stages handoff file deletions on wipe" {
     git_tmp="$BATS_TEST_TMPDIR/wipegit-ptu"
     mkdir -p "$git_tmp"
     seed_tracked_task "$git_tmp"
@@ -563,10 +567,12 @@ seed_tracked_task() {
     ' _ "$git_tmp"
     [ "$status" -eq 0 ]
     [ ! -e "$git_tmp/.claude/handoff-task.md" ]
+    [ ! -e "$git_tmp/.claude/handoff-todo.md" ]
     git -C "$git_tmp" status --porcelain .claude/handoff-task.md | grep -q '^D'
+    git -C "$git_tmp" status --porcelain .claude/handoff-todo.md | grep -q '^D'
 }
 
-@test "prompt-pre-hook (git staging): stages handoff-task.md deletion on wipe" {
+@test "prompt-pre-hook (git staging): stages handoff file deletions on wipe" {
     git_tmp="$BATS_TEST_TMPDIR/wipegit-ups"
     mkdir -p "$git_tmp"
     seed_tracked_task "$git_tmp"
@@ -577,7 +583,9 @@ seed_tracked_task() {
     ' _ "$git_tmp"
     [ "$status" -eq 0 ]
     [ ! -e "$git_tmp/.claude/handoff-task.md" ]
+    [ ! -e "$git_tmp/.claude/handoff-todo.md" ]
     git -C "$git_tmp" status --porcelain .claude/handoff-task.md | grep -q '^D'
+    git -C "$git_tmp" status --porcelain .claude/handoff-todo.md | grep -q '^D'
 }
 
 @test "skill-pre-hook (non-git cwd: wipe still succeeds)" {
