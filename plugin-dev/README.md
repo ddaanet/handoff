@@ -51,8 +51,8 @@ It's idempotent — re-running with everything already in place is a
 no-op. The vendored copy at `plugin-dev/install.sh` can be re-run after
 clone or after wiring drift to repair the wiring without re-vendoring.
 
-Then define your project-specific `precommit` recipe in `justfile` —
-`release` depends on it. Example:
+Then define two project-specific recipes in `justfile`: `precommit`,
+your commit gate, and `prerelease`, the gate `release` depends on.
 
 ```just
 import 'plugin-dev/release.just'
@@ -61,7 +61,25 @@ precommit:
     jq . .claude-plugin/plugin.json > /dev/null
     bash -n scripts/*.sh
     # ...whatever else your plugin needs...
+
+prerelease: precommit
 ```
+
+For most plugins the two gates are the same and `prerelease: precommit`
+is the whole recipe. If your release gate is bigger — slow or paid
+checks you don't want on every commit — widen it there:
+
+```just
+evals:
+    make evals      # slow, paid; not part of precommit
+
+prerelease: precommit evals
+```
+
+`prerelease` is mandatory. just rejects a justfile whose dependency
+names a recipe that doesn't exist, so omitting it fails every recipe
+immediately with `unknown dependency prerelease` — not silently at
+release time.
 
 Commit:
 

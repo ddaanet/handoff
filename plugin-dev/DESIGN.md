@@ -287,8 +287,8 @@ in the local `justfile`): it too dropped its `read -rp` prompt and
 
 ### Recipe naming: `precommit`, not `validate`
 
-The consumer-defined gate the `release` recipe depends on is called
-`precommit`. `validate` was considered but rejected:
+The consumer-defined commit gate is called `precommit`. `validate` was
+considered but rejected:
 
 - `validate` isn't an established convention — it shows up mostly in
   schema-validation contexts (k8s, terraform), not "the gate before a
@@ -296,8 +296,72 @@ The consumer-defined gate the `release` recipe depends on is called
 - `precommit` names the *moment* it should fire, matches the
   pre-commit ecosystem's vocabulary, and is already used in adjacent
   projects (e.g. `edify`).
-- `release` depending on `precommit` reads naturally: "the same
-  gates that pass for a commit must pass for a release."
+- `release` reaching `precommit` reads naturally: "the same gates that
+  pass for a commit must pass for a release."
+
+That last point was an argument about what to *name* the commit gate, and
+it predates a consumer whose release gate is bigger than its commit gate.
+It is not an argument for `precommit` being the recipe `release` binds to
+— `release` now depends on `prerelease` (next section), which for most
+consumers is exactly `prerelease: precommit`.
+
+### Release gate: `release` depends on `prerelease`
+
+`release` depends on a consumer-defined `prerelease` recipe, not on
+`precommit`. Consumers define both; the usual body is one line:
+
+```just
+prerelease: precommit
+```
+
+A consumer whose release gate is larger widens it there:
+
+```just
+prerelease: precommit evals
+```
+
+The motivating consumer is `gitlore`, which has a fast `precommit`
+(check-version, lint, test) and a slow, paid `evals` gate that drives the
+real `claude` CLI. With `release` hardcoded to `precommit`, `just release`
+shipped without ever running the evals; the workaround — remembering to
+type `just prerelease release` — is discipline, not a gate. A release
+recipe that can be satisfied by remembering something is not a gate.
+
+Rejected alternatives:
+
+- **A private `_release-gate: precommit` in `release.just`, overridden in
+  the consumer's justfile.** Non-breaking, and the shape most of the
+  design pressure initially pointed at. Rejected because overriding an
+  imported recipe requires `set allow-duplicate-recipes := true`, which
+  the toolkit would have to declare on the consumer's behalf — a
+  repo-wide setting that silently turns the consumer's *accidental*
+  duplicate recipes from an error into last-definition-wins. Trading a
+  global safety check for one override point is a bad exchange, and the
+  backward compatibility it buys isn't needed: consumers update their
+  justfile as part of `update-plugin-dev` anyway.
+- **`just "$gate"` as the recipe's first shell line**, with an overridable
+  `release_gate := "precommit"` variable. Non-breaking, but the gate
+  vanishes from just's dependency graph and `--list`, and failures surface
+  through a nested `just` invocation. Also inconsistent: every other
+  precondition in `release` is a real dependency or a pre-flight check.
+- **Taking the recipe name from a variable** (`release: {{gate}}`) — just
+  does not support recipe names from variables in a dependency list.
+
+This is a **breaking change**: a consumer that pulls the new toolkit
+without adding `prerelease` gets `error: Recipe release has unknown
+dependency prerelease`. That error is a whole-justfile compile error, so
+*every* recipe fails, `just precommit` included — not just `release`. The
+blast radius is deliberate and, on reflection, the better failure mode: it
+fires at update time, when the maintainer is already in the justfile, and
+names the exact missing recipe. The alternative — a `release` that quietly
+runs a narrower gate than intended — is the bug this section exists to
+fix.
+
+Locked in by `_import-check`, which builds three stub consumers — plain
+(`prerelease: precommit`), widened (`prerelease: precommit evals`), and one
+with `prerelease` missing — and asserts via `--dry-run` that `release`
+resolves to the right gate chain in the first two and that the third fails
+with an error naming `prerelease`. Verified against just 1.46.0.
 
 ### Default branch detection via `origin/HEAD`
 
@@ -333,6 +397,10 @@ fallback fires cleanly.
   `install.sh`.** A consumer that vendored the toolkit but skipped
   installing the hook is unprotected. Mitigation: `install.sh` does
   both in one step.
+- **Toolkit updates may require a consumer justfile edit.** Adopting a
+  new toolkit tag is not always a pure `git subtree pull` — the
+  `prerelease` gate landed as a required consumer-side recipe. Consumers
+  are expected to read the release notes at `update-plugin-dev` time.
 - **Solo-author workflow assumed.** The toolkit is built around one
   maintainer's plugins. Multi-contributor scenarios (e.g. forks
   proposing changes back to the toolkit) work mechanically but
@@ -343,6 +411,16 @@ fallback fires cleanly.
   recipe. May change if patterns converge across enough consumers.
 
 ## History
+
+- **Unreleased — breaking.** `release` now depends on a consumer-defined
+  `prerelease` recipe instead of `precommit` directly, so a consumer whose
+  release gate is bigger than its commit gate can express that (raised
+  from `gitlore`, whose paid `evals` gate never ran at release time).
+  **Every consumer must add `prerelease: precommit` to its justfile** when
+  adopting this tag; without it just rejects the whole justfile with
+  `unknown dependency prerelease`. `_import-check` now tests three stub
+  shapes — plain, widened, and missing. See "Release gate: `release`
+  depends on `prerelease`".
 
 - **Unreleased.** Removed the interactive confirmation prompt and the
   `--yes` argument from the `release` recipe. `just release [bump]` is

@@ -79,10 +79,12 @@ else
     cat > justfile <<EOF
 $import_line
 
-# Define your project-specific precommit recipe.
-# (The release recipe imported above depends on it.)
+# Checks that run before every commit.
 precommit:
     jq . .claude-plugin/plugin.json > /dev/null
+
+# Checks that run before a release. Add slow or paid checks here.
+prerelease: precommit
 EOF
     changed+=("justfile (created)")
 fi
@@ -123,7 +125,7 @@ else
     done
     echo
     echo "Next steps:"
-    echo "  1. Define your precommit recipe in justfile (project-specific checks)."
+    echo "  1. Define your precommit and prerelease recipes in justfile."
     echo "  2. Commit the changes:"
     echo "     git add $TOOLKIT_PREFIX justfile .claude/settings.json"
     echo "     git commit -m 'add claude-plugin-dev toolkit'"
