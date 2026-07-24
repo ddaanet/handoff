@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "version": "0.11.2",
-  "description": "Pre-/clear task snapshot for Claude Code: agent writes current task + open decisions; at next session start, a hook scrapes the prior transcript and injects task + last-N prompts + files touched into the fresh agent automatically.",
+  "description": "Task snapshot that survives a /clear or /compact in Claude Code: the agent writes the current task, open decisions, and remaining todos to a local file, and a SessionStart hook injects it verbatim into the next session. Also names the session and drives an attended compact-and-continue.",
   "author": {
     "name": "David Allouche",
     "email": "david@allouche.net"
