@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "Task snapshot that survives a /clear or /compact in Claude Code: the agent writes the current task, open decisions, and remaining todos to a local file, and a SessionStart hook injects it verbatim into the next session. Also names the session and drives an attended compact-and-continue.",
   "author": {
     "name": "David Allouche",
