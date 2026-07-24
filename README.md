@@ -1,10 +1,20 @@
 # handoff
 
-A pre-`/clear` task snapshot for Claude Code. Designed as a narrow
+A task snapshot that survives a context reset in Claude Code — whether
+that reset is a `/clear` or a `/compact`. Designed as a narrow
 complement to Claude Code's auto-memory: memory holds durable facts
 (preferences, feedback, project context); this plugin holds the
 *ephemeral task frame* memory avoids — what you were doing right now,
 what decisions are still open.
+
+Three skills sit on that seam. `/handoff:handoff` snapshots the task
+before a `/clear` and names the session on its way out.
+`/handoff:precompact` drives an attended compact-and-continue, so a
+session that has to compact keeps its thread instead of resuming from a
+paraphrase. `/handoff:autoname` is the rename alone, for a session worth
+a title while the main thread stays live. The first two write the same
+file; a `SessionStart` hook injects it back, verbatim, into whatever
+comes next.
 
 ## Setup
 
