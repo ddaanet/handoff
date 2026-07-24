@@ -154,6 +154,18 @@ submit_confirmed_or_fail() {
         sleep "$VERIFY_DELAY"
         (( "$(transcript_prompt_count "${HANDOFF_TRANSCRIPT:-}" "$marker")" > baseline )) && exit 0
     done
+    # The fast retries above cover an Enter that never registered. A registered
+    # Enter can still take far longer than VERIFY_DELAY to show up as a
+    # transcript entry — observed live 2026-07-24, an 18s gap between the
+    # compaction's summary being ready and compact_boundary actually landing in
+    # the transcript, well past this loop's ~1.5s window. So poll on, without
+    # resending Enter (that would concatenate a second submit), same shape as
+    # submit_consumed_or_fail's long phase.
+    local deadline=$((SECONDS + CONSUME_TIMEOUT))
+    while (( SECONDS < deadline )); do
+        (( "$(transcript_prompt_count "${HANDOFF_TRANSCRIPT:-}" "$marker")" > baseline )) && exit 0
+        sleep "$CONSUME_POLL"
+    done
     watcher_fail "$reason"
 }
 

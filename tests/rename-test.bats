@@ -398,11 +398,13 @@ STUB
 }
 
 # The other side: the Enter is absorbed, no transcript entry ever appears, so the
-# watcher retries three times and then reports non-delivery.
+# watcher retries three times, exhausts the long poll too, and reports
+# non-delivery.
 @test "continue watcher retries and fails when the Enter is absorbed" {
     make_continue_stub absorbs
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_WATCHER_CONSUME_POLL=0.05 \
+        HANDOFF_WATCHER_CONSUME_TIMEOUT=1 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 
@@ -410,6 +412,32 @@ STUB
     [ "$(grep -c 'Enter|' "$SENT")" -eq 3 ]
     # The text is never re-sent — that would concatenate a second copy.
     [ "$(grep -c -- '-l|' "$SENT")" -eq 1 ]
+}
+
+# Regression (session 5c5b043b, 2026-07-24): a live compaction left an ~18s gap
+# between the summary being ready and compact_boundary actually landing in the
+# transcript — the Enter registered but confirmation showed up long after the
+# three fast retries (~1.5s in production) gave up. The old submit_confirmed_or_fail
+# reported non-delivery for a prompt that, in fact, arrived. Here the Enter is
+# absorbed by the fast-retry stub, but the transcript entry lands asynchronously
+# well after the fast-retry phase (each check spawns python3, ~60ms/call on this
+# machine, so the phase itself already takes longer than a naive small delay
+# would assume) — confirmation must still succeed, and without resending Enter.
+@test "continue watcher confirms a submit that lands after the fast-retry window" {
+    make_continue_stub absorbs
+    ( sleep 1
+      printf '{"type":"user","message":{"role":"user","content":"continue with task 3"}}\n' \
+          >> "$TRANSCRIPT" ) &
+
+    run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_WATCHER_CONSUME_POLL=0.05 \
+        HANDOFF_WATCHER_CONSUME_TIMEOUT=5 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
+        bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
+    [ "$status" -eq 0 ]
+
+    sent="$(cat "$SENT")"
+    # Three fast-retry Enters, none resent during the long poll.
+    [ "$(grep -c 'Enter|' "$SENT")" -eq 3 ]
 }
 
 @test "continue watcher sends nothing while user types" {
@@ -440,7 +468,8 @@ STUB
     fail_file="$BATS_TEST_TMPDIR/autocompact.failed"
     make_continue_stub absorbs
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_WATCHER_CONSUME_POLL=0.05 \
+        HANDOFF_WATCHER_CONSUME_TIMEOUT=1 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
         HANDOFF_FAIL_FILE="$fail_file" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
@@ -478,7 +507,8 @@ STUB
 @test "watcher tolerates an unset HANDOFF_FAIL_FILE" {
     make_continue_stub absorbs
     run env PATH="$STUBDIR:$PATH" HANDOFF_WATCHER_TIMEOUT=5 HANDOFF_WATCHER_POLL=0.01 \
-        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
+        HANDOFF_WATCHER_VERIFY_DELAY=0.01 HANDOFF_WATCHER_CONSUME_POLL=0.05 \
+        HANDOFF_WATCHER_CONSUME_TIMEOUT=1 HANDOFF_TRANSCRIPT="$TRANSCRIPT" \
         bash "$SCRIPTS/continue-when-idle.sh" '%9' 'continue with task 3'
     [ "$status" -ne 0 ]
 }
