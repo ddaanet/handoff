@@ -3,7 +3,7 @@
 Living document. Captures the research, analysis, and decisions behind
 this plugin. Updated as the design evolves.
 
-Last updated: 2026-07-22.
+Last updated: 2026-07-25.
 
 ## Problem
 
@@ -116,6 +116,13 @@ composition. No read+write round-trip, no LLM-summarising full history,
 no drift.
 
 ## Activation: PostToolUse extraction, agent-authored template file
+
+> **Superseded 2026-07-17** (see *Task frame drops the transcript and file
+> list*) on mechanism only: there is no `extract.py` and no session pointer.
+> `load-handoff.sh` assembles the frame itself — a timestamp header and the
+> inlined task file — and `PostToolUse` does nothing but `git add -f`. The
+> decision this section records, agent-authored markdown over a JSON marker,
+> is unchanged, and its three wins below survive the collapse.
 
 Three patterns were considered:
 
@@ -254,6 +261,13 @@ mistakes and multi-checkout confusion (agent operating in project A
 but resolving a path that lands in project B). The denial message
 tells the agent the expected path so it can retry.
 
+> **Superseded 2026-06-09** (see *Per-worktree handoff root*): hooks anchor on
+> `handoff_root` — the enclosing linked-worktree root, falling back to
+> `CLAUDE_PROJECT_DIR` — rather than on `CLAUDE_PROJECT_DIR` directly, so a
+> worktree session resolves to its own `.claude/`. The cwd-is-untrustworthy
+> reasoning below stands unchanged; the hook count does not (eleven, as of
+> the compaction driver).
+
 **Project root resolution.** Hook payloads include a `cwd` field,
 but `cwd` tracks the Bash tool's *persistent shell working directory*,
 not the project's configured directory. If the shell cwd drifts — for
@@ -303,7 +317,7 @@ without stored state. Three mechanisms were weighed:
   across two scripts. Rejected.
 - **Transcript scraping (chosen)** — the guard reads `transcript_path`
   and derives the answer from the session JSONL each call, the same
-  way `extract.py` derives files-touched. Stateless, session-scoped by
+  way `extract.py` then derived files-touched. Stateless, session-scoped by
   construction, no new artifact, no lifecycle. The JSONL parse is paid
   only on the rare guarded call (the cheap basename check
   short-circuits first). A `handoff_activated()` helper in `_lib.sh`
@@ -321,6 +335,12 @@ See
 for the full decision record.
 
 ### Missing-frame edge case
+
+> **Superseded 2026-07-17** (see *Task frame drops the transcript and file
+> list*): `extract.py` and the `handoff-error.log` sink are gone —
+> `load-handoff.sh` assembles the frame inline, so the crash branch below has
+> no subprocess to crash. The staging half and the no-task-file no-op stand,
+> as does the closing stance.
 
 The frame is assembled at read time, so there is no write-time extract
 to miss. If `extract.py` crashes at `SessionStart` (logged to
@@ -413,6 +433,11 @@ for a 1–5 KiB artifact.
 
 ## Marker file schema
 
+> **Never implemented.** The JSON-marker pattern lost to the agent-authored
+> template file (*Activation*), so `handoff-pending.json` was never written
+> and no hook reads it. Kept as history; see *Read-time assembly*, which
+> notes the same.
+
 ```json
 {
   "current_task": "string — one sentence",
@@ -490,7 +515,7 @@ inlined block is omitted entirely.
 
 ## Skill: handoff
 
-Two skills ship with the plugin:
+Three skills ship with the plugin:
 
 - **`/handoff:handoff`** — the main skill. Updates memory, then
   decides whether to write `handoff-task.md` from a template. The
@@ -506,6 +531,11 @@ Two skills ship with the plugin:
   live. handoff does not route through it (no benefit, one extra turn);
   the two skills only share the `.claude/autorename` trigger file. See
   `docs/superpowers/specs/2026-06-07-autoname-skill-design.md`.
+- **`/handoff:precompact`** — commit memory, drive `/compact`, resume. Shares
+  `handoff-task.md` with the main skill and the same wipe-at-activation
+  protocol; no rename. Added 2026-07-12, inverted to drive the compaction
+  itself 2026-07-20 — see *Session compaction*, *precompact drives the
+  compaction*, and *One task file, two transitions*.
 
 The skill is named `handoff` (matching the plugin) so CLI completion
 on `/handoff:` lands directly on the action, with no second namespace
@@ -635,8 +665,11 @@ versioning it worthwhile rather than noise.
 ## Open questions
 
 - Should `Read/Grep/Glob` paths be included as "scope of investigation"
-  in the output? Current answer: no — keeps the artifact focused on
-  modifications. Revisit if user feedback says otherwise.
+  in the output? Resolved (2026-07-17): moot. The frame carries no file
+  list of any kind — `## Files touched` went with the transcript scrape
+  (*Task frame drops the transcript and file list*), and the harness's own
+  `gitStatus` block supplies the working set at read time. Answering this
+  now would mean reversing that decision, not settling this question.
 - Should the output live inside `.claude/` (gitignored by convention) or
   outside the repo (e.g., `~/.claude/handoff/<project-hash>/`)? Resolved
   (2026-06-05): in-repo. `handoff-task.md` is **tracked** (a versioned task
@@ -660,6 +693,14 @@ per-worktree storage, fragile vs. the stateless `.git` walk). Full rationale:
 `plans/2026-06-09-per-worktree-handoff-root-design.md`.
 
 ## gitlore-aware handoff (2026-06-12)
+
+> **Superseded 2026-07-20** (see *precompact drives the compaction*): the
+> commit path is no longer `commit-memory.sh` resolved through
+> `git config gitlore.commitCommand`. The agent writes an approved message
+> file plus a trigger file and gitlore's own `PostToolBatch` commits — all
+> file writes, sidestepping the sandbox and the auto-mode classifier. The
+> probe-as-PATH-shim rationale and the harness-over-agent split below are
+> unchanged, and the directive text is now shared with the precompact probe.
 
 The handoff skill runs a read-only probe (`bin/handoff-memory-probe` →
 `scripts/memory-probe.sh`) at wrap-up; on a dirty gitlore-memory submodule
@@ -741,6 +782,15 @@ and no `/clear`-style bridge is needed.
 
 ### As a boundary: non-goal for the task frame
 
+> **Superseded 2026-07-20** (see *One task file, two transitions*):
+> `SessionStart(compact)` is matched — `load-compact.sh` injects the same
+> `handoff_frame` there that `load-handoff.sh` injects at `startup|clear`.
+> The staleness argument below held only while the frame could come from a
+> *previous* boundary; precompact now writes the file in the turn that arms
+> the compaction, so the frame is fresher than the summary rather than older
+> than it. The verbatim-tail argument stands and is why the frame carries no
+> transcript. Auto-compact remains out of scope.
+
 `SessionStart` deliberately does not match the `compact` source (the
 matcher exists and supports `additionalContext`). Two reasons:
 
@@ -765,6 +815,16 @@ too: durable context belongs in gitlore memory and the task frame, not
 in machinery that fights the summariser.
 
 ### Manual compact as a wrap-up moment
+
+> **Superseded 2026-07-20** on two of its three exclusions. precompact writes
+> `handoff-task.md` (*One task file, two transitions*: with no durable channel,
+> anything verbatim-critical gets crammed into the continuation prompt), and it
+> runs the memory probe and commits through it (*precompact drives the
+> compaction*: the commit can wait, but the conversation it summarises cannot).
+> It also drives `/compact` and the continuation rather than telling the user to.
+> The rename stays unbundled, and the `PreCompact`-hook rejection stands —
+> the compaction is driven from `Stop`, still not from a hook that cannot run
+> an agent turn.
 
 A manual `/compact` is a user-chosen milestone — structurally like
 `/clear` with lossy continuation instead of a reset. Testing handoff's
@@ -875,6 +935,12 @@ rather than guessing at staleness. And precompact **still does not run
 `handoff-memory-probe`**: committing memory stays wrap-up logic (the
 commit rides the following session), so the probe is advisory — a nudge,
 not the gitlore probe's mandatory commit gate.
+
+> **Superseded 2026-07-20** (see *precompact drives the compaction*): the
+> second exclusion is reversed. precompact composes the memory directive
+> ahead of the ledger nudge and commits before the summariser runs, because
+> the summary is written from the conversation and after compaction that
+> conversation is a paraphrase. The existence-not-currency exclusion stands.
 
 Calibrated against superpowers 6.1.1: the origin note's vocabulary
 ("in-flight fix-waves", "how to verify an incoming subagent report") was
