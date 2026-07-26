@@ -1,43 +1,42 @@
 ## Current task
 
-Two threads, both at a natural stopping point.
+Two threads, both unstarted.
 
-**Commit awareness** (plan of record: `docs/2026-07-25-commit-awareness-design.md`,
-status `implemented`). Both probes take a required `with-commit|without-commit`
-argument; under `with-commit` the memory directive names only the summary file,
-deferring the memory commit to the parent commit. The stated problem was wrong
-and was corrected on 2026-07-26: the standalone path never split history,
-because the standalone commit is a *submodule* commit and the parent's
-pre-commit hook stages the moved gitlink unconditionally
-(`/Users/david/code/gitlore/scripts/git-hooks/pre-commit:75-91`, verified at
-source in both the `saved_index` and plain branches). Both paths end with one
-parent commit carrying source and pointer together. The real gain is **one call
-instead of two**, since agents batch the two IPC writes into a single assistant
-message only 43% of the time (28 of 65 measured writes). `DESIGN.md`, the spec's
-`## Problem` plus its changelog, `CLAUDE.md`, `README.md`, `_probe-lib.sh` and
-the `reference_gitlore_memory_commit_routing` memory were all rewritten on that
-premise; no code, mode or test changed. `just precommit` is green at 177 bats /
-9 pytest, and the load-bearing negative — `with-commit` output never mentions
-the trigger, in any form — is mutation-checked at 7 red across the two probe
-suites.
+**Memory curation.** `feedback_directive_states_acts` is confirmed subsumed by
+`feedback_directive_acts_not_mechanism`: read side by side, every one of the
+former's three bullets appears in the latter, which adds two more cut-items, the
+user's own words and the negative test. `feedback_withhold_dont_forbid` earns its
+own file and stays. This is the first *confirmed* retire-and-merge pair — earlier
+sweeps produced none, and one subagent report on it was largely fabricated, so
+confirm any further candidate by reading both files rather than by resemblance.
+Retiring the file also means dropping the pointer line one other mount
+(`/Users/david/code/gitlore/memory/MEMORY.md`) carries in its own root index;
+that is a proposal to make there, not an edit — other repos stay read-only. Of
+the four mounts only `gitlore` carries it (`cwd-safety` and `onekeys` do not),
+`gitlore_compose_dangling` reports and never refuses
+(`scripts/lib/index-compose.sh:208`), and gitlore's index merging is being fixed
+independently — so nothing here is blocking and the mechanism should not be
+designed around.
 
-**The post-commit round-trip question is answered, and the deliverable is now
-in gitlore's court.** `scripts/cc-hooks/memory-commit-batch.sh` reports every
-outcome on `systemMessage` alone, which is user-visible and model-blind, so the
-agent re-checks a commit it requested after 62 of 68 landings (91%) — `ls` the
-IPC files, then `git -C memory log`/`status`. The control is the parent-commit
-path, where the outcome arrives inside a readable Bash tool result: 5 of 14
-(35%). A cross-tab rules out handoff's own directive as the cause (58/64 blind
-cases with it present, 4/4 without, no difference), so the fix belongs to the
-hook. A brief and a proposed diff are dropped in that repo as
-`docs/plans/brief-memory-commit-batch-model-channel.md` and the sibling
-`.patch`; gitlore itself was not modified. The quantified channel finding is
-folded into the `reference_hook_output_channels` memory.
+The same commit is the moment to compact the root index: 88% of the 25600-byte
+budget, with the hook asking for under 17.1KB. Bytes live in the longest lines —
+`feedback_posttooluse_print_mode` 623, `reference_gitlore_memory_commit_routing`
+465, `reference_git_stderr_and_parsing` 456.
 
-The loaded `handoff` skill body was again the pre-change one — the fourth time
-this session's skills have loaded stale — so this wrap-up followed the repo's
-current five-step `SKILL.md` rather than the body in context.
+**The `_probe-lib.sh` directive trim**, still blocked on gitlore. Cut the closing
+sentence of the `without-commit` directive once gitlore's
+`memory-commit-batch.sh` reports on `additionalContext` instead of
+`systemMessage`. Until then that sentence is the agent's only signal, so it
+cannot go first; after, it asks the agent to infer from file existence what the
+hook states outright. The brief and patch are already in gitlore's repo as
+`docs/plans/brief-memory-commit-batch-model-channel.md` plus the sibling
+`.patch`.
 
 ## Open decisions
 
-None blocking.
+- Whether the index compaction targets the hook's 17.1KB (a ~4.8KB cut, which
+  at these line lengths means rewriting many entries) or only removes genuinely
+  redundant text and accepts staying above it. `feedback_memory_index_lines_functional`
+  says index lines serve agent-matching and ambient awareness, not just
+  pointing, and warns against mechanical shortening to hit an advisory number —
+  the two pull in opposite directions and the budget is advisory.
