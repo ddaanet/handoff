@@ -26,14 +26,39 @@ EOF
     printf '%s\n' "$repo"
 }
 
-# Materialize the SDD durable-progress ledger inside $1 (a repo path).
+# Materialize a live superpowers SDD ledger inside $1 (a repo path) for the plan
+# whose basename is $2 (default feature-plan). Layout and identity line are
+# 6.2.0's: one git-ignored workspace directory per plan, first line naming the
+# plan file. Note the em dash — it is literal in SDD's format.
 add_sdd_ledger() {
+    local repo="$1" slug="${2:-feature-plan}" dir
+    dir="$repo/.superpowers/sdd/$slug"
+    mkdir -p "$dir"
+    printf '*\n' > "$repo/.superpowers/sdd/.gitignore"
+    printf '%s\n' \
+        "# SDD ledger — plan: docs/plans/$slug.md" \
+        "Task 1: complete (commits abc1234..def5678, review clean)" \
+        > "$dir/progress.md"
+}
+
+# A ledger at the pre-6.2.0 flat path. SDD names this one as another plan's
+# progress and never removes it, so the probe must not count it.
+add_flat_sdd_ledger() {
     local repo="$1"
     mkdir -p "$repo/.superpowers/sdd"
     printf '*\n' > "$repo/.superpowers/sdd/.gitignore"
-    cat > "$repo/.superpowers/sdd/progress.md" <<'EOF'
-Task 1: complete (commits abc1234..def5678, review clean)
-EOF
+    printf '%s\n' "Task 1: complete (commits abc1234..def5678, review clean)" \
+        > "$repo/.superpowers/sdd/progress.md"
+}
+
+# A hand-rolled file in a workspace-shaped directory, with no identity line —
+# the shape that hijacked a session in /Users/david/code/micro on 2026-07-25.
+add_unidentified_sdd_ledger() {
+    local repo="$1" slug="${2:-ghmem}" dir
+    dir="$repo/.superpowers/sdd/$slug"
+    mkdir -p "$dir"
+    printf '*\n' > "$repo/.superpowers/sdd/.gitignore"
+    printf '%s\n' "# ghmem — progress (C2 COMPLETE)" > "$dir/progress.md"
 }
 
 # Dirty the memory submodule of $1 so the memory directive fires.

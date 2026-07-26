@@ -132,20 +132,54 @@ probe_memory_directive() {
 }
 
 # Registry of known workflow-owned progress ledgers, as project-relative paths.
-# Prints the first one that exists and returns 0; returns 1 when none does. One
-# row per workflow — the single place that knows a foreign ledger's layout, so
-# the nudge and the suppression below can never disagree about what exists.
+# Prints the live one and returns 0; returns 1 when there is none. One row per
+# workflow — the single place that knows a foreign ledger's layout, so the nudge
+# and the suppression below can never disagree about what exists. Callers
+# interpolate what this prints; nothing downstream hardcodes a ledger path.
+#
+# What has to be detected is **liveness**, not presence. superpowers SDD (6.2.0)
+# gives each plan its own git-ignored workspace at
+# `.superpowers/sdd/<plan-basename>/progress.md`, and deletes that directory when
+# the plan's final whole-branch review comes back clean. So two things do not
+# count as a ledger:
+#
+#   - The pre-6.2.0 flat path `.superpowers/sdd/progress.md`. Nothing in SDD's
+#     lifecycle removes it — it sits in no workspace — and the skill names it
+#     explicitly as another plan's progress, to be left in place. Treating it as
+#     authoritative suppressed handoff-todo.md in a session that ran no SDD at
+#     all, which is the whole defect this shape exists to avoid, inverted.
+#   - A file at a workspace path whose first line is not SDD's identity line,
+#     `# SDD ledger — plan: <plan file>`. That line is what separates a live
+#     ledger from a hand-rolled file that happens to sit in the right place, and
+#     it costs one read. A near-miss fails open: no ledger found means
+#     handoff-todo.md gets written, which is the safe direction.
+#
+# Several workspaces can coexist — an abandoned run leaves one behind — so the
+# most recently modified wins. That is the honest signal for the one in play;
+# glob order is not. Equal mtimes fall back to glob order, which is lexical.
+#
+# Read-only by contract: a stale workspace is another workflow's file, never
+# ours to delete or rewrite however abandoned it looks.
 probe_ledger_path() {
-    local root="$1"
+    local root="$1" f best='' first
 
-    # superpowers SDD: .superpowers/sdd/progress.md (git-ignored scratch, so it
-    # never shows in `git status` — existence is the only signal).
-    if [ -f "$root/.superpowers/sdd/progress.md" ]; then
-        printf '.superpowers/sdd/progress.md\n'
-        return 0
-    fi
+    for f in "$root"/.superpowers/sdd/*/progress.md; do
+        # Also rejects the unmatched glob, which bash leaves literal.
+        [ -f "$f" ] || continue
+        first=''
+        # A ledger whose only line lacks a trailing newline still counts: `read`
+        # reports failure but has set $first.
+        IFS= read -r first < "$f" || [ -n "$first" ] || continue
+        case "$first" in
+            '# SDD ledger — plan: '*) ;;
+            *) continue ;;
+        esac
+        [ -z "$best" ] || [ "$f" -nt "$best" ] || continue
+        best="$f"
+    done
 
-    return 1
+    [ -n "$best" ] || return 1
+    printf '%s\n' "${best#"$root"/}"
 }
 
 # Emit the durable-progress nudge when a known structured-workflow ledger
@@ -155,12 +189,12 @@ probe_ledger_path() {
 # like superpowers SDD trust their ledger over post-compaction recollection.
 # Advisory — a nudge, not a gate.
 probe_sdd_directive() {
-    local root="$1"
+    local root="$1" ledger
 
-    probe_ledger_path "$root" >/dev/null || return 0
+    ledger=$(probe_ledger_path "$root") || return 0
 
     printf '%s\n' \
-"You are running superpowers SDD. Before compacting, bring the ledger current at .superpowers/sdd/progress.md — after compaction the SDD skill trusts the ledger over recollection. Ensure:" \
+"You are running superpowers SDD. Before compacting, bring the ledger current at $ledger — after compaction the SDD skill trusts the ledger over recollection. Ensure:" \
 "" \
 "  - every task whose review came back clean has its \`Task N: complete (commits <base>..<head>, review clean)\` line" \
 "  - any Minor findings seen so far are recorded for the final whole-branch review" \

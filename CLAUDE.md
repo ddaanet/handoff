@@ -326,7 +326,13 @@ persistence (2026-07-23)".
   Couples only to the two IPC filenames — never gitlore internals.
   `probe_ledger_path` is the one-row registry of known workflow-owned
   progress ledgers (currently superpowers SDD), so the nudge and the
-  suppression can never disagree about what exists. `probe_sdd_directive`
+  suppression can never disagree about what exists — and both interpolate
+  what it prints, because with a glob there is no path to hardcode. It
+  detects **liveness**, not presence: a match under
+  `.superpowers/sdd/*/progress.md` counts only with SDD's identity first
+  line, the pre-6.2.0 flat path never counts, and among several the
+  most-recently-modified wins. See DESIGN.md, "An orphaned ledger hijacks
+  the handoff (2026-07-26)". `probe_sdd_directive`
   holds the structured-workflow ledger nudge (precompact only) and ends by
   standing `handoff-todo.md` down; `probe_todo_suppression` is that
   stand-down alone, for the handoff path.

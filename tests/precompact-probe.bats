@@ -61,10 +61,88 @@ setup() {
     add_sdd_ledger "$repo"
     run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
     echo "$output" | grep -qi 'minor'
     echo "$output" | grep -qi 're-dispatch'
     [[ "$output" != *"gitlore-commit-memory"* ]]
+}
+
+# --- ledger liveness ------------------------------------------------------
+#
+# What counts is a *live* SDD run, not a file that looks like one. 6.2.0 gives
+# each plan a workspace directory and deletes it when the final review is clean,
+# so presence at the old flat path — or without the identity first line — is
+# somebody else's leftover.
+
+# The pre-6.2.0 flat path is what SDD itself calls another plan's progress, and
+# nothing in its lifecycle removes it. Counting it stood handoff-todo.md down in
+# a session that ran no SDD at all.
+#
+# Mutation-checked: restoring the flat-path branch in probe_ledger_path turns
+# this test red.
+@test "probe: flat-path ledger alone -> silent" {
+    repo="$BATS_TEST_TMPDIR/sddflat"; mkdir -p "$repo"
+    git -C "$repo" init -q
+    add_flat_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+# The identity line is what separates a live ledger from a hand-rolled file that
+# happens to sit in a workspace-shaped directory.
+#
+# Mutation-checked: dropping the identity-line `case` in probe_ledger_path turns
+# this test red.
+@test "probe: workspace file without SDD's identity line -> silent" {
+    repo="$BATS_TEST_TMPDIR/sddnoident"; mkdir -p "$repo"
+    git -C "$repo" init -q
+    add_unidentified_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "probe: flat-path stray beside a live ledger -> only the live one is named" {
+    repo="$BATS_TEST_TMPDIR/sddboth"; mkdir -p "$repo"
+    git -C "$repo" init -q
+    add_flat_sdd_ledger "$repo"
+    add_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
+    [[ "$output" != *"sdd/progress.md"* ]]
+}
+
+# An abandoned run and a live one both leave a workspace, so mtime decides. The
+# assertion has to rule out both "glob-first wins" and "glob-last wins": run it
+# once with the live ledger lexically first, once lexically last.
+@test "probe: several live workspaces -> most recently modified wins" {
+    i=0
+    for pair in a-live:z-stale z-live:a-stale; do
+        i=$((i + 1))
+        live="${pair%%:*}"; stale="${pair##*:}"
+        repo="$BATS_TEST_TMPDIR/sddmulti$i"; mkdir -p "$repo"
+        git -C "$repo" init -q
+        add_sdd_ledger "$repo" "$stale"
+        add_sdd_ledger "$repo" "$live"
+        touch -t 202601010000 "$repo/.superpowers/sdd/$stale/progress.md"
+        run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+        [ "$status" -eq 0 ]
+        echo "$output" | grep -qF ".superpowers/sdd/$live/progress.md"
+        [[ "$output" != *"$stale"* ]]
+    done
+}
+
+# The nudge interpolates whatever probe_ledger_path prints — the registry is the
+# only place that knows the layout.
+@test "probe: nudge names the ledger's own workspace, not a fixed path" {
+    repo="$BATS_TEST_TMPDIR/sddslug"; mkdir -p "$repo"
+    git -C "$repo" init -q
+    add_sdd_ledger "$repo" some-other-plan
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF '.superpowers/sdd/some-other-plan/progress.md'
 }
 
 # The ledger is the session's task list, so the nudge must also stand
@@ -96,7 +174,7 @@ setup() {
     echo "$output" | grep -qi 'blockquote'
     echo "$output" | grep -qi 'commit message'
     echo "$output" | grep -qF '72 characters'
-    [[ "$output" != *".superpowers/sdd/progress.md"* ]]
+    [[ "$output" != *".superpowers/sdd/feature-plan/progress.md"* ]]
 }
 
 # The with-commit half of the branch, in precompact's composition: summary
@@ -123,9 +201,9 @@ setup() {
     run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
-    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
     mem_line=$(echo "$output" | grep -nF 'gitlore-commit-memory' | head -1 | cut -d: -f1)
-    sdd_line=$(echo "$output" | grep -nF '.superpowers/sdd/progress.md' | head -1 | cut -d: -f1)
+    sdd_line=$(echo "$output" | grep -nF '.superpowers/sdd/feature-plan/progress.md' | head -1 | cut -d: -f1)
     [ "$mem_line" -lt "$sdd_line" ]
 }
 
@@ -138,10 +216,10 @@ setup() {
     run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" with-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF "$repo/.claude/gitlore-memory-message"
-    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
     [[ "$output" != *"trigger"* ]]
     mem_line=$(echo "$output" | grep -nF 'gitlore-memory-message' | head -1 | cut -d: -f1)
-    sdd_line=$(echo "$output" | grep -nF '.superpowers/sdd/progress.md' | head -1 | cut -d: -f1)
+    sdd_line=$(echo "$output" | grep -nF '.superpowers/sdd/feature-plan/progress.md' | head -1 | cut -d: -f1)
     [ "$mem_line" -lt "$sdd_line" ]
 }
 
@@ -150,7 +228,7 @@ setup() {
     add_sdd_ledger "$repo"
     run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
     [[ "$output" != *"gitlore-commit-memory"* ]]
 }
 
@@ -162,7 +240,7 @@ setup() {
     run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo/pkg/src" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
-    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
 }
 
 # --- mode argument validation -------------------------------------------
@@ -218,7 +296,7 @@ setup() {
     add_sdd_ledger "$repo"
     run bash -c 'cd "$1" && "$2" "$3"' _ "$repo" "$SHIM" without-commit
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
 }
 
 @test "shim: bin/handoff-precompact-probe forwards the mode argument" {

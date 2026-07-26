@@ -232,7 +232,7 @@ setup() {
     add_sdd_ledger "$repo"
     run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    echo "$output" | grep -qF '.superpowers/sdd/feature-plan/progress.md'
     echo "$output" | grep -qF 'handoff-todo.md'
     [[ "$output" != *"Minor findings"* ]]
     [[ "$output" != *"re-dispatched"* ]]
@@ -270,6 +270,30 @@ setup() {
     run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qiF 'delete'
+}
+
+# The suppression is where an orphaned ledger does its damage: handoff-todo.md
+# is the file that survives the /clear, so deferring to a leftover risks losing
+# the real remainder. Neither shape of leftover may stand it down.
+#
+# Mutation-checked: restoring the flat-path branch in probe_ledger_path turns the
+# first red; dropping the identity-line `case` turns the second red.
+@test "probe: flat-path stray does not suppress the todo file" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    add_flat_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"handoff-todo.md"* ]]
+}
+
+@test "probe: workspace file without an identity line does not suppress the todo file" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    add_unidentified_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"handoff-todo.md"* ]]
 }
 
 # No ledger is the common case: nothing suppresses the todo file, so the
