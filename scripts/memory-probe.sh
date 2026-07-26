@@ -12,14 +12,22 @@
 # is a different question and does apply here: a workflow ledger outlives a
 # /clear just as it outlives a compaction, so handoff-todo.md must stand down
 # for it either way.
+#
+# Usage: handoff-memory-probe <with-commit|without-commit>
+#
+# The one argument is the single fact the agent supplies — whether a commit is
+# going to carry this session's memory — and it selects the memory commit path.
+# The agent answers the question; the branch is here.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_probe-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_probe-lib.sh"
 
+probe_require_mode handoff-memory-probe "$@"
+
 root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 
-memory=$(probe_memory_directive "$root")
+memory=$(probe_memory_directive "$root" "$PROBE_MODE")
 todo=$(probe_todo_suppression "$root")
 
 # Blank line between them only when both fired.

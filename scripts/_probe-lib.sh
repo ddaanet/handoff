@@ -11,16 +11,65 @@
 # prints its directive or stays silent; both always return 0, so callers need
 # no conditional.
 
+# Validate a probe's sole positional argument: the commit-awareness mode. Sets
+# the PROBE_MODE global on success; prints a usage line and exits 2 otherwise.
+#
+# A global rather than stdout because `exit 2` inside a command substitution
+# ends only the subshell — the caller would sail on with an empty mode. Same
+# shape as handoff_match_target's MATCHED_NAME in _lib.sh.
+#
+# The two values are peers: no default, no fallback. A default would be the
+# answer the agent gives when it has not thought about the question, and the
+# whole point of the argument is that it has (FR4).
+# shellcheck disable=SC2034  # PROBE_MODE is consumed by the sourcing script
+probe_require_mode() {
+    local name="$1"
+    shift
+
+    if [ "$#" -eq 1 ]; then
+        case "$1" in
+            with-commit | without-commit)
+                PROBE_MODE="$1"
+                return 0
+                ;;
+        esac
+    fi
+
+    printf 'usage: %s <with-commit|without-commit>\n' "$name" >&2
+    exit 2
+}
+
 # Emit the gitlore memory-commit directive when the gitlore-memory submodule is
 # registered (FR12 activation gate) and its worktree is dirty. Silent otherwise.
 #
-# The commit runs through gitlore's file-trigger IPC, not a Bash call: the agent
-# writes an approved message file plus a trigger file, and gitlore's
-# PostToolBatch hook does the commit. All file writes, so it sidesteps the
-# sandbox and the auto-mode classifier that make a `commit-memory.sh -F -` Bash
-# call fragile. Couples only to the two IPC filenames — never gitlore internals.
+# $2 is the commit-awareness mode, and it selects which of gitlore's two commit
+# paths the agent is told to take. The IPC is the same either way — write files,
+# never Bash, so it sidesteps the sandbox and the auto-mode classifier that made
+# a `commit-memory.sh -F -` call fragile — and the whole difference is one file:
+#
+#   without-commit  summary + trigger -> gitlore's PostToolBatch commits memory
+#                                        on the spot, standalone
+#   with-commit     summary only      -> the parent commit's pre-commit hook
+#                                        commits memory into that same commit
+#
+# Both end with one parent commit carrying the source change and the gitlink
+# bump, so the second is not a history fix — it is one call instead of two, and
+# agents batch the two writes into a single message only 43% of the time (see
+# DESIGN.md, "Commit awareness"). Couples only to the two IPC filenames — never
+# gitlore internals.
+#
+# The with-commit text never mentions the trigger — not its path, not the idea
+# of one. Its reader is a fresh agent with no other source for that filename, so
+# saying nothing is what makes the standalone commit unreachable; a prohibition
+# would instead introduce the thing it forbids. It states no mechanism either —
+# not the pre-commit hook, not the mtime freshness rule — because mechanism in a
+# directive gets verified, narrated, and worked around. Nor does it order the
+# write against the memory edits: "once approved" already places it after them,
+# and approval is the end of a feedback loop — the user may well ask for a
+# memory change there, which is what review is for. What survives is the one act
+# the agent performs.
 probe_memory_directive() {
-    local root="$1" mempath mem status msgfile trigger
+    local root="$1" mode="$2" mempath mem status msgfile trigger approve_files
 
     # FR12 activation gate: the gitlore-memory submodule registration.
     mempath=$(git config --file "$root/.gitmodules" \
@@ -43,13 +92,34 @@ probe_memory_directive() {
     msgfile="$root/.claude/gitlore-memory-message"
     trigger="$root/.claude/gitlore-commit-memory"
 
+    # with-commit writes one file, without-commit two — the approval gate has to
+    # say which, since it is the gate on writing them.
+    if [ "$mode" = "with-commit" ]; then
+        approve_files="the file below"
+    else
+        approve_files="either file below"
+    fi
+
+    # The summary file is the memory commit's message: gitlore feeds it to
+    # `git commit -F` verbatim, in the submodule and in each tier. So the shape
+    # asked for is a commit message's — title line, blank line, body.
     printf '%s\n' \
 "gitlore memory has uncommitted changes:" \
 "" \
 "$status" \
 "" \
-"Summarize these changes in 1-3 sentences. Present the summary to the user as a markdown blockquote (lines prefixed with '> ', not a code fence) and get their approval — they may edit it. Do not write either file below before the user approves." \
+"Summarize these changes as a commit message: a title line of at most 72 characters, a blank line, then a body of one bullet per memory file saying what it now records. Present it to the user as a markdown blockquote (lines prefixed with '> ', not a code fence) and get their approval — they may edit it. Do not write $approve_files before the user approves." \
+""
+
+    if [ "$mode" = "with-commit" ]; then
+        printf '%s\n' \
+"Once approved, write the approved summary to:" \
 "" \
+"     $msgfile" \
+"" \
+"The commit that lands these changes carries the memory. Nothing further is needed from you."
+    else
+        printf '%s\n' \
 "Once approved, commit the memory with two file writes (no Bash):" \
 "" \
 "  1. Write the approved summary to:" \
@@ -58,6 +128,7 @@ probe_memory_directive() {
 "     $trigger" \
 "" \
 "gitlore's PostToolBatch hook commits the submodule and removes both files on success. If they remain, the commit did not run — report that rather than retrying."
+    fi
 }
 
 # Registry of known workflow-owned progress ledgers, as project-relative paths.

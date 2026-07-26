@@ -95,9 +95,13 @@ right before `/clear` throws away what the compaction just paid for.
 A `PreToolUse(Skill)` hook wipes any prior handoff files the moment the skill activates, so the slate is always clean — and tells the agent so it doesn't redundantly verify. The agent then updates auto-memory with any durable learnings, and in a single turn writes a short task snapshot (if anything is outstanding), the remaining todo items (if a task list is in flight), and a session title to `.claude/autorename`. A `PostToolUse(Write|Edit)` hook stages `handoff-task.md` and `handoff-todo.md` for commit. A second hook picks up `autorename` and renames the session via tmux `send-keys` once the prompt goes idle (or emits a `/rename` line to paste if not in tmux). Guards prevent the agent from reading or writing `.claude/handoff-task.md` or `.claude/handoff-todo.md` outside the handoff flow. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently.
 
 In a gitlore-managed repository, handoff also offers to commit your memory:
-when the memory submodule has uncommitted changes, it summarizes them, asks
-you to approve (or edit) the summary, and commits via gitlore — so durable
-learnings land instead of waiting for your next commit.
+when the memory submodule has uncommitted changes, it drafts a commit message
+for them, asks you to approve (or edit) it, and commits via gitlore — so durable
+learnings land instead of waiting for your next commit. When a commit is going
+to land the change that memory documents — the one you are about to make, or a
+later one — the memory rides *that* commit instead of committing separately
+first, which saves a step, and it is written as if the change has already
+happened, because it has.
 
 ## Staleness and cleanup
 

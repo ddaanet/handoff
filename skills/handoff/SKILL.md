@@ -11,12 +11,33 @@ and stage-after-write — this skill's job is the task file.
 
 ## Protocol
 
-### Step 1: Update memory
+### Step 1: Will a commit carry this session's memory?
+
+Decide from the request and the state of the work, without making any tool
+calls. Two answers, of equal weight:
+
+- **`with-commit`** — a commit is going to land the change this session's
+  memory documents. The routine wrap-up (`/handoff`, then `/commit`) is
+  this answer; so is a change already made but committed later, even in a
+  later session, since the memory belongs in that commit either way.
+- **`without-commit`** — no such commit is coming. What the session learned
+  stands on its own.
+
+There is no default, and the answer is about where the memory belongs
+rather than which command the user typed. It feeds the probe invocation in
+Step 3, and it changes what the other steps write.
+
+Under `with-commit`, memory bodies state present-tense truth — the change
+described as made rather than proposed. Memory phrased as pending is false
+from the moment the change exists, and gets re-injected that way at the
+next session start.
+
+### Step 2: Update memory
 
 If durable learnings surfaced this session, capture them in
 auto-memory now. Skip if nothing durable surfaced — do not force.
 
-### Step 2: Decide, then write in parallel
+### Step 3: Decide, then write in parallel
 
 First, decide both of the following without making any tool calls:
 
@@ -35,12 +56,13 @@ Then, in the **same turn**, issue the writes and run the memory probe:
 - Write `./.claude/autorename` — sole line is the session title (always)
 - Write `./.claude/handoff-task.md` — only if there's an active task
 - Write `./.claude/handoff-todo.md` — only if open items remain
-- Run `handoff-memory-probe` (Bash) — deterministic memory check
+- Run `handoff-memory-probe <answer>` (Bash) — deterministic memory check,
+  where `<answer>` is Step 1's `with-commit` or `without-commit`
 
 Omit either file when it has nothing to say — the activation hook already
 wiped both, and an absent file is the honest "nothing pending".
 
-### Step 3: Follow the probe
+### Step 4: Follow the probe
 
 `handoff-memory-probe` prints nothing when there is nothing to do —
 finish normally. If it prints a directive, follow it exactly; the
@@ -111,8 +133,9 @@ Todo file rules:
   a struck-through item. The file holds the remainder and nothing else.
 - Durable lessons in `## Open decisions`. Those go to feedback memory.
 - Extra sections in either file. Both templates are fixed.
-- Commit/push status anywhere in the file ("work is uncommitted",
-  "ready to commit"). It's reconstructable from `git status`/`git log`
+- Commit/push status anywhere in either file ("work is uncommitted",
+  "ready to commit", a `handoff-todo.md` item saying "commit the work" or
+  "push the branch"). It's reconstructable from `git status`/`git log`
   at load time and goes stale the moment the user commits after handoff.
   If uncommitted work matters, what matters is *why* (tests red, decision
   pending) — write that as an open decision, not a status line.

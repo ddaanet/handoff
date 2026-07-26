@@ -18,14 +18,29 @@ user whether to proceed.
 
 ## Steps
 
-1. If durable learnings surfaced this session, capture them in auto-memory
+1. Decide, from the request and the state of the work and without making
+   any tool calls, whether a commit is going to carry this session's
+   memory. Two answers, of equal weight: **`with-commit`** — a commit is
+   going to land the change that memory documents, whether this request is
+   what commits it or a later one is — and **`without-commit`** — no such
+   commit is coming. There is no default, and the answer is about where the
+   memory belongs rather than which command the user typed. It feeds the
+   probe call in step 3, and it changes what steps 4 and 5 do.
+
+   Under `with-commit`, memory bodies state present-tense truth — the
+   change described as made rather than proposed. Memory phrased as pending
+   is false from the moment the change exists, and the compaction
+   re-injects it that way.
+
+2. If durable learnings surfaced this session, capture them in auto-memory
    now. Skip if nothing durable surfaced — do not force.
 
-2. Run `handoff-precompact-probe` (Bash) and follow any directive it prints
-   **exactly**. Nothing printed → nothing to do. The probe owns the
+3. Run `handoff-precompact-probe <answer>` (Bash), where `<answer>` is
+   step 1's `with-commit` or `without-commit`, and follow any directive it
+   prints **exactly**. Nothing printed → nothing to do. The probe owns the
    decision; do not re-derive or verify it.
 
-3. Write `./.claude/handoff-task.md` — a `## Current task` section and,
+4. Write `./.claude/handoff-task.md` — a `## Current task` section and,
    when any remain, `## Open decisions`; no `#` heading. This is where the
    task state goes — see the seam below.
 
@@ -43,13 +58,17 @@ user whether to proceed.
    invoke the skill to reach it: activating `handoff` wipes both files,
    the task file just written included.
 
-4. Write `./.claude/autocompact` — **only once step 2 is fully complete**,
+5. Write `./.claude/autocompact` — **only once step 3 is fully complete**,
    never in the same turn as a question the directive requires.
    Writing it arms compaction at the *next* turn boundary, and a question
    ends the turn — so an autocompact written alongside an approval request
    compacts away the very conversation the answer applies to. When a
    directive needs an answer, end the turn on the question and write the
-   file in the turn after it is resolved. Exactly two lines:
+   file in the turn after it is resolved.
+
+   When the commit is part of this request, it lands **before** this file
+   is written, for the same reason: arm the compaction first and it runs at
+   the turn boundary instead of the commit. Exactly two lines:
 
    - **Line 1** — the literal command to run: `/compact`, or
      `/compact <directive>` when a focus instruction would help the

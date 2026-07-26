@@ -10,9 +10,14 @@ High-level flow: skill writes `.claude/handoff-task.md` →
 session's `SessionStart(startup|clear)` assembles the frame in memory
 (header + inlined task file) and injects it. `README.md`
 has the user-facing version of this. At wrap-up the skill also runs
-`handoff-memory-probe`; when a gitlore-memory submodule is dirty, the probe
-emits a directive and the agent summarizes → gets approval → writes gitlore's
-message + trigger files, which gitlore's own `PostToolBatch` hook consumes.
+`handoff-memory-probe <with-commit|without-commit>`; when a gitlore-memory
+submodule is dirty, the probe emits a directive and the agent summarizes →
+gets approval → writes gitlore's message file, plus the trigger file only
+under `without-commit`, which gitlore's own `PostToolBatch` hook consumes.
+Under `with-commit` the message file alone leaves the memory commit to the
+parent commit's pre-commit hook — one call instead of two, which is the whole
+gain, since both paths end with one parent commit carrying the source change and
+the gitlink bump. See DESIGN.md, "Commit awareness (2026-07-25)".
 
 Second flow, driven by the precompact skill: probe (memory commit + ledger
 flush) → skill writes `handoff-task.md` and `.claude/autocompact` →
@@ -39,7 +44,10 @@ persistence (2026-07-23)".
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
   contains the markdown templates for `handoff-task.md` and
-  `handoff-todo.md` (both are the single source of truth for their shape)
+  `handoff-todo.md` (both are the single source of truth for their shape).
+  Its first step is the commit-awareness decision — is a commit going to
+  carry this session's memory — which it passes to the probe and which
+  makes it write memory as if the change has landed.
 - `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
   session title from the conversation (no tool calls) and writes it to
   `.claude/autorename`; the same `write-rename.sh` PostToolUse hook that
@@ -47,8 +55,11 @@ persistence (2026-07-23)".
   memory. For `/btw` side conversations and any session worth a name
   while the main thread stays live.
 - `skills/precompact/SKILL.md` — the `/handoff:precompact` skill.
-  Drives **commit memory → compact → continue**: capture durable
-  learnings in auto-memory, run `handoff-precompact-probe` and follow
+  Drives **commit memory → compact → continue**: decide commit awareness
+  (same first step as handoff, with the extra load-bearing rule that when
+  the commit is part of the request it lands *before* `.claude/autocompact`
+  is written — arming the compaction ends the turn), capture durable
+  learnings in auto-memory, run `handoff-precompact-probe <mode>` and follow
   its directives (memory commit and/or ledger flush), then write
   `handoff-task.md` (and `handoff-todo.md` when a task list has open
   items — with no tracker the list is context-resident, and context is
@@ -272,7 +283,10 @@ persistence (2026-07-23)".
   body invokes it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
   the agent's Bash, so the shim is the entry point.
 - `scripts/memory-probe.sh` — read-only gitlore-memory detector run by the
-  handoff skill at wrap-up. Owns the dirty-or-not branch and prints the
+  handoff skill at wrap-up. Takes the required commit-awareness mode
+  (`probe_require_mode`, validated before anything else — a bad mode is
+  exit 2 even where the probe would have stayed silent). Owns the
+  dirty-or-not branch and prints the
   agent's next action or stays silent. Composes the memory directive plus
   the todo-file suppression from `_probe-lib.sh`. No SDD *nudge* — the
   bring-the-ledger-current prompt is a precompact concern — but the
@@ -280,10 +294,33 @@ persistence (2026-07-23)".
   exactly as it outlives a compaction.
 - `scripts/_probe-lib.sh` — sourced helper holding the probe directives, so
   each prompt is authored once and composed twice.
+  `probe_require_mode` validates each probe's sole positional argument, the
+  commit-awareness mode, and sets `PROBE_MODE` — a global rather than stdout,
+  because `exit 2` inside a command substitution ends only the subshell and
+  the caller would sail on with an empty mode (same shape as
+  `handoff_match_target`'s `MATCHED_NAME`). No default: the two values are
+  peers, since a default is the answer an agent gives when it has not thought
+  about the question.
   `probe_memory_directive` gates on the `gitlore-memory` submodule
   registration (FR12) and a dirty worktree, then instructs the agent to
-  summarize → get approval → write `.claude/gitlore-memory-message` and
-  `.claude/gitlore-commit-memory`. That file-trigger IPC replaced the old
+  summarize → get approval → write `.claude/gitlore-memory-message`, and
+  under `without-commit` also `.claude/gitlore-commit-memory`. That trigger
+  file is the whole difference between the two paths: written, gitlore's
+  `PostToolBatch` commits memory standalone; withheld, the parent commit's
+  pre-commit hook bundles it into the source commit. The `with-commit` text
+  therefore never mentions the trigger — not its path, not the concept. The
+  reader is a fresh agent with no other source for that filename, so saying
+  nothing is what makes the standalone commit unreachable, and a prohibition
+  would introduce what it forbids. It states no mechanism either (no
+  pre-commit hook, no mtime freshness rule) and does not order the write
+  against the memory edits — both skills finish memory before running the
+  probe, and "once approved" already places the write after them. Neither
+  skill body states it either: approval is a feedback loop that routinely
+  edits memory, so a rule pinning memory as final forbids what the gate is
+  for. What is left is one act plus one clause saying this
+  turn's commit carries the memory, so its absence is not read as a failure.
+  Mechanism a reader cannot act on gets verified and narrated instead.
+  That file-trigger IPC replaced the old
   `git config gitlore.commitCommand` + `commit-memory.sh -F -` Bash path:
   all file writes, so it sidesteps the sandbox and the auto-mode classifier.
   Couples only to the two IPC filenames — never gitlore internals.
@@ -297,9 +334,11 @@ persistence (2026-07-23)".
   `scripts/precompact-probe.sh`. Invoked by the precompact skill body by
   bare name (same pattern as `handoff-memory-probe`).
 - `scripts/precompact-probe.sh` — read-only detector run by the precompact
-  skill before `/compact`. Owns the plugin-specific vocabulary so the skill
+  skill before `/compact`. Takes the same required commit-awareness mode as
+  `memory-probe.sh`. Owns the plugin-specific vocabulary so the skill
   body stays vocab-free: composes the memory directive **then** the SDD
   ledger nudge from `_probe-lib.sh`, or stays silent when neither applies.
+  Composition order is a property of the probe, not the mode.
   Memory goes first — it is the flow's one interactive gate (FR11 approval)
   and must commit while context is still full, before the summariser runs.
 - `plugin-dev/` — vendored
@@ -379,7 +418,13 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   `tests/memory-probe.bats` covers `scripts/memory-probe.sh` and the
   `bin/` shim against a synthetic gitlore repo; `tests/precompact-probe.bats`
   covers `scripts/precompact-probe.sh` and its shim, including the composed
-  memory-then-SDD ordering. Both build their fixtures from
+  memory-then-SDD ordering. Both cover the commit-awareness contract in
+  full: the mode's four combinations with memory state, the argument
+  validation (missing / unknown / two), and each shim forwarding the mode.
+  The load-bearing assertion is the negative — `with-commit` output never
+  mentions a trigger — and it is mutation-checked (disable the branch, watch
+  it go red), not observed passing.
+  Both build their fixtures from
   `tests/probe-helpers.bash` (one shared synthetic-repo shape, so the two
   suites cannot drift). Both are listed in the `precommit` and `hook-test`
   recipes.

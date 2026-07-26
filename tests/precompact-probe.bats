@@ -10,7 +10,14 @@
 # Memory comes first because it is the one interactive gate (FR11 approval)
 # and must land as a durable commit before the summariser runs.
 #
+# The probe takes one required argument, the commit-awareness mode, which
+# selects between gitlore's standalone and parent-commit memory paths — the
+# trigger is mentioned under without-commit only. The composition and its
+# ordering are the same under both modes.
+#
 # Run with: bats tests/precompact-probe.bats   (from plugin root)
+
+bats_require_minimum_version 1.5.0
 
 setup() {
     repo_root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -21,7 +28,7 @@ setup() {
 
 @test "probe: not a git repo -> silent" {
     plain="$BATS_TEST_TMPDIR/plain"; mkdir -p "$plain"
-    run bash -c 'cd "$1" && bash "$2"' _ "$plain" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$plain" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
@@ -29,14 +36,21 @@ setup() {
 @test "probe: git repo, no ledger and no gitlore -> silent" {
     repo="$BATS_TEST_TMPDIR/bare"; mkdir -p "$repo"
     git -C "$repo" init -q
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
 @test "probe: gitlore + clean memory, no ledger -> silent" {
     repo="$(make_gitlore_repo)"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "probe: gitlore + clean memory, with-commit -> silent" {
+    repo="$(make_gitlore_repo)"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" with-commit
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
@@ -45,7 +59,7 @@ setup() {
     repo="$BATS_TEST_TMPDIR/sddonly"; mkdir -p "$repo"
     git -C "$repo" init -q
     add_sdd_ledger "$repo"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF '.superpowers/sdd/progress.md'
     echo "$output" | grep -qi 'minor'
@@ -59,7 +73,7 @@ setup() {
     repo="$BATS_TEST_TMPDIR/sddsupp"; mkdir -p "$repo"
     git -C "$repo" init -q
     add_sdd_ledger "$repo"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF 'handoff-todo.md'
 }
@@ -67,7 +81,7 @@ setup() {
 @test "probe: no ledger -> no todo suppression" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     [[ "$output" != *"handoff-todo.md"* ]]
 }
@@ -75,19 +89,38 @@ setup() {
 @test "probe: dirty memory only -> memory directive, no SDD nudge" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF "$repo/.claude/gitlore-memory-message"
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
     echo "$output" | grep -qi 'blockquote'
+    echo "$output" | grep -qi 'commit message'
+    echo "$output" | grep -qF '72 characters'
     [[ "$output" != *".superpowers/sdd/progress.md"* ]]
+}
+
+# The with-commit half of the branch, in precompact's composition: summary
+# write only, no mention of a trigger — see the same test in
+# tests/memory-probe.bats for why saying nothing is the mechanism.
+#
+# Mutation-checked: deleting the with-commit branch in _probe-lib.sh (so the
+# mode falls through to the without-commit text) turns this test red.
+@test "probe: with-commit -> summary write only, no mention of a trigger" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" with-commit
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF "$repo/.claude/gitlore-memory-message"
+    [[ "$output" != *"trigger"* ]]
+    [[ "$output" != *"two file writes"* ]]
+    echo "$output" | grep -qi "carries the memory"
 }
 
 @test "probe: dirty memory + SDD ledger -> both, memory directive first" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
     add_sdd_ledger "$repo"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
     echo "$output" | grep -qF '.superpowers/sdd/progress.md'
@@ -96,10 +129,26 @@ setup() {
     [ "$mem_line" -lt "$sdd_line" ]
 }
 
+# Composition order is a property of the probe, not of the commit mode: memory
+# is the interactive gate either way, so it stays first.
+@test "probe: with-commit + SDD ledger -> both, memory directive first" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    add_sdd_ledger "$repo"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" with-commit
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF "$repo/.claude/gitlore-memory-message"
+    echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+    [[ "$output" != *"trigger"* ]]
+    mem_line=$(echo "$output" | grep -nF 'gitlore-memory-message' | head -1 | cut -d: -f1)
+    sdd_line=$(echo "$output" | grep -nF '.superpowers/sdd/progress.md' | head -1 | cut -d: -f1)
+    [ "$mem_line" -lt "$sdd_line" ]
+}
+
 @test "probe: clean memory + SDD ledger -> nudge only" {
     repo="$(make_gitlore_repo)"
     add_sdd_ledger "$repo"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF '.superpowers/sdd/progress.md'
     [[ "$output" != *"gitlore-commit-memory"* ]]
@@ -110,17 +159,80 @@ setup() {
     dirty_memory "$repo"
     add_sdd_ledger "$repo"
     mkdir -p "$repo/pkg/src"
-    run bash -c 'cd "$1" && bash "$2"' _ "$repo/pkg/src" "$PROBE"
+    run bash -c 'cd "$1" && bash "$2" "$3"' _ "$repo/pkg/src" "$PROBE" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
     echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+}
+
+# --- mode argument validation -------------------------------------------
+
+# The usage line names the shim, which is what the skill body invokes — an
+# agent that misreads it must be told what to fix, not shown scripts/.
+@test "probe: no argument -> exit 2 with usage on stderr" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    # shellcheck disable=SC2016   # positionals of the inner `bash -c` script
+    run --separate-stderr -2 bash -c 'cd "$1" && bash "$2"' _ "$repo" "$PROBE"
+    [ "$output" = "" ]
+    # shellcheck disable=SC2154   # set by bats `run --separate-stderr`
+    [ "$stderr" = "usage: handoff-precompact-probe <with-commit|without-commit>" ]
+}
+
+@test "probe: unknown mode -> exit 2 with usage on stderr" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    for bad in --with-commit commit yes ""; do
+        # shellcheck disable=SC2016   # positionals of the inner `bash -c` script
+        run --separate-stderr -2 bash -c 'cd "$1" && bash "$2" "$3"' \
+            _ "$repo" "$PROBE" "$bad"
+        [ "$output" = "" ]
+        [ "$stderr" = "usage: handoff-precompact-probe <with-commit|without-commit>" ]
+    done
+}
+
+@test "probe: two arguments -> exit 2" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    # shellcheck disable=SC2016   # positionals of the inner `bash -c` script
+    run --separate-stderr -2 bash -c 'cd "$1" && bash "$2" "$3" "$4"' \
+        _ "$repo" "$PROBE" with-commit without-commit
+    [ "$output" = "" ]
+    [ "$stderr" = "usage: handoff-precompact-probe <with-commit|without-commit>" ]
+}
+
+# Validation precedes every other check, so a bad mode is an error even where
+# the probe would otherwise have stayed silent.
+@test "probe: bad mode outside a git repo -> still exit 2" {
+    plain="$BATS_TEST_TMPDIR/plain2"; mkdir -p "$plain"
+    # shellcheck disable=SC2016   # positionals of the inner `bash -c` script
+    run --separate-stderr -2 bash -c 'cd "$1" && bash "$2" "$3"' \
+        _ "$plain" "$PROBE" nonsense
+    [ "$output" = "" ]
+    [ "$stderr" = "usage: handoff-precompact-probe <with-commit|without-commit>" ]
 }
 
 @test "shim: bin/handoff-precompact-probe execs the probe (ledger -> nudge)" {
     repo="$BATS_TEST_TMPDIR/shimrepo"; mkdir -p "$repo"
     git -C "$repo" init -q
     add_sdd_ledger "$repo"
-    run bash -c 'cd "$1" && "$2"' _ "$repo" "$SHIM"
+    run bash -c 'cd "$1" && "$2" "$3"' _ "$repo" "$SHIM" without-commit
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF '.superpowers/sdd/progress.md'
+}
+
+@test "shim: bin/handoff-precompact-probe forwards the mode argument" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    run bash -c 'cd "$1" && "$2" "$3"' _ "$repo" "$SHIM" with-commit
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"trigger"* ]]
+    echo "$output" | grep -qi "carries the memory"
+}
+
+@test "shim: bin/handoff-precompact-probe rejects a missing mode" {
+    repo="$(make_gitlore_repo)"
+    # shellcheck disable=SC2016   # positionals of the inner `bash -c` script
+    run --separate-stderr -2 bash -c 'cd "$1" && "$2"' _ "$repo" "$SHIM"
+    [ "$stderr" = "usage: handoff-precompact-probe <with-commit|without-commit>" ]
 }
