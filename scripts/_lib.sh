@@ -190,61 +190,6 @@ handoff_spawn_detached() {
     disown 2>/dev/null || true
 }
 
-# Has a task-file-writing skill activated in this session? Stateless:
-# derive the answer from the transcript JSONL each call (no marker, no
-# env). Either `handoff` or `precompact` counts — both write
-# handoff-task.md, so both must open the read and write guards. Scans both
-# invocation paths per skill: a Skill tool_use (agent path; the bare and
-# plugin-qualified skill arg are both launches of the same skill) or the
-# slash command (user path, stored as a <command-name> wrapper). Verified
-# against real transcripts 2026-05-23. Exit 0 if activated, 1 otherwise
-# (incl. empty/missing/unreadable transcript).
-handoff_activated() {
-    local transcript="$1"
-    [[ -n "$transcript" && -f "$transcript" ]] || return 1
-    python3 - "$transcript" <<'PY'
-import json, sys
-
-# Both skills write handoff-task.md, so either activates the guards. The bare
-# and qualified skill args are both launches of the same skill.
-SKILLS = {"handoff", "handoff:handoff", "precompact", "handoff:precompact"}
-SLASHES = (
-    "<command-name>/handoff:handoff</command-name>",
-    "<command-name>/handoff:precompact</command-name>",
-)
-try:
-    fh = open(sys.argv[1], encoding="utf-8", errors="replace")
-except OSError:
-    sys.exit(1)
-with fh:
-    for line in fh:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if entry.get("isSidechain"):
-            continue
-        msg = entry.get("message") or {}
-        # Agent path: Skill tool_use naming either skill.
-        if msg.get("role") == "assistant":
-            for block in msg.get("content") or []:
-                if (isinstance(block, dict)
-                        and block.get("type") == "tool_use"
-                        and block.get("name") == "Skill"
-                        and (block.get("input") or {}).get("skill") in SKILLS):
-                    sys.exit(0)
-        # User path: slash command stored as a <command-name> wrapper.
-        if entry.get("type") == "user":
-            content = msg.get("content")
-            if isinstance(content, str) and any(s in content for s in SLASHES):
-                sys.exit(0)
-sys.exit(1)
-PY
-}
-
 # Emit a PreToolUse deny on stdout, then `exit 0` (not `return`) —
 # terminates the calling process, so only safe from a standalone hook
 # script, not a general sourced context (subshell/interactive/setup).

@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# PATH-resident entry point for the precompact skill's durable-progress probe.
-# Claude Code adds every installed plugin's bin/ to PATH, so the skill body can
-# invoke this by bare name. Self-locates and execs the real logic in scripts/.
-set -euo pipefail
-here="$(cd "$(dirname "$0")" && pwd)"
-exec bash "$here/../scripts/precompact-probe.sh" "$@"

@@ -60,49 +60,6 @@ make_worktree() {
     printf '%s\n' "$wt"
 }
 
-# --- _lib.sh: handoff_activated detector ---
-
-@test "handoff_activated: Skill tool_use (qualified) -> activated" {
-    run handoff_activated "$repo_root/tests/fixtures/activated-skill.jsonl"
-    [ "$status" -eq 0 ]
-}
-
-@test "handoff_activated: Skill tool_use (bare name) -> activated" {
-    run handoff_activated "$repo_root/tests/fixtures/activated-skill-bare.jsonl"
-    [ "$status" -eq 0 ]
-}
-
-@test "handoff_activated: slash command -> activated" {
-    run handoff_activated "$repo_root/tests/fixtures/activated-slash.jsonl"
-    [ "$status" -eq 0 ]
-}
-
-# precompact writes the same task file, so it is an activation signal too.
-@test "handoff_activated: precompact Skill tool_use -> activated" {
-    run handoff_activated "$repo_root/tests/fixtures/activated-precompact-skill.jsonl"
-    [ "$status" -eq 0 ]
-}
-
-@test "handoff_activated: precompact slash command -> activated" {
-    run handoff_activated "$repo_root/tests/fixtures/activated-precompact-slash.jsonl"
-    [ "$status" -eq 0 ]
-}
-
-@test "handoff_activated: no signal -> not activated" {
-    run handoff_activated "$repo_root/tests/fixtures/extract-basic.jsonl"
-    [ "$status" -eq 1 ]
-}
-
-@test "handoff_activated: empty path -> not activated" {
-    run handoff_activated ""
-    [ "$status" -eq 1 ]
-}
-
-@test "handoff_activated: missing file -> not activated" {
-    run handoff_activated "$tmp/.claude/does-not-exist.jsonl"
-    [ "$status" -eq 1 ]
-}
-
 # --- _lib.sh: handoff_root resolver ---
 
 @test "handoff_root: worktree cwd -> worktree root" {
@@ -209,14 +166,17 @@ $tmp" ]
 # --- write-stage ---
 # Stages handoff-task.md with `git add -f` and does NOT create handoff.md.
 
-@test "write-stage (git staging): stages task, no handoff.md" {
+# handoff-task.md no longer comes through write-stage.sh at all (it is
+# checkpoint-only, FR3) — a direct Write to it is caught by write-guard.sh
+# before write-stage.sh would ever see it, so there is nothing to test here.
+
+@test "write-stage (git staging): stages handoff-todo.md, reports version-tracked" {
     git_tmp="$BATS_TEST_TMPDIR/git"
-    mkdir -p "$git_tmp"
-    git -C "$git_tmp" init -q
     mkdir -p "$git_tmp/.claude"
-    cp "$tmp/.claude/handoff-task.md" "$git_tmp/.claude/handoff-task.md"
+    git -C "$git_tmp" init -q
+    printf '## Remaining\n\n- an item\n' > "$git_tmp/.claude/handoff-todo.md"
     run bash -c '
-        jq -nc --arg fp "$1/.claude/handoff-task.md" \
+        jq -nc --arg fp "$1/.claude/handoff-todo.md" \
             "{tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
         | CLAUDE_PROJECT_DIR="$1" bash scripts/write-stage.sh
     ' _ "$git_tmp"
@@ -224,8 +184,30 @@ $tmp" ]
     echo "$output" | jq -e '.systemMessage == "handoff — staged for commit"' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("version-tracked") and test("gitlore")' >/dev/null
-    git -C "$git_tmp" status --porcelain | grep -q 'handoff-task.md'
-    [ ! -f "$git_tmp/.claude/handoff.md" ]
+    git -C "$git_tmp" status --porcelain | grep -q 'handoff-todo.md'
+}
+
+# FR6: an edit that leaves handoff-todo.md with no remaining items removes it
+# and stages the removal, rather than leaving behind a file that reads as
+# "nothing pending" while still present. Shares checkpoint_is_empty_body with
+# checkpoint.sh (tests/checkpoint.bats), so the two writers cannot drift.
+@test "write-stage (handoff-todo.md emptied): removed and the removal staged" {
+    git_tmp="$BATS_TEST_TMPDIR/git-empty"
+    mkdir -p "$git_tmp/.claude"
+    git -C "$git_tmp" init -q
+    printf '## Remaining\n\n- item\n' > "$git_tmp/.claude/handoff-todo.md"
+    git -C "$git_tmp" add -f .claude/handoff-todo.md
+    git -C "$git_tmp" -c user.email=t@t -c user.name=t commit -qm seed
+    printf '## Remaining\n' > "$git_tmp/.claude/handoff-todo.md"
+    run bash -c '
+        jq -nc --arg fp "$1/.claude/handoff-todo.md" \
+            "{tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/write-stage.sh
+    ' _ "$git_tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$git_tmp/.claude/handoff-todo.md" ]
+    echo "$output" | jq -e '.systemMessage == "handoff-todo.md emptied — removed and staged."' >/dev/null
+    git -C "$git_tmp" status --porcelain .claude/handoff-todo.md | grep -q '^D'
 }
 
 @test "write-stage (unrelated path: no-op)" {
@@ -259,45 +241,20 @@ $tmp" ]
 }
 
 # --- write-guard ---
+# handoff-task.md is checkpoint-only (FR3): any direct agent Write/Edit is
+# denied unconditionally, no activation predicate left to check. read-guard.sh
+# is gone entirely — nothing gates a Read any more.
 
-@test "write-guard (handoff-task.md, not activated: deny)" {
+@test "write-guard (handoff-task.md: deny, checkpoint-only)" {
     run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/handoff-task.md" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
         | bash scripts/write-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/extract-basic.jsonl"
+    ' _ "$tmp"
     [ "$status" -eq 0 ]
     echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-}
-
-@test "write-guard (handoff-task.md, activated: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-guard (handoff-task.md, precompact activated: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-precompact-skill.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "read-guard (handoff-task.md, precompact activated: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/read-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-precompact-slash.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
+        | test("checkpoint")' >/dev/null
 }
 
 @test "write-guard (cross-project: deny)" {
@@ -313,16 +270,20 @@ $tmp" ]
     echo "$output" | jq -e '.systemMessage' >/dev/null
 }
 
-@test "write-guard (CLAUDE_PROJECT_DIR overrides cwd drift: allow)" {
+@test "write-guard (CLAUDE_PROJECT_DIR overrides cwd drift: denies as checkpoint-only, not cross-project)" {
     # Simulates shell cwd drifting to another directory (e.g. /add-dir + cd)
-    # while the project root stays $tmp. Write to $tmp should be allowed.
+    # while the project root stays $tmp. Despite the drifted cwd, the write
+    # resolves as in-project and is denied on the checkpoint-only ground, not
+    # misclassified as cross-project.
     run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$3/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | CLAUDE_PROJECT_DIR="$3" bash scripts/write-guard.sh
-    ' _ "$other" "$repo_root/tests/fixtures/activated-skill.jsonl" "$tmp"
+        jq -nc --arg cwd "$1" --arg fp "$2/.claude/handoff-task.md" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | CLAUDE_PROJECT_DIR="$2" bash scripts/write-guard.sh
+    ' _ "$other" "$tmp"
     [ "$status" -eq 0 ]
-    [ "$output" = "" ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
+        | test("checkpoint")' >/dev/null
 }
 
 @test "write-guard (unrelated filename: allow)" {
@@ -334,369 +295,29 @@ $tmp" ]
     [ "$status" -eq 0 ]
 }
 
-@test "write-guard (worktree cwd: allow write to worktree .claude)" {
+@test "write-guard (worktree cwd: denies the worktree's own handoff-task.md, not main)" {
     wt="$(make_worktree wtG)"
     run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/handoff-task.md" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
         | bash scripts/write-guard.sh
-    ' _ "$wt" "$repo_root/tests/fixtures/activated-skill.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-# --- read-guard ---
-
-@test "read-guard (handoff-task.md, not activated: deny)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/read-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/extract-basic.jsonl"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-}
-
-@test "read-guard (handoff-task.md, activated: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/read-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-slash.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "read-guard (unrelated file: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/README.md" \
-            "{cwd:\$cwd, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/read-guard.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "read-guard (worktree cwd, not activated: deny)" {
-    wt="$(make_worktree wtR)"
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-task.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/read-guard.sh
-    ' _ "$wt" "$repo_root/tests/fixtures/extract-basic.jsonl"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-}
-
-# --- guards: handoff-todo.md ---
-# The remainder ledger is skill-owned on the same terms as the task file:
-# the defect these guards exist for was the agent co-opting a handoff file
-# as a scratch todo list before any skill ran.
-
-@test "write-guard (handoff-todo.md, not activated: deny, names the todo file)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/not-activated.jsonl"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
-        | test("handoff-todo.md")' >/dev/null
-}
-
-@test "write-guard (handoff-todo.md, activated: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-guard (handoff-todo.md, precompact activated: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-precompact-skill.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-guard (cross-project handoff-todo.md: deny)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$3/.claude/handoff-todo.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl" "$other"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
-        | test("handoff-todo.md")' >/dev/null
-}
-
-@test "read-guard (handoff-todo.md, not activated: deny)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/read-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/not-activated.jsonl"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
-}
-
-@test "read-guard (handoff-todo.md, activated: allow)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg t "$2" --arg fp "$1/.claude/handoff-todo.md" \
-            "{cwd:\$cwd, transcript_path:\$t, tool_name:\"Read\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/read-guard.sh
-    ' _ "$tmp" "$repo_root/tests/fixtures/activated-skill.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-# --- skill-pre-hook ---
-
-@test "skill-pre-hook (handoff:handoff: wipe)" {
-    : > "$tmp/.claude/handoff-task.md"
-    : > "$tmp/.claude/handoff.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
-        | bash scripts/skill-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-task.md" ]
-    [ ! -e "$tmp/.claude/handoff.md" ]
-    [ "$(echo "$output" | jq -r '.systemMessage // ""')" = "handoff: wiped prior handoff-task.md, handoff.md" ]
-    [ "$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')" = "handoff activation hook wiped prior handoff files (handoff-task.md, handoff.md); they are absent." ]
-    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null
-}
-
-@test "skill-pre-hook (bare handoff: wipe)" {
-    : > "$tmp/.claude/handoff-task.md"
-    : > "$tmp/.claude/handoff.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff\"}}" \
-        | bash scripts/skill-pre-hook.sh >/dev/null
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-task.md" ]
-    [ ! -e "$tmp/.claude/handoff.md" ]
-}
-
-# precompact authors the same handoff-task.md, so it resets on the same
-# terms — qualified and bare form, both invocation paths.
-@test "skill-pre-hook (handoff:precompact: wipe)" {
-    : > "$tmp/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:precompact\"}}" \
-        | bash scripts/skill-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-task.md" ]
-    [ "$(echo "$output" | jq -r '.systemMessage // ""')" = "handoff: wiped prior handoff-task.md" ]
-}
-
-@test "skill-pre-hook (bare precompact: wipe)" {
-    : > "$tmp/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"precompact\"}}" \
-        | bash scripts/skill-pre-hook.sh >/dev/null
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-task.md" ]
-}
-
-# The remainder ledger resets on the same terms: both loaders put it back in
-# front of the agent at SessionStart, so re-authoring is from context, and
-# without the wipe a finished list would linger and re-inject done items.
-@test "skill-pre-hook (handoff-todo.md: wiped and named)" {
-    : > "$tmp/.claude/handoff-task.md"
-    printf '## Remaining\n\n- stale item\n' > "$tmp/.claude/handoff-todo.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
-        | bash scripts/skill-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-todo.md" ]
-    echo "$output" | jq -e '.systemMessage | test("handoff-todo.md")' >/dev/null
-}
-
-@test "prompt-pre-hook (handoff-todo.md: wiped)" {
-    printf '## Remaining\n\n- stale item\n' > "$tmp/.claude/handoff-todo.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, prompt:\"/handoff:precompact\"}" \
-        | bash scripts/prompt-pre-hook.sh >/dev/null
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-todo.md" ]
-}
-
-# Both handoff files are git-tracked (write-stage.sh force-adds them). When the
-# wipe deletes a committed one, the deletion must be staged too — else the
-# write-side `git add -f` and the wipe-side rm are asymmetric and the removal
-# never rides the user's next commit. Seed both files committed in a throwaway
-# repo, wipe, assert the index shows a staged deletion (porcelain first column
-# `D`, not the unstaged ` D`).
-seed_tracked_task() {
-    local repo="$1"
-    mkdir -p "$repo/.claude"
-    printf 'seed task body\n' > "$repo/.claude/handoff-task.md"
-    printf '## Remaining\n\n- seed item\n' > "$repo/.claude/handoff-todo.md"
-    git -C "$repo" init -q
-    git -C "$repo" add -f .claude/handoff-task.md .claude/handoff-todo.md
-    git -C "$repo" -c user.email=t@t -c user.name=t commit -qm seed
-}
-
-@test "skill-pre-hook (git staging): stages handoff file deletions on wipe" {
-    git_tmp="$BATS_TEST_TMPDIR/wipegit-ptu"
-    mkdir -p "$git_tmp"
-    seed_tracked_task "$git_tmp"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
-        | CLAUDE_PROJECT_DIR="$1" bash scripts/skill-pre-hook.sh
-    ' _ "$git_tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$git_tmp/.claude/handoff-task.md" ]
-    [ ! -e "$git_tmp/.claude/handoff-todo.md" ]
-    git -C "$git_tmp" status --porcelain .claude/handoff-task.md | grep -q '^D'
-    git -C "$git_tmp" status --porcelain .claude/handoff-todo.md | grep -q '^D'
-}
-
-@test "prompt-pre-hook (git staging): stages handoff file deletions on wipe" {
-    git_tmp="$BATS_TEST_TMPDIR/wipegit-ups"
-    mkdir -p "$git_tmp"
-    seed_tracked_task "$git_tmp"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, prompt:\"/handoff:handoff\"}" \
-        | CLAUDE_PROJECT_DIR="$1" bash scripts/prompt-pre-hook.sh
-    ' _ "$git_tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$git_tmp/.claude/handoff-task.md" ]
-    [ ! -e "$git_tmp/.claude/handoff-todo.md" ]
-    git -C "$git_tmp" status --porcelain .claude/handoff-task.md | grep -q '^D'
-    git -C "$git_tmp" status --porcelain .claude/handoff-todo.md | grep -q '^D'
-}
-
-@test "skill-pre-hook (non-git cwd: wipe still succeeds)" {
-    nogit="$BATS_TEST_TMPDIR/nogit"
-    mkdir -p "$nogit/.claude"
-    : > "$nogit/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
-        | CLAUDE_PROJECT_DIR="$1" bash scripts/skill-pre-hook.sh
-    ' _ "$nogit"
-    [ "$status" -eq 0 ]
-    [ ! -e "$nogit/.claude/handoff-task.md" ]
-}
-
-@test "skill-pre-hook (other skill: no-op)" {
-    : > "$tmp/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"some-other:skill\"}}" \
-        | bash scripts/skill-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ -e "$tmp/.claude/handoff-task.md" ]
-}
-
-@test "skill-pre-hook (missing .claude: create)" {
-    fresh="$BATS_TEST_TMPDIR/fresh"
-    mkdir -p "$fresh"
-    run bash -c '
-        jq -nc "{tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
-        | CLAUDE_PROJECT_DIR="$1" bash scripts/skill-pre-hook.sh
-    ' _ "$fresh"
-    [ "$status" -eq 0 ]
-    [ -d "$fresh/.claude" ]
-}
-
-@test "skill-pre-hook (worktree cwd: wipes worktree .claude, not main)" {
-    wt="$(make_worktree wtW)"
-    : > "$wt/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, tool_name:\"Skill\", tool_input:{skill:\"handoff:handoff\"}}" \
-        | bash scripts/skill-pre-hook.sh
     ' _ "$wt"
     [ "$status" -eq 0 ]
-    [ ! -e "$wt/.claude/handoff-task.md" ]
-    [ -e "$tmp/.claude/handoff-task.md" ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
+        | test("checkpoint")' >/dev/null
 }
 
-# --- prompt-pre-hook ---
-
-@test "prompt-pre-hook (/handoff:handoff: wipe)" {
-    : > "$tmp/.claude/handoff-task.md"
-    : > "$tmp/.claude/handoff.md"
+# handoff-todo.md is a scratch list the agent edits freely all session (FR4)
+# — no PreToolUse guard covers it any more.
+@test "write-guard (handoff-todo.md: allow, no longer guarded)" {
     run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, prompt:\"/handoff:handoff\"}" \
-        | bash scripts/prompt-pre-hook.sh
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/handoff-todo.md" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
     ' _ "$tmp"
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-task.md" ]
-    [ ! -e "$tmp/.claude/handoff.md" ]
-    [ "$(echo "$output" | jq -r '.systemMessage // ""')" = "handoff: wiped prior handoff-task.md, handoff.md" ]
-    [ "$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext // ""')" = "handoff activation hook wiped prior handoff files (handoff-task.md, handoff.md); they are absent." ]
-    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
-}
-
-@test "prompt-pre-hook (/handoff:precompact: wipe)" {
-    : > "$tmp/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, prompt:\"/handoff:precompact\"}" \
-        | bash scripts/prompt-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/handoff-task.md" ]
-    [ "$(echo "$output" | jq -r '.systemMessage // ""')" = "handoff: wiped prior handoff-task.md" ]
-}
-
-# Prefix-only matching would fire on a longer sibling command.
-@test "prompt-pre-hook (/handoff:precompactish: no-op)" {
-    : > "$tmp/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, prompt:\"/handoff:precompactish\"}" \
-        | bash scripts/prompt-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ -e "$tmp/.claude/handoff-task.md" ]
-}
-
-@test "prompt-pre-hook (/handoff:setup: no-op)" {
-    : > "$tmp/.claude/handoff-task.md"
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, prompt:\"/handoff:setup\"}" \
-        | bash scripts/prompt-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ -e "$tmp/.claude/handoff-task.md" ]
-}
-
-@test "prompt-pre-hook (unrelated prompt: no-op)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" \
-            "{cwd:\$cwd, prompt:\"hello world\"}" \
-        | bash scripts/prompt-pre-hook.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ -e "$tmp/.claude/handoff-task.md" ]
+    [ "$output" = "" ]
 }
 
 # --- load-handoff ---

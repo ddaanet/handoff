@@ -5,53 +5,70 @@ to edit the plugin's skill, hook, or script.
 
 ## Layout
 
-High-level flow: skill writes `.claude/handoff-task.md` →
-`PostToolUse(Write|Edit)` stages `handoff-task.md` for commit → next
-session's `SessionStart(startup|clear)` assembles the frame in memory
-(header + inlined task file) and injects it. `README.md`
-has the user-facing version of this. At wrap-up the skill also runs
-`handoff-memory-probe <with-commit|without-commit>`; when a gitlore-memory
-submodule is dirty, the probe emits a directive and the agent summarizes →
-gets approval → writes gitlore's message file, plus the trigger file only
-under `without-commit`, which gitlore's own `PostToolBatch` hook consumes.
-Under `with-commit` the message file alone leaves the memory commit to the
-parent commit's pre-commit hook — one call instead of two, which is the whole
-gain, since both paths end with one parent commit carrying the source change and
-the gitlink bump. See DESIGN.md, "Commit awareness (2026-07-25)".
+High-level flow: the skill decides the task/todo/rename content, then issues
+one `handoff-checkpoint` Bash call carrying the whole wrap-up as a
+schema-validated JSON payload on stdin → `checkpoint.sh` writes
+`.claude/handoff-task.md`/`.claude/handoff-todo.md`/`.claude/autorename` (per
+FR5/FR6 write semantics — a Write or Edit form, empty body ⟹ removed) and
+leaves `.claude/checkpoint-manifest` behind, since staging and the tmux
+rename watcher can't run from the agent's sandboxed Bash (NFR1) →
+`PostToolUse(Bash)` (`bash-post.sh`) consumes the manifest: stages every
+listed path with `git add -f` (deletions included) and spawns the rename
+watcher → next session's `SessionStart(startup|clear)` assembles the frame in
+memory (header + inlined task file) and injects it. `README.md` has the
+user-facing version of this. The checkpoint also emits, on stdout, the same
+directives the two probes it replaced used to print: when a gitlore-memory
+submodule is dirty, a memory directive tells the agent to summarize → get
+approval → write gitlore's message file, plus the trigger file only under
+`without-commit`, which gitlore's own `PostToolBatch` hook consumes. Under
+`with-commit` the message file alone leaves the memory commit to the parent
+commit's pre-commit hook — one call instead of two, which is the whole gain,
+since both paths end with one parent commit carrying the source change and
+the gitlink bump. See DESIGN.md, "Commit awareness (2026-07-25)" and "One
+channel, one writer (2026-07-27)".
 
-Second flow, driven by the precompact skill: probe (memory commit + ledger
-flush) → skill writes `handoff-task.md` and `.claude/autocompact` →
-`PostToolUse` validates the latter → `Stop` arms the compaction →
-`SessionStart(compact)` re-injects the task file and fires the continuation
-prompt. Both typed lines go through detached tmux watchers spawned by hooks at
-turn boundaries, never from inside a live turn.
+Second flow, driven by the precompact skill: same `handoff-checkpoint` call
+(`"skill": "precompact"`, no `rename`) → its directive output composes the
+memory gate with the SDD ledger nudge instead of the todo-file suppression →
+skill writes `.claude/autocompact` → `PostToolUse` validates it → `Stop` arms
+the compaction → `SessionStart(compact)` re-injects the task file and fires
+the continuation prompt. Both typed lines go through detached tmux watchers
+spawned by hooks at turn boundaries, never from inside a live turn.
 
-Both skills write the same `handoff-task.md`. It is the durable side of the
-seam — content that must survive verbatim — while the continuation prompt is
-only a handle to it. Consequently `handoff_activated()` treats either skill as
-an activation signal, and the file persists across the compaction to be
-re-injected again at the next `startup|clear`.
+Both skills route through the same checkpoint call, discriminated by the
+payload's `skill` field, and both can carry `task` — the durable side of the
+seam, content that must survive verbatim — while the continuation prompt is
+only a handle to it. `handoff-task.md` is written **only** by the checkpoint
+(FR3): a direct agent Write/Edit is denied outright by `write-guard.sh`.
 
-Both skills also write `.claude/handoff-todo.md` when an active task list has
-open items: the **remainder** only, never completion state. It is the ledger;
-whatever todo tracker the harness happens to expose is a cache, and nothing in
-the plugin names one (the tool is behind a server-side flag and has already
-changed generations once). Same wipe, same guards, same frame, same
-force-added staging as the task file — it is overflow from it. See DESIGN.md,
-"A place for the todo list (2026-07-22)" and "Overflow deserves the same
-persistence (2026-07-23)".
+`handoff-todo.md` is different: it is a scratch list the agent edits freely
+all session (FR4), and the checkpoint's wrap-up call is only where the final
+remainder gets folded in — not the only writer. It is the ledger; whatever
+todo tracker the harness happens to expose is a cache, and nothing in the
+plugin names one (the tool is behind a server-side flag and has already
+changed generations once). A direct agent edit is staged by `write-stage.sh`
+on the spot; the checkpoint stages its own task/todo writes via the manifest
+instead. Content, not activation, decides when either file is considered
+empty and removed: see DESIGN.md, "A place for the todo list (2026-07-22)",
+"Overflow deserves the same persistence (2026-07-23)", and "One channel, one
+writer (2026-07-27)".
 
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
   contains the markdown templates for `handoff-task.md` and
   `handoff-todo.md` (both are the single source of truth for their shape).
   Its first step is the commit-awareness decision — is a commit going to
-  carry this session's memory — which it passes to the probe and which
-  makes it write memory as if the change has landed.
+  carry this session's memory — which it passes to the checkpoint call and
+  which makes it write memory as if the change has landed. Step 3 decides
+  the title/task/remainder, then issues one `handoff-checkpoint` Bash call
+  with the whole wrap-up as a JSON heredoc; step 4 follows whatever
+  directive the checkpoint prints.
 - `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
   session title from the conversation (no tool calls) and writes it to
-  `.claude/autorename`; the same `write-rename.sh` PostToolUse hook that
-  handoff relies on does the rename. Rename-only — no task file, no
+  `.claude/autorename` directly with the Write tool; the same
+  `write-rename.sh` PostToolUse(Write|Edit) hook that handoff's checkpoint
+  call ultimately triggers (via `bash-post.sh`, since the checkpoint writes
+  the same file from Bash) does the rename. Rename-only — no task file, no
   memory. For `/btw` side conversations and any session worth a name
   while the main thread stays live.
 - `skills/precompact/SKILL.md` — the `/handoff:precompact` skill.
@@ -59,79 +76,42 @@ persistence (2026-07-23)".
   (same first step as handoff, with the extra load-bearing rule that when
   the commit is part of the request it lands *before* `.claude/autocompact`
   is written — arming the compaction ends the turn), capture durable
-  learnings in auto-memory, run `handoff-precompact-probe <mode>` and follow
-  its directives (memory commit and/or ledger flush), then write
-  `handoff-task.md` (and `handoff-todo.md` when a task list has open
-  items — with no tracker the list is context-resident, and context is
-  exactly what compaction paraphrases), per the handoff skill's templates,
-  and `.claude/autocompact` (line 1 the literal `/compact [directive]`,
-  line 2 a single-line continuation prompt that is only a handle to the
-  task file). The hooks do the rest; the skill never runs `/compact`
-  itself. No rename.
+  learnings in auto-memory, decide the task/todo content, then run one
+  `handoff-checkpoint` Bash call (`"skill": "precompact"`, no `rename` —
+  schema-forbidden there) and follow whatever directive it prints (memory
+  commit and/or ledger flush), then write `.claude/autocompact` (line 1 the
+  literal `/compact [directive]`, line 2 a single-line continuation prompt
+  that is only a handle to the task file). The hooks do the rest; the skill
+  never runs `/compact` itself. No rename.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in the plugin-root `DESIGN.md`
-- `hooks/hooks.json` — declares eleven hooks.
+- `hooks/hooks.json` — declares nine hooks.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
   `additionalContext`.
-  `PreToolUse(Skill)` and `UserPromptSubmit`: wipe prior handoff files
-  when `handoff:handoff` or `handoff:precompact` activates. The two
-  together cover both invocation paths — the `Skill` tool (agent-driven)
-  and the slash command (user-driven, which loads the skill body
-  directly without going through the `Skill` tool). Both skills wipe:
-  both author `handoff-task.md` from the conversation, never from the
-  file's prior contents, so each runs against a clean slate.
-  `PreToolUse(Read)`: deny reads of this project's `handoff-task.md` and
-  `handoff-todo.md` until `handoff` or `precompact` has activated this
-  session.
-  `PreToolUse(Write|Edit)`: deny `handoff-task.md` / `handoff-todo.md`
-  writes before activation; deny them when the resolved path is not
-  `$cwd/.claude/<file>` (cross-project guard).
-  `PostToolUse(Write|Edit)`: stage `handoff-task.md` for commit when
-  it is written; rename the session on an `autorename` write; validate
-  an `autocompact` write.
+  `PreToolUse(Write|Edit)`: deny any direct agent Write/Edit to
+  `handoff-task.md` — it is checkpoint-only (FR3) — and deny writes whose
+  resolved path is not `$cwd/.claude/<file>` (cross-project guard).
+  `PostToolUse(Write|Edit)`: stage `handoff-todo.md` for commit when the
+  agent writes it directly; rename the session on an `autorename` write;
+  validate an `autocompact` write.
+  `PostToolUse(Bash)`: consume `.claude/checkpoint-manifest` after
+  `handoff-checkpoint` runs — stage every listed path (deletions included)
+  and spawn the rename watcher for a checkpoint-written `autorename`.
   `Stop`: arm the compaction when `.claude/autocompact` exists.
   `SessionStart(compact)`: fire the continuation prompt after a
   compaction completes.
-- `scripts/skill-pre-hook.sh` — PreToolUse(Skill) entry point:
-  matches `tool_input.skill` being `handoff` or `handoff:handoff` (the
-  Skill tool accepts both as launches of the same skill), then `exec`s
-  `_wipe-emit.sh` with `hookEventName=PreToolUse`. Mechanical reset
-  before the skill body is loaded — keeps the agent out of the
-  cleanup path.
 - `scripts/load-handoff.sh` — SessionStart(startup|clear) entry
   point. Gates on `.claude/handoff-task.md`, assembles the frame in
   memory (a timestamp header plus the inlined task file), and emits it
   via `hookSpecificOutput.additionalContext` (agent-facing) plus a curt
   `systemMessage` with bytes + age (user-facing). Silent no-op when
   the task file is missing or empty.
-- `scripts/prompt-pre-hook.sh` — UserPromptSubmit entry point:
-  matches prompts starting with `/handoff:handoff`, then `exec`s
-  `_wipe-emit.sh` with `hookEventName=UserPromptSubmit`.
-  `UserPromptSubmit` does not support the `matcher` field, so the
-  script does its own prefix check on the `prompt` JSON field.
-- `scripts/_wipe-emit.sh` — shared helper used by both entry scripts.
-  Removes `.claude/handoff-task.md`, `.claude/handoff-todo.md`,
-  `.claude/autorename`, and (as legacy cleanup for ≤0.4.x upgrades)
-  `.claude/handoff.md` if present. The todo file is wiped despite being
-  input carried forward: both loaders re-inject it at SessionStart, so the
-  agent re-authors from context, and without the wipe a finished list would
-  linger and keep re-injecting done items as outstanding.
-  If anything was removed, emits dual-channel JSON: `systemMessage`
-  (user-facing) and `hookSpecificOutput.additionalContext` (agent-facing,
-  so the agent knows the wipe happened and doesn't redundantly verify).
-  When `handoff-task.md` or `handoff-todo.md` (the tracked artifacts) is
-  wiped, stages the deletion with `git add -f` on the now-absent path,
-  mirroring `write-stage.sh`'s write-side staging so the removal rides the
-  next commit (suppressed no-op outside a git repo / when untracked).
-- `scripts/_lib.sh` — sourced helper for the write and read hooks.
-  Defines the `HANDOFF_REL_*` path constants and `handoff_resolve()`,
-  which canonicalizes multiple paths in one `python3` subprocess
-  (GNU/BSD `realpath` are incompatible; python is portable and
-  amortizes startup). Also defines `handoff_activated()` (stateless
-  transcript scraper — checks whether `handoff` **or** `precompact` has
-  activated this session, scanning both invocation signals for each;
-  either opens the guards, since both skills write the task file),
+- `scripts/_lib.sh` — sourced helper for the write hooks and
+  `bash-post.sh`. Defines the `HANDOFF_REL_*` path constants and
+  `handoff_resolve()`, which canonicalizes multiple paths in one `python3`
+  subprocess (GNU/BSD `realpath` are incompatible; python is portable and
+  amortizes startup). Also defines
   `handoff_frame()` (assembles the injectable frame — timestamp header
   plus the inlined task file and todo remainder, task first; either alone
   is enough, rc 1 only when both are missing or empty — shared by
@@ -157,18 +137,18 @@ persistence (2026-07-23)".
   cover two files, and the jq parse is on the Write/Edit hot path, so N
   files must stay one parse.
   `handoff_spawn_detached()` is the shared setsid-else-nohup detach used
-  by all three watcher-spawning hooks (setsid is Linux-only; nohup is the
-  macOS fallback).
-- `scripts/read-guard.sh` — PreToolUse(Read) guard. Denies reads of
-  this project's `handoff-task.md` and `handoff-todo.md` until `handoff`
-  or `precompact` has activated this session.
-- `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies
-  `handoff-task.md` / `handoff-todo.md` writes whose resolved path is not
-  `$cwd/.claude/<file>` (catches cross-project misfires). Denies them
-  before `handoff` or `precompact` has activated this session. The todo
-  file is gated on the same terms as the task file: the defect these
-  guards exist for was the agent co-opting a handoff file as a scratch
-  todo list before any skill ran.
+  by all watcher-spawning hooks (setsid is Linux-only; nohup is the
+  macOS fallback) — `rename-when-idle.sh` (from both `write-rename.sh` and
+  `bash-post.sh`) and both compaction watchers.
+  There is no more transcript-scraping activation predicate: with
+  `handoff-task.md` written only by the checkpoint (FR3), there is no
+  "before/after activation" distinction left to detect. See DESIGN.md,
+  "One channel, one writer (2026-07-27)".
+- `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies any
+  direct agent Write/Edit to `handoff-task.md` unconditionally — it is
+  checkpoint-only (FR3) — and denies writes whose resolved path is not
+  `$cwd/.claude/<file>` (cross-project misfires). No longer covers
+  `handoff-todo.md`, which the agent is meant to edit directly (FR4).
 - `scripts/rename-when-idle.sh` — detached watcher. Polls for the Claude TUI
   spinner to be absent (idle), checks the user isn't composing, then fires
   `tmux send-keys -l` to type `/rename <title>` + Enter. Verifies the rename
@@ -198,8 +178,9 @@ persistence (2026-07-23)".
   `load-compact.sh`) rather than the spinner — line 2 fires into the
   post-compaction settle where a submit is *queued* (accepted, transcript-logged
   at once) but shows no spinner until the queued turn starts seconds later, so
-  `is_busy` would false-fail it. The count keys on the same structural flags as
-  `handoff_activated` and is baselined before the first Enter, so neither a
+  `is_busy` would false-fail it. The count keys on structural flags (isMeta,
+  isCompactSummary, isSidechain) rather than content, and is baselined before
+  the first Enter, so neither a
   quoted echo in the summary/frame nor a stale pre-compaction copy reads as a
   submit. Each watcher keeps only its distinct middle — rename-verify vs
   type-verify-submit vs prose-settle-confirm. And `watcher_fail`, which records a
@@ -213,12 +194,18 @@ persistence (2026-07-23)".
   Bash tool means the tmux socket is accessible with no sandbox bypass.
   Exports `HANDOFF_FAIL_FILE` (`.claude/autorename.failed`) before spawning,
   the same arrangement `stop-compact.sh` uses: the hook owns the path, the
-  watcher stays ignorant of the layout.
-- `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point:
-  matches writes/edits that resolve to `$cwd/.claude/handoff-task.md` or
-  `$cwd/.claude/handoff-todo.md`, then stages the matched file with
-  `git add -f`. One `handoff_match_target` call covers both, so the two
-  tracked halves of the frame cost one jq parse.
+  watcher stays ignorant of the layout. Fires only for the `/handoff:autoname`
+  path, which still writes `autorename` with the Write tool; `bash-post.sh`
+  covers the same file when `handoff-checkpoint` writes it from Bash instead,
+  sharing the watcher-spawn body but not this hook.
+- `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point: matches
+  writes/edits that resolve to `$cwd/.claude/handoff-todo.md` — the one path
+  the checkpoint never sees, since the agent edits that scratch list directly
+  all session (FR4). Stages the file with `git add -f`, or — via
+  `checkpoint_is_empty_body` from `_checkpoint-lib.sh` — removes it and stages
+  the removal when the edit left it with no substantive content (a `##
+  Remaining` with no items). `handoff-task.md` no longer takes this path; it
+  is checkpoint-only (FR3) and staged via the manifest instead.
 - `scripts/write-compact.sh` — PostToolUse(Write|Edit) entry point for the
   compaction driver. Matches writes resolving to `$cwd/.claude/autocompact`
   and **validates only**: exactly two lines, line 1 begins `/compact`. Never
@@ -278,30 +265,39 @@ persistence (2026-07-23)".
   linked-worktree root, else returns `project`. Backs `_lib.sh`'s
   `handoff_root`; lets each worktree own its `.claude/`. Unit-tested in
   `tests/test_worktree_root.py` (pytest).
-- `bin/handoff-memory-probe` — PATH-resident shim (Claude Code adds each
-  plugin's `bin/` to PATH) that execs `scripts/memory-probe.sh`. The skill
-  body invokes it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
-  the agent's Bash, so the shim is the entry point.
-- `scripts/memory-probe.sh` — read-only gitlore-memory detector run by the
-  handoff skill at wrap-up. Takes the required commit-awareness mode
-  (`probe_require_mode`, validated before anything else — a bad mode is
-  exit 2 even where the probe would have stayed silent). Owns the
-  dirty-or-not branch and prints the
-  agent's next action or stays silent. Composes the memory directive plus
-  the todo-file suppression from `_probe-lib.sh`. No SDD *nudge* — the
-  bring-the-ledger-current prompt is a precompact concern — but the
-  suppression does apply here, since a workflow ledger outlives a `/clear`
-  exactly as it outlives a compaction.
-- `scripts/_probe-lib.sh` — sourced helper holding the probe directives, so
-  each prompt is authored once and composed twice.
-  `probe_require_mode` validates each probe's sole positional argument, the
-  commit-awareness mode, and sets `PROBE_MODE` — a global rather than stdout,
-  because `exit 2` inside a command substitution ends only the subshell and
-  the caller would sail on with an empty mode (same shape as
-  `handoff_match_target`'s `MATCHED_NAME`). No default: the two values are
-  peers, since a default is the answer an agent gives when it has not thought
-  about the question.
-  `probe_memory_directive` gates on the `gitlore-memory` submodule
+- `bin/handoff-checkpoint` — PATH-resident shim (Claude Code adds each
+  plugin's `bin/` to PATH) that execs `scripts/checkpoint.sh`. Both skill
+  bodies invoke it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
+  the agent's Bash, so the shim is the entry point. Replaces
+  `bin/handoff-memory-probe` and `bin/handoff-precompact-probe`.
+- `scripts/checkpoint.sh` — the one write path for the handoff/precompact
+  wrap-up (FR1). Reads the JSON payload on stdin, validates it against the
+  schema (FR2 — a violation exits 2 naming the offending field on stderr),
+  applies the `task`/`todo` Write-or-Edit forms (FR5; `task` is Write-form-
+  or-null only), removes a file whose resulting body is empty via
+  `checkpoint_is_empty_body` (FR6), writes `.claude/checkpoint-manifest` —
+  always, even with zero lines, so `bash-post.sh`'s presence-gate still
+  fires for a rename-only call — and `.claude/autorename` when `rename` is
+  present (FR8), then prints the same directive output the two probes it
+  replaced used to (FR9, via `_checkpoint-lib.sh`). NFR1: it does no `git`
+  or `tmux` work itself — see `bash-post.sh`. The Edit form's exact string
+  replacement (first occurrence, error if `old_string` is absent or
+  ambiguous) is applied by a `python3` heredoc, not shell, so a multi-line
+  `old_string`/`new_string` needs no quoting.
+- `scripts/_checkpoint-lib.sh` — sourced helper for `checkpoint.sh` and, for
+  `checkpoint_is_empty_body`, `write-stage.sh`. Renamed from `_probe-lib.sh`;
+  `probe_*` functions became `checkpoint_*`, unchanged in content and
+  composition order (FR9) — only the commit-awareness mode's source moved
+  from a positional CLI argument (`probe_require_mode`, now gone; the
+  literal-value check is inline JSON validation in `checkpoint.sh`) to a
+  payload field.
+  `checkpoint_is_empty_body` is FR6's generic emptiness test: strips heading
+  (`#`) and blank lines, and what remains decides — a `## Remaining` with no
+  items or a task file with headings and no content both count as empty.
+  Shared by `checkpoint.sh` (after a Write/Edit it just applied) and
+  `write-stage.sh` (after the agent's own direct edit to `handoff-todo.md`)
+  so the two writers cannot drift on what counts as empty.
+  `checkpoint_memory_directive` gates on the `gitlore-memory` submodule
   registration (FR12) and a dirty worktree, then instructs the agent to
   summarize → get approval → write `.claude/gitlore-memory-message`, and
   under `without-commit` also `.claude/gitlore-commit-memory`. That trigger
@@ -314,17 +310,17 @@ persistence (2026-07-23)".
   would introduce what it forbids. It states no mechanism either (no
   pre-commit hook, no mtime freshness rule) and does not order the write
   against the memory edits — both skills finish memory before running the
-  probe, and "once approved" already places the write after them. Neither
-  skill body states it either: approval is a feedback loop that routinely
-  edits memory, so a rule pinning memory as final forbids what the gate is
-  for. What is left is one act plus one clause saying this
+  checkpoint, and "once approved" already places the write after them.
+  Neither skill body states it either: approval is a feedback loop that
+  routinely edits memory, so a rule pinning memory as final forbids what
+  the gate is for. What is left is one act plus one clause saying this
   turn's commit carries the memory, so its absence is not read as a failure.
   Mechanism a reader cannot act on gets verified and narrated instead.
   That file-trigger IPC replaced the old
   `git config gitlore.commitCommand` + `commit-memory.sh -F -` Bash path:
   all file writes, so it sidesteps the sandbox and the auto-mode classifier.
   Couples only to the two IPC filenames — never gitlore internals.
-  `probe_ledger_path` is the one-row registry of known workflow-owned
+  `checkpoint_ledger_path` is the one-row registry of known workflow-owned
   progress ledgers (currently superpowers SDD), so the nudge and the
   suppression can never disagree about what exists — and both interpolate
   what it prints, because with a glob there is no path to hardcode. It
@@ -332,21 +328,24 @@ persistence (2026-07-23)".
   `.superpowers/sdd/*/progress.md` counts only with SDD's identity first
   line, the pre-6.2.0 flat path never counts, and among several the
   most-recently-modified wins. See DESIGN.md, "An orphaned ledger hijacks
-  the handoff (2026-07-26)". `probe_sdd_directive`
+  the handoff (2026-07-26)". `checkpoint_sdd_directive`
   holds the structured-workflow ledger nudge (precompact only) and ends by
-  standing `handoff-todo.md` down; `probe_todo_suppression` is that
-  stand-down alone, for the handoff path.
-- `bin/handoff-precompact-probe` — PATH-resident shim that execs
-  `scripts/precompact-probe.sh`. Invoked by the precompact skill body by
-  bare name (same pattern as `handoff-memory-probe`).
-- `scripts/precompact-probe.sh` — read-only detector run by the precompact
-  skill before `/compact`. Takes the same required commit-awareness mode as
-  `memory-probe.sh`. Owns the plugin-specific vocabulary so the skill
-  body stays vocab-free: composes the memory directive **then** the SDD
-  ledger nudge from `_probe-lib.sh`, or stays silent when neither applies.
-  Composition order is a property of the probe, not the mode.
-  Memory goes first — it is the flow's one interactive gate (FR11 approval)
-  and must commit while context is still full, before the summariser runs.
+  standing `handoff-todo.md` down; `checkpoint_todo_suppression` is that
+  stand-down alone, for the handoff path — composed in
+  `checkpoint.sh`'s `skill: "handoff"` vs `skill: "precompact"` branch,
+  memory first, same order the two deleted probes used.
+- `scripts/bash-post.sh` — `PostToolUse(Bash)` entry point. Fires on every
+  Bash call in every session with the plugin installed (NFR2), so the
+  negative case (manifest absent, which is nearly every call) stays cheap:
+  the raw session `cwd` from the hook payload is stat'd directly, and the
+  worktree-aware root resolution (a `python3` spawn via `handoff_root`) is
+  deferred to the rare positive path. When the manifest is present, stages
+  every listed path with `git add -f` (deletions included), consumes
+  `.claude/autorename` if present and spawns the rename watcher through the
+  same helper `write-rename.sh` uses, then emits a dual-channel summary and
+  deletes the manifest. This is where NFR1's git/tmux work happens instead
+  of in the agent's sandboxed Bash — see DESIGN.md, "One channel, one
+  writer (2026-07-27)".
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.4.0`). Provides:
@@ -378,17 +377,19 @@ persistence (2026-07-23)".
   judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `DESIGN.md`.
-- Output paths: `.claude/handoff-task.md` and `.claude/handoff-todo.md`, both
-  agent-written and both git-tracked via `git add -f` (listed in `.gitignore`
-  so only the hook adds them). Changing either is a breaking change and
-  requires a version bump.
+- Output paths: `.claude/handoff-task.md` (checkpoint-only, FR3) and
+  `.claude/handoff-todo.md` (agent-editable scratch list, FR4), both
+  git-tracked via `git add -f` (listed in `.gitignore` so only a hook adds
+  them — the manifest for the task file, `write-stage.sh` for the todo
+  file). Changing either's shape is a breaking change and requires a
+  version bump.
 - Both markdown templates live in `SKILL.md` (single source of truth).
   Neither loader re-states them — each file carries its own `##` headings
   and is inlined verbatim under the one `#` header the frame prepends.
 - `handoff-todo.md` holds **open items only**. A finished item is dropped,
   never checked off: what landed is reconstructable from `git log`, and a
   done item still listed reads as outstanding and gets redone.
-- Sourced helpers (`_lib.sh`, `_wipe-emit.sh`) need
+- Sourced helpers (`_lib.sh`, `_checkpoint-lib.sh`) need
   `# shellcheck source-path=SCRIPTDIR source=<file>.sh` above the
   `source` line so `shellcheck -x` follows them. Add
   `# shellcheck disable=SC2034` to vars consumed only by sourcing
@@ -411,29 +412,34 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   `precommitCommand`, so it runs on every memory commit (needs the
   direnv-activated venv).
 - `just hook-test` — `bats tests/hook-test.bats tests/rename-test.bats
-  tests/memory-probe.bats tests/precompact-probe.bats`: end-to-end test of
-  the handoff-specific hook
+  tests/checkpoint.bats`: end-to-end test of the handoff-specific hook
   scripts (and the rename scripts) against synthetic tool-event payloads. `bats run` captures
   exit codes/output without the `set +e` dance. `version-guard.sh` is
   tested in the toolkit, not here.
   `hook-test.bats` stubs `tmux` on `PATH` in `setup()` and shortens the
-  `HANDOFF_WATCHER_*` tunables. Three of the hooks it exercises spawn a
-  detached watcher, and `TMUX=fake` does not stop tmux falling back to the
-  default socket — unstubbed, those watchers drive a real pane belonging to
-  whoever is running the suite.
-  `tests/memory-probe.bats` covers `scripts/memory-probe.sh` and the
-  `bin/` shim against a synthetic gitlore repo; `tests/precompact-probe.bats`
-  covers `scripts/precompact-probe.sh` and its shim, including the composed
-  memory-then-SDD ordering. Both cover the commit-awareness contract in
-  full: the mode's four combinations with memory state, the argument
-  validation (missing / unknown / two), and each shim forwarding the mode.
-  The load-bearing assertion is the negative — `with-commit` output never
-  mentions a trigger — and it is mutation-checked (disable the branch, watch
-  it go red), not observed passing.
-  Both build their fixtures from
-  `tests/probe-helpers.bash` (one shared synthetic-repo shape, so the two
-  suites cannot drift). Both are listed in the `precommit` and `hook-test`
-  recipes.
+  `HANDOFF_WATCHER_*` tunables. Hooks it exercises that spawn a detached
+  watcher rely on this, since `TMUX=fake` does not stop tmux falling back to
+  the default socket — unstubbed, those watchers drive a real pane belonging
+  to whoever is running the suite.
+  `tests/checkpoint.bats` covers `scripts/checkpoint.sh`, `bin/handoff-checkpoint`,
+  and `scripts/bash-post.sh` (merged from the deleted
+  `tests/memory-probe.bats` + `tests/precompact-probe.bats`, over the shared
+  `tests/probe-helpers.bash` fixtures). Carries forward the commit-awareness
+  contract in full — the mode's four combinations with memory state, and the
+  composed memory-then-SDD ordering under `skill: "precompact"` vs its
+  absence under `skill: "handoff"` — plus the ledger-liveness matrix (flat
+  path, unidentified workspace, several-workspaces mtime tiebreak). The
+  load-bearing assertion is the negative — `with-commit` output never
+  mentions the trigger file — and it is mutation-checked (disable the
+  branch, watch it go red), not observed passing. New: schema validation
+  (each required field missing, each literal with an unknown value, `rename`
+  under `precompact`, `content`+`old_string` together, a partial Edit,
+  `file_path` outside `$root/.claude/`, malformed JSON — each asserting a
+  non-zero exit and that the message names the field), Edit application
+  (`old_string` absent, ambiguous, successful), empty-body removal through
+  both writers (`checkpoint.sh` and `write-stage.sh`) including that the
+  deletion reaches the manifest, and `bash-post.sh` (manifest absent,
+  manifest present, `autorename` present).
   The compaction driver is covered in the two existing suites rather than a
   new file: `tests/hook-test.bats` for `write-compact.sh` / `stop-compact.sh`
   / `load-compact.sh` / `report-watcher-failure.sh`, `tests/rename-test.bats`
@@ -446,11 +452,6 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
 Test files live under `tests/`. The justfile recipes are one-liners
 that delegate. Add new scenarios to the existing `.bats`/`test_*.py`
 files rather than adding new just recipes.
-
-The JSONL fixtures the bats suite feeds to `handoff_activated`
-(`tests/fixtures/*.jsonl`) must mirror the real transcript format — the
-format is undocumented and evolves, so verify by eyeballing a recent
-transcript; fictional shapes mislead.
 
 ## Frame assembly
 
@@ -469,7 +470,8 @@ list (2026-07-17)".
 
 - Summarising the conversation. Extraction is deterministic; summary
   is already handled by `/compact`, Session Memory, and training.
-- Validating the markdown schema at write time. Markdown is soft; we
-  trust the template in SKILL.md.
+- Validating markdown structure at write time. `handoff-checkpoint`
+  validates the JSON envelope (FR2), not the markdown content inside it;
+  the templates in `SKILL.md` are trusted, not schema-checked.
 - Cross-session thread management. This plugin handles one `/clear`
   transition; auto-memory handles durable state.

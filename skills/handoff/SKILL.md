@@ -6,8 +6,9 @@ description: Snapshot the in-progress task and still-open decisions before a `/c
 # handoff — Pre-Clear Task Snapshot
 
 Preserve the irreducible residual across `/clear`: what was in
-progress and what's still undecided. Hooks handle wipe-before-write
-and stage-after-write — this skill's job is the task file.
+progress and what's still undecided. `handoff-checkpoint` handles the
+writes and staging — this skill's job is deciding what goes in the task
+file.
 
 ## Protocol
 
@@ -37,9 +38,9 @@ next session start.
 If durable learnings surfaced this session, capture them in
 auto-memory now. Skip if nothing durable surfaced — do not force.
 
-### Step 3: Decide, then write in parallel
+### Step 3: Decide, then checkpoint
 
-First, decide both of the following without making any tool calls:
+First, decide all of the following without making any tool calls:
 
 - **Session title** — a concise, specific title (≤ ~50 characters, Title
   Case, no surrounding quotes, no trailing punctuation) for the work done
@@ -52,22 +53,34 @@ First, decide both of the following without making any tool calls:
   paraphrase that list the way a compaction would — it discards it, so disk
   is the only place it survives.
 
-Then, in the **same turn**, issue the writes and run the memory probe:
-- Write `./.claude/autorename` — sole line is the session title (always)
-- Write `./.claude/handoff-task.md` — only if there's an active task
-- Write `./.claude/handoff-todo.md` — only if open items remain
-- Run `handoff-memory-probe <answer>` (Bash) — deterministic memory check,
-  where `<answer>` is Step 1's `with-commit` or `without-commit`
+Then run `handoff-checkpoint` (Bash), piping the whole wrap-up as JSON on
+stdin via a heredoc:
 
-Omit either file when it has nothing to say — the activation hook already
-wiped both, and an absent file is the honest "nothing pending".
+```
+handoff-checkpoint <<'JSON'
+{
+  "skill": "handoff",
+  "commit": "<with-commit|without-commit>",
+  "rename": "<session title>",
+  "task": {"file_path": "<abs path to>/.claude/handoff-task.md", "content": "<task content, or omit the whole field with null>"},
+  "todo": {"file_path": "<abs path to>/.claude/handoff-todo.md", "content": "<todo content, or omit the whole field with null>"}
+}
+JSON
+```
 
-### Step 4: Follow the probe
+`task` and `todo` are each the file's content, or `null` when there is
+nothing to say for that file — the checkpoint decides absence from content,
+not from a wipe. `todo` may also carry an incremental edit
+(`old_string`/`new_string`) instead of full `content`, for striking a
+finished item without regenerating the whole list.
 
-`handoff-memory-probe` prints nothing when there is nothing to do —
+### Step 4: Follow the directive
+
+`handoff-checkpoint` prints nothing when there is nothing further to do —
 finish normally. If it prints a directive, follow it exactly; the
-directive carries its own instructions. The probe owns the decision —
-do not re-derive or verify it.
+directive carries its own instructions. The checkpoint owns the decision —
+do not re-derive or verify it. A non-zero exit names the offending field on
+stderr — fix the payload and retry.
 
 **Task file template:**
 

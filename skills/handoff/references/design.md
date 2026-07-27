@@ -101,17 +101,15 @@ committed but the agent-authored task file.
 
 ## File guards
 
-`PreToolUse(Write|Edit)` and `PreToolUse(Read)` hooks keep
-`handoff-task.md` and `handoff-todo.md` inert outside the skill's control
-path. Both are skill-owned: reads and writes are denied until
-`handoff:handoff` or `handoff:precompact` has activated this session
-(both author them) — detected statelessly by scraping the
-transcript for the same activation signals the wipe hooks key on (a
-`Skill` tool_use or a slash command). The write-guard additionally
-denies writes whose `realpath` is not `$cwd/.claude/<file>`, catching
-multi-checkout confusion and absolute-path mistakes. The todo file is
-gated on the same terms because the defect that motivated these guards
-was the agent co-opting a handoff file as a scratch todo list before any
-skill had run. The hooks
-themselves do plain filesystem I/O rather than agent tool calls, so
-they are never intercepted by these guards.
+`handoff-task.md` is written only by `handoff-checkpoint` (FR3 of "One
+channel, one writer", 2026-07-27): a `PreToolUse(Write|Edit)` guard denies
+any direct agent Write/Edit to it, unconditionally. `handoff-todo.md` is a
+scratch list by design (FR4) — the agent edits it freely all session, and a
+`PostToolUse(Write|Edit)` hook stages each direct edit with `git add -f`,
+removing the file (and staging the removal) when an edit leaves it with no
+substantive content. Neither guard scrapes the transcript for an activation
+signal any more: the checkpoint is the only legitimate writer of the task
+file, full stop, so there is no "before/after activation" distinction left to
+detect. The write-guard still denies a `handoff-task.md` write whose
+`realpath` is not `$cwd/.claude/<file>`, catching multi-checkout confusion
+and absolute-path mistakes.

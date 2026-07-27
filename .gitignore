@@ -11,6 +11,10 @@
 .claude/autorename*
 .claude/autocompact*
 
+# handoff-checkpoint's IPC to bash-post.sh: exists for one Bash-call turn,
+# consumed and deleted by the PostToolUse(Bash) hook.
+.claude/checkpoint-manifest
+
 # Local-only Claude Code settings
 .claude/settings.local.json
 

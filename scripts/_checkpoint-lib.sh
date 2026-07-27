@@ -1,42 +1,31 @@
 #!/usr/bin/env bash
-# Shared directive text for the two read-only probes:
-#   memory-probe.sh     (handoff-memory-probe)     -> memory directive alone
-#   precompact-probe.sh (handoff-precompact-probe) -> memory directive + SDD
+# Shared helpers for scripts/checkpoint.sh (handoff-checkpoint) and, for
+# checkpoint_is_empty_body, scripts/write-stage.sh. Renamed from
+# _probe-lib.sh: the directive functions below are unchanged in content and
+# composition order (FR9) from the two read-only probes they replaced; only
+# the probe_* -> checkpoint_* names and the mode source moved. See DESIGN.md,
+# "One channel, one writer".
 #
-# One authored prompt, two composition points. Both directives are written to
-# stdout for the agent to act on, so the wording is imperative — this is a
-# DIRECTIVE channel, not a DENY channel.
-#
-# Sourced, never executed. Each function takes the git worktree root and either
-# prints its directive or stays silent; both always return 0, so callers need
-# no conditional.
+# Sourced, never executed. Each directive function takes the git worktree
+# root and either prints its directive or stays silent; both always return
+# 0, so callers need no conditional.
 
-# Validate a probe's sole positional argument: the commit-awareness mode. Sets
-# the PROBE_MODE global on success; prints a usage line and exits 2 otherwise.
-#
-# A global rather than stdout because `exit 2` inside a command substitution
-# ends only the subshell — the caller would sail on with an empty mode. Same
-# shape as handoff_match_target's MATCHED_NAME in _lib.sh.
-#
-# The two values are peers: no default, no fallback. A default would be the
-# answer the agent gives when it has not thought about the question, and the
-# whole point of the argument is that it has (FR4).
-# shellcheck disable=SC2034  # PROBE_MODE is consumed by the sourcing script
-probe_require_mode() {
-    local name="$1"
-    shift
-
-    if [ "$#" -eq 1 ]; then
-        case "$1" in
-            with-commit | without-commit)
-                PROBE_MODE="$1"
-                return 0
-                ;;
+# True (rc 0) when $1's content has no substance once heading and blank lines
+# are stripped: a `## Remaining` with no items, a task file with headings and
+# no content. This is the generic form of FR6 ("file present => content
+# pending"), and the one helper that decides it — shared by checkpoint.sh
+# (after a Write/Edit it just applied) and write-stage.sh (after the agent's
+# own direct Write/Edit to handoff-todo.md) so the two writers cannot drift on
+# what counts as empty.
+checkpoint_is_empty_body() {
+    local content="$1" line
+    while IFS= read -r line; do
+        case "$line" in
+            '#'* | '') ;;
+            *) return 1 ;;
         esac
-    fi
-
-    printf 'usage: %s <with-commit|without-commit>\n' "$name" >&2
-    exit 2
+    done <<<"$content"
+    return 0
 }
 
 # Emit the gitlore memory-commit directive when the gitlore-memory submodule is
@@ -68,7 +57,7 @@ probe_require_mode() {
 # and approval is the end of a feedback loop — the user may well ask for a
 # memory change there, which is what review is for. What survives is the one act
 # the agent performs.
-probe_memory_directive() {
+checkpoint_memory_directive() {
     local root="$1" mode="$2" mempath mem status msgfile trigger approve_files
 
     # FR12 activation gate: the gitlore-memory submodule registration.
@@ -160,7 +149,7 @@ probe_memory_directive() {
 #
 # Read-only by contract: a stale workspace is another workflow's file, never
 # ours to delete or rewrite however abandoned it looks.
-probe_ledger_path() {
+checkpoint_ledger_path() {
     local root="$1" f best='' first
 
     for f in "$root"/.superpowers/sdd/*/progress.md; do
@@ -188,10 +177,10 @@ probe_ledger_path() {
 # The compaction summary paraphrases; a durable ledger does not, and workflows
 # like superpowers SDD trust their ledger over post-compaction recollection.
 # Advisory — a nudge, not a gate.
-probe_sdd_directive() {
+checkpoint_sdd_directive() {
     local root="$1" ledger
 
-    ledger=$(probe_ledger_path "$root") || return 0
+    ledger=$(checkpoint_ledger_path "$root") || return 0
 
     printf '%s\n' \
 "You are running superpowers SDD. Before compacting, bring the ledger current at $ledger — after compaction the SDD skill trusts the ledger over recollection. Ensure:" \
@@ -206,19 +195,20 @@ probe_sdd_directive() {
 
 # Emit the todo-file suppression when a workflow-owned ledger already tracks the
 # session's task list. Silent otherwise — the common case, where handoff-todo.md
-# is the only ledger and the skill writes it normally.
+# is the only ledger and the checkpoint writes it normally.
 #
-# The handoff path's counterpart to the stand-down that probe_sdd_directive
+# The handoff path's counterpart to the stand-down that checkpoint_sdd_directive
 # folds into its nudge: the ledger outlives a /clear exactly as it outlives a
 # compaction. The wording differs on one point, because the orderings differ.
-# precompact runs its probe BEFORE the writes, so "do not write it" lands in
-# time. handoff runs the probe in the SAME turn as the writes, so this always
-# arrives after the file exists — a bare prohibition is a no-op there, and the
-# directive has to name the cleanup instead.
-probe_todo_suppression() {
+# precompact's checkpoint call runs BEFORE the writes it drives, so "do not
+# write it" lands in time. handoff's checkpoint call carries the writes in the
+# SAME payload, so this always arrives after the file may already exist — a
+# bare prohibition is a no-op there, and the directive has to name the cleanup
+# instead.
+checkpoint_todo_suppression() {
     local root="$1" ledger
 
-    ledger=$(probe_ledger_path "$root") || return 0
+    ledger=$(checkpoint_ledger_path "$root") || return 0
 
     printf '%s\n' \
 "This session's task list lives in a workflow-owned progress ledger at $ledger, which survives the /clear. That file is the ledger: .claude/handoff-todo.md must not exist alongside it — delete it if you have already written it, and do not write it. Bring the ledger current instead if it has drifted."

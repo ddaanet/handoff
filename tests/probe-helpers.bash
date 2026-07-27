@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Shared synthetic-repo builders for the probe suites
-# (tests/memory-probe.bats, tests/precompact-probe.bats).
+# Shared synthetic-repo builders for tests/checkpoint.bats (which merges the
+# former tests/memory-probe.bats + tests/precompact-probe.bats).
 #
-# Both probes compose the same memory directive out of scripts/_probe-lib.sh,
-# so both need an identically-shaped gitlore repo. Keeping one builder here
-# stops the two fixtures from drifting apart as the directive evolves.
+# checkpoint.sh composes the same memory directive out of
+# scripts/_checkpoint-lib.sh regardless of which skill invoked it, so one
+# builder here stops fixtures from drifting apart as the directive evolves.
 
 # A gitlore-managed repo: a .gitmodules registration for the gitlore-memory
 # submodule (the FR12 activation gate) plus a nested memory git repo holding
-# one committed file. Clean by default — dirty it by writing into memory/.
-# Echoes the repo path.
+# one committed file, and an empty .claude/ (checkpoint.sh's write target).
+# Clean by default — dirty it by writing into memory/. Echoes the repo path.
 make_gitlore_repo() {
     local repo="${1:-$BATS_TEST_TMPDIR/glrepo}"
-    rm -rf "$repo"; mkdir -p "$repo/memory"
+    rm -rf "$repo"; mkdir -p "$repo/memory" "$repo/.claude"
     git -C "$repo" init -q
     cat > "$repo/.gitmodules" <<'EOF'
 [submodule "gitlore-memory"]

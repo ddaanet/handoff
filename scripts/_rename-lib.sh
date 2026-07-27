@@ -98,9 +98,10 @@ submit_consumed_or_fail() {
 # — the isMeta frame, the isCompactSummary, a sidechain — so only a real
 # submitted prompt counts. The task text is typically all over the transcript
 # (compact summary, injected frame, attachments), so a raw substring grep would
-# false-match; keying on the entry's structural flags is the same discipline as
-# handoff_activated. Prints an integer; 0 (never an error) on an empty/unset or
-# unreadable path. The format is undocumented — flags, not content heuristics.
+# false-match; keying on the entry's structural flags (isMeta, isCompactSummary,
+# isSidechain) rather than content is the discipline this whole file follows.
+# Prints an integer; 0 (never an error) on an empty/unset or unreadable path.
+# The format is undocumented — flags, not content heuristics.
 transcript_prompt_count() {
     local transcript="$1" marker="$2"
     [[ -n "$transcript" && -f "$transcript" ]] || { printf '0\n'; return 0; }

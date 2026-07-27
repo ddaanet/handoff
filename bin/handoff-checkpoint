@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# PATH-resident entry point for the checkpoint channel. Claude Code adds
+# every installed plugin's bin/ to PATH, so the skill body can invoke this by
+# bare name. Self-locates and execs the real logic in scripts/. Replaces
+# bin/handoff-memory-probe and bin/handoff-precompact-probe.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+exec bash "$here/../scripts/checkpoint.sh" "$@"

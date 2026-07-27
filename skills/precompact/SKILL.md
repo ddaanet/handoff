@@ -25,7 +25,7 @@ user whether to proceed.
    what commits it or a later one is — and **`without-commit`** — no such
    commit is coming. There is no default, and the answer is about where the
    memory belongs rather than which command the user typed. It feeds the
-   probe call in step 3, and it changes what steps 4 and 5 do.
+   checkpoint call in step 3, and it changes what step 4 does.
 
    Under `with-commit`, memory bodies state present-tense truth — the
    change described as made rather than proposed. Memory phrased as pending
@@ -35,30 +35,39 @@ user whether to proceed.
 2. If durable learnings surfaced this session, capture them in auto-memory
    now. Skip if nothing durable surfaced — do not force.
 
-3. Run `handoff-precompact-probe <answer>` (Bash), where `<answer>` is
-   step 1's `with-commit` or `without-commit`, and follow any directive it
-   prints **exactly**. Nothing printed → nothing to do. The probe owns the
-   decision; do not re-derive or verify it.
-
-4. Write `./.claude/handoff-task.md` — a `## Current task` section and,
-   when any remain, `## Open decisions`; no `#` heading. This is where the
-   task state goes — see the seam below.
-
-   When a task list with open items is in play, write the remainder to
-   `./.claude/handoff-todo.md` as well — one `## Remaining` section, open
-   items only, a finished item dropped rather than checked off. That list
-   lives in the context the compaction is about to paraphrase. Putting it
-   on disk now is what spares your post-compaction self from inferring
-   which items are still open — an inference that fails silently by
-   redoing finished work.
+3. Decide the task snapshot and, when a task list with open items is in
+   play, the todo remainder — one `## Current task` section and, when any
+   remain, `## Open decisions`, for the task file; one `## Remaining`
+   section, open items only, for the todo file. That list lives in the
+   context the compaction is about to paraphrase; deciding it now is what
+   spares your post-compaction self from inferring which items are still
+   open — an inference that fails silently by redoing finished work.
 
    The `handoff` skill holds the full templates and the rules behind them,
    in the `SKILL.md` beside this one — `../handoff/SKILL.md`, relative to
-   this skill's own directory. Read that file when the rules matter. Never
-   invoke the skill to reach it: activating `handoff` wipes both files,
-   the task file just written included.
+   this skill's own directory. Read that file when the rules matter.
 
-5. Write `./.claude/autocompact` — **only once step 3 is fully complete**,
+   Then run `handoff-checkpoint` (Bash) with `"skill": "precompact"` (no
+   `rename` field — precompact never renames), the `commit` answer from
+   step 1, and `task`/`todo` each either the drafted content or `null`:
+
+   ```
+   handoff-checkpoint <<'JSON'
+   {
+     "skill": "precompact",
+     "commit": "<with-commit|without-commit>",
+     "task": {"file_path": "<abs path to>/.claude/handoff-task.md", "content": "<task content, or null>"},
+     "todo": {"file_path": "<abs path to>/.claude/handoff-todo.md", "content": "<todo content, or null>"}
+   }
+   JSON
+   ```
+
+   Follow any directive it prints **exactly**. Nothing printed → nothing
+   further to do. The checkpoint owns the decision; do not re-derive or
+   verify it. A non-zero exit names the offending field on stderr — fix the
+   payload and retry.
+
+4. Write `./.claude/autocompact` — **only once step 3 is fully complete**,
    never in the same turn as a question the directive requires.
    Writing it arms compaction at the *next* turn boundary, and a question
    ends the turn — so an autocompact written alongside an approval request
@@ -77,8 +86,8 @@ user whether to proceed.
      the work. It must be a **single line** — one Enter is one submit, so
      an embedded newline would submit it early.
 
-The normal case — nothing durable, clean memory, no probe output — is one
-silent probe call and two file writes.
+The normal case — nothing durable, clean memory, no directive — is one
+silent checkpoint call and one file write (`autocompact`).
 
 ## The seam: task file vs. prompt
 

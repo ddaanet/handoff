@@ -1,14 +1,9 @@
 {
-  "description": "Hooks for the handoff skill: SessionStart load, activation wipe (Skill + UserPromptSubmit), write guard, read guard, post-write staging, and the precompact compaction driver (write validate, Stop arm, SessionStart(compact) resume, watcher-failure report). See CLAUDE.md for details.",
+  "description": "Hooks for the handoff skill: SessionStart load, write guard (handoff-task.md, checkpoint-only), post-write staging (handoff-todo.md), the checkpoint channel's PostToolUse(Bash) manifest consumer, and the precompact compaction driver (write validate, Stop arm, SessionStart(compact) resume, watcher-failure report). See CLAUDE.md for details.",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/prompt-pre-hook.sh",
-            "timeout": 5
-          },
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/report-watcher-failure.sh",
@@ -19,31 +14,11 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Skill",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/skill-pre-hook.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-guard.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/read-guard.sh",
             "timeout": 5
           }
         ]
@@ -67,6 +42,16 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-compact.sh",
             "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/bash-post.sh",
+            "timeout": 10
           }
         ]
       }

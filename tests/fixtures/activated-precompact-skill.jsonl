@@ -1,2 +1,0 @@
-{"type":"user","isSidechain":false,"message":{"role":"user","content":"let's compact and keep going"}}
-{"type":"assistant","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"handoff:precompact"}}]}}
