@@ -1,9 +1,9 @@
 ## Remaining
 
-- Release the ledger-liveness change as a patch bump, naming both `handoff` and
-  `claude-plugins` up front so auto-mode auth covers the marketplace push.
-- Trim the closing sentence of `_probe-lib.sh`'s `without-commit` directive once
-  gitlore's `memory-commit-batch.sh` reports on `additionalContext`.
-- Sweep the rest of `memory/` for retire-and-merge candidates, confirming each
-  cited path with `ls` and quoting the actual `description:` line rather than
-  judging by resemblance.
+- Implement the checkpoint channel per
+  `docs/2026-07-27-checkpoint-channel-design.md`, including inserting its
+  verbatim `DESIGN.md` section before `## References`.
+- Trim the closing sentence of the `without-commit` memory directive (in what
+  becomes `_checkpoint-lib.sh`) once gitlore ships a release carrying `62b1e59`,
+  which gives `memory-commit-batch.sh` a model channel. gitlore's latest tag is
+  v0.4.1 and that commit is 14 commits past it.
