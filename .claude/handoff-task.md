@@ -1,39 +1,38 @@
 ## Current task
 
-Three threads.
+Two carried threads, both untouched today.
 
-**Ledger liveness.** `probe_ledger_path` now detects a *live* superpowers SDD
-run rather than a file's presence at a fixed path; DESIGN.md's dated section
-carries the full rationale and the rejected alternatives. The one thing not
-on disk: this changes released probe behaviour, so it wants a version bump,
-and `plugin.json` is deliberately untouched because `version-guard.sh` owns
-`.version` — the release recipe is the only path.
-
-**Memory curation, unstarted.** `feedback_directive_states_acts` is confirmed
-subsumed by `feedback_directive_acts_not_mechanism`: read side by side, every
-one of the former's three bullets appears in the latter, which adds two more
-cut-items, the user's own words and the negative test.
-`feedback_withhold_dont_forbid` earns its own file and stays. This is the
-first *confirmed* retire-and-merge pair — an earlier subagent report on it was
-largely fabricated, so confirm any further candidate by reading both files
-rather than by resemblance. Retiring the file also drops a pointer line that
-`/Users/david/code/gitlore/memory/MEMORY.md` carries in its own root index;
-that is a proposal to make there, not an edit — other repos stay read-only.
+**Ledger liveness, awaiting release.** `probe_ledger_path` detects a *live*
+superpowers SDD run rather than a file at a fixed path; DESIGN.md carries the
+rationale and rejected alternatives. This changes released probe behaviour, so
+it wants a patch bump. `plugin.json` is deliberately untouched — `version-guard.sh`
+owns `.version` and the release recipe is the only path.
 
 **The `_probe-lib.sh` directive trim, blocked on gitlore.** Cut the closing
 sentence of the `without-commit` memory directive once gitlore's
 `memory-commit-batch.sh` reports on `additionalContext` instead of
 `systemMessage`. Until then that sentence is the agent's only signal, so it
-cannot go first; after, it asks the agent to infer from file existence what
-the hook states outright. The brief and patch already live in gitlore's repo
-as `docs/plans/brief-memory-commit-batch-model-channel.md` plus the sibling
-`.patch`.
+cannot go first; after, it asks the agent to infer from file existence what the
+hook states outright. Brief and patch already live in gitlore's repo as
+`docs/plans/brief-memory-commit-batch-model-channel.md` plus the sibling `.patch`.
 
 ## Open decisions
 
+- Whether gitlore's own byte-budget hook should stand down. It fired on every
+  index edit this session demanding compaction to 17.1KB, while
+  `feedback_index_compaction_triggers` — stored *in* that index — records the
+  last such compaction as a defect that cost 12 routing tokens. A hook
+  contradicting the memory it carries is the thing to resolve; the 17.1KB
+  figure is also unsourced and was measured to truncate nothing at this size.
+
+- Whether the decision procedure dropped from the merged
+  `feedback_directive_states_acts` index line needs its own routing surface.
+  The line keeps the rule but not the test ("ask who else could supply the
+  identifier; nobody → say nothing"); the procedure survives only in the file
+  body, so nothing routes an agent to it mid-task.
+
 - Whether the abandoned-workspace false positive needs more than the
   most-recently-modified tiebreak. A run abandoned rather than completed keeps
-  its workspace and its identity line, so it still reads as live; mtime only
-  mitigates. The fallback is the brief's rejected alternative — drop the
-  suppression and always write `handoff-todo.md` — if detection alone proves
-  too fragile.
+  its workspace and identity line, so it still reads as live; mtime only
+  mitigates. Fallback is the brief's rejected alternative — drop the
+  suppression and always write `handoff-todo.md`.
