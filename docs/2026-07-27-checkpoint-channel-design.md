@@ -144,6 +144,11 @@ Validation rules:
   — where `$root` is `handoff_root`, so a worktree session resolves to its own
   `.claude/`. This is where `write-guard.sh`'s cross-project branch goes for the
   channel path.
+- `{"content": null}` inside the `task`/`todo` object is equivalent to the
+  whole field being bare `null` — a no-op, with `file_path` not required in
+  that case. Without this, `content` being present (even as JSON `null`)
+  read as "content supplied," and `jq -r` on a JSON `null` prints the
+  literal string `"null"` into the file body.
 
 `file_path` is redundant — the checkpoint owns the paths. It is kept because
 it makes "harness tool call syntax" true rather than approximate, and the agent

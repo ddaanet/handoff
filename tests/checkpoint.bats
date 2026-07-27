@@ -191,6 +191,53 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 }
 
 # ==========================================================================
+# {"content": null} is equivalent to the field being bare null (no-op) —
+# guards against the literal string "null" being written to the file body.
+# ==========================================================================
+
+@test "checkpoint: task {content:null}, no file_path -> no-op, no file, no manifest line" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T",
+        task:{content:null}, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/handoff-task.md" ]
+    run ! grep -q "handoff-task.md" "$repo/.claude/checkpoint-manifest"
+}
+
+@test "checkpoint: task {file_path, content:null} -> no-op, no file, no manifest line" {
+    repo="$(make_repo)"
+    payload=$(jq -nc --arg fp "$repo/.claude/handoff-task.md" \
+        '{skill:"handoff", commit:"with-commit", rename:"T",
+          task:{file_path:$fp, content:null}, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/handoff-task.md" ]
+    run ! grep -q "handoff-task.md" "$repo/.claude/checkpoint-manifest"
+}
+
+@test "checkpoint: todo {content:null}, no file_path -> no-op, no file, no manifest line" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T",
+        task:null, todo:{content:null}}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/handoff-todo.md" ]
+    run ! grep -q "handoff-todo.md" "$repo/.claude/checkpoint-manifest"
+}
+
+@test "checkpoint: todo {file_path, content:null} -> no-op, no file, no manifest line" {
+    repo="$(make_repo)"
+    payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
+        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+          todo:{file_path:$fp, content:null}}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/handoff-todo.md" ]
+    run ! grep -q "handoff-todo.md" "$repo/.claude/checkpoint-manifest"
+}
+
+# ==========================================================================
 # Write semantics (FR5) and empty-body removal (FR6)
 # ==========================================================================
 

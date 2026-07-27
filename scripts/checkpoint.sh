@@ -75,6 +75,11 @@ validate_task() {
     if field_has_key task old_string || field_has_key task new_string; then
         err "task" "old_string/new_string are not allowed for task (Write form only)"
     fi
+    # {"content": null} is equivalent to task: null — no-op, and file_path
+    # is not required for a no-op.
+    if field_has_key task content && field_is_null task.content; then
+        return 0
+    fi
     field_has_key task file_path || err "task.file_path" "required"
     field_has_key task content || err "task.content" "required"
 
@@ -101,6 +106,12 @@ validate_todo() {
 
     jq -e '.todo | type == "object"' >/dev/null 2>&1 <<<"$payload" \
         || err "todo" "must be an object or null"
+    # {"content": null} (with no old_string/new_string) is equivalent to
+    # todo: null — no-op, and file_path is not required for a no-op.
+    if field_has_key todo content && field_is_null todo.content \
+        && ! field_has_key todo old_string && ! field_has_key todo new_string; then
+        return 0
+    fi
     field_has_key todo file_path || err "todo.file_path" "required"
 
     local file_path resolved expected has_content has_old has_new
