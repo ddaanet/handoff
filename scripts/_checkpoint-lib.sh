@@ -114,9 +114,7 @@ checkpoint_memory_directive() {
 "  1. Write the approved summary to:" \
 "     $msgfile" \
 "  2. Write the trigger file (any content) to:" \
-"     $trigger" \
-"" \
-"gitlore's PostToolBatch hook commits the submodule and removes both files on success. If they remain, the commit did not run — report that rather than retrying."
+"     $trigger"
     fi
 }
 
