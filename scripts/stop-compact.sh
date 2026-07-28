@@ -60,5 +60,5 @@ export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_COMPACT_FAILED"
 export HANDOFF_PENDING_FILE="$pending"
 handoff_spawn_detached compact-when-idle.sh "$PANE" "$COMPACT_L1"
 
-jq -nc --arg c "$COMPACT_L1" --arg p "$PANE" \
-    '{systemMessage: ("handoff: will run \"" + $c + "\" once the prompt is idle (tmux pane " + $p + "), then resume.")}'
+jq -nc --arg p "$PANE" \
+    '{systemMessage: ("handoff: will run /compact once the prompt is idle (tmux pane " + $p + "), then resume.")}'
