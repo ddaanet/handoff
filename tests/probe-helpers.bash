@@ -23,8 +23,19 @@ EOF
     echo "seed" > "$repo/memory/seed.md"
     git -C "$repo/memory" add -A
     git -C "$repo/memory" -c user.email=t@t -c user.name=t commit -qm seed
+    # gitlore.memoryApprovalClauseFile: what a real gitlore SessionStart would
+    # have seeded/re-pinned this session — checkpoint_memory_directive discovers
+    # it the same way it discovers gitlore.commitCommand. See DESIGN.md,
+    # "Memory-approval wording is discovered from gitlore, not duplicated".
+    printf '%s\n' "$GITLORE_MEMORY_APPROVAL_CLAUSE" > "$repo/.gitlore-memory-approval-clause.txt"
+    git -C "$repo" config gitlore.memoryApprovalClauseFile "$repo/.gitlore-memory-approval-clause.txt"
     printf '%s\n' "$repo"
 }
+
+# The fixture's stand-in for gitlore's canonical clause text (real wording
+# lives in gitlore's reference/memory-approval-clause.txt) — a fixed value so
+# tests can assert on it without reading the file back.
+GITLORE_MEMORY_APPROVAL_CLAUSE="as one line per memory file — New, Update, Augment, Reduce, or Remove, its tier/slug, and a one-line summary of what changed"
 
 # Materialize a live superpowers SDD ledger inside $1 (a repo path) for the plan
 # whose basename is $2 (default feature-plan). Layout and identity line are

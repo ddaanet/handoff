@@ -421,6 +421,37 @@ precompact_payload() {
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
 }
 
+@test "checkpoint: gitlore.memoryApprovalClauseFile resolved -> its content appears in the directive" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    run_checkpoint "$repo" "$(handoff_payload without-commit)"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qF "$GITLORE_MEMORY_APPROVAL_CLAUSE"
+}
+
+@test "checkpoint: gitlore.memoryApprovalClauseFile unset -> reports gitlore disabled, never the IPC instructions" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    git -C "$repo" config --unset gitlore.memoryApprovalClauseFile
+    run_checkpoint "$repo" "$(handoff_payload without-commit)"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qi 'gitlore.memoryApprovalClauseFile'
+    echo "$output" | grep -qi 'gitlore plugin looks disabled'
+    [[ "$output" != *"$repo/.claude/gitlore-memory-message"* ]]
+    [[ "$output" != *"$repo/.claude/gitlore-commit-memory"* ]]
+    [[ "$output" != *"two file writes"* ]]
+}
+
+@test "checkpoint: gitlore.memoryApprovalClauseFile points at a missing file -> reports gitlore disabled" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    git -C "$repo" config gitlore.memoryApprovalClauseFile "$repo/.gitlore-memory-approval-clause-missing.txt"
+    run_checkpoint "$repo" "$(handoff_payload without-commit)"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qi 'gitlore plugin looks disabled'
+    [[ "$output" != *"$repo/.claude/gitlore-memory-message"* ]]
+}
+
 # THE load-bearing assertion: the with-commit output never mentions the
 # trigger — not its path, not the concept. Mutation-checked: temporarily
 # deleting the with-commit branch in checkpoint_memory_directive (so the mode

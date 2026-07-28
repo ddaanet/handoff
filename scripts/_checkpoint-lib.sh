@@ -59,6 +59,7 @@ checkpoint_is_empty_body() {
 # the agent performs.
 checkpoint_memory_directive() {
     local root="$1" mode="$2" mempath mem status msgfile trigger approve_files
+    local clause_file clause
 
     # FR12 activation gate: the gitlore-memory submodule registration.
     mempath=$(git config --file "$root/.gitmodules" \
@@ -72,6 +73,20 @@ checkpoint_memory_directive() {
     # Clean memory: nothing to commit.
     status=$(git -C "$mem" status --porcelain 2>/dev/null)
     [ -n "$status" ] || return 0
+
+    # gitlore is the single source of truth for the approval-body wording (see
+    # gitlore's docs/design.md D19); this discovers it the same way handoff
+    # already discovers gitlore.commitCommand — a key gitlore seeds at install
+    # and re-pins every SessionStart. No fallback copy here: the wording is
+    # only ever needed while gitlore is genuinely active, so a stale local copy
+    # could never be more correct than reporting the gap.
+    clause_file=$(git -C "$root" config --get gitlore.memoryApprovalClauseFile 2>/dev/null) || clause_file=""
+    if [ -z "$clause_file" ] || [ ! -r "$clause_file" ]; then
+        printf '%s\n' \
+"gitlore memory has uncommitted changes, but this session cannot read the memory-approval wording (git config gitlore.memoryApprovalClauseFile is unset or its file is missing) — the gitlore plugin looks disabled or not installed for this session. Check /plugin to enable gitlore, then retry; nothing has been written and the memory changes are still pending."
+        return 0
+    fi
+    clause=$(cat "$clause_file")
 
     # The IPC files live in the superproject's .claude/ — which is $root by
     # construction, since mempath was read out of $root/.gitmodules and is
@@ -97,7 +112,7 @@ checkpoint_memory_directive() {
 "" \
 "$status" \
 "" \
-"Summarize these changes as a commit message: a title line of at most 72 characters, a blank line, then a body of one bullet per memory file saying what it now records. Present it to the user as a markdown blockquote (lines prefixed with '> ', not a code fence) and get their approval — they may edit it. Do not write $approve_files before the user approves." \
+"Summarize these changes as a commit message: a title line of at most 72 characters, a blank line, then a body with $clause. Present it to the user as a markdown blockquote (lines prefixed with '> ', not a code fence) and get their approval — they may edit it. Do not write $approve_files before the user approves." \
 ""
 
     if [ "$mode" = "with-commit" ]; then
