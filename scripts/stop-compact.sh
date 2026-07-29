@@ -2,7 +2,7 @@
 # Stop: arm the compaction. Fires when the main loop has actually finished the
 # turn — the only point at which typing a slash command means what this design
 # assumes. A watcher spawned mid-turn has no safe idle window to find (see
-# DESIGN.md, "Mid-turn TUI input").
+# docs/changelog/2026-07-19-mid-turn-tui-input-taxonomy.md).
 #
 # Stop fires on every turn, so the no-file path must be silent and cheap.
 # Stop does NOT fire on an Esc interrupt, so an interrupted turn cannot arm the

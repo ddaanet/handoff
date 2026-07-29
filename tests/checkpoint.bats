@@ -2,8 +2,8 @@
 # Tests for scripts/checkpoint.sh (handoff-checkpoint), bin/handoff-checkpoint,
 # and scripts/bash-post.sh — the one-write-path channel that replaced
 # scripts/memory-probe.sh, scripts/precompact-probe.sh, the activation wipe,
-# and the agent's three separate Write calls. See DESIGN.md,
-# "One channel, one writer".
+# and the agent's three separate Write calls. See
+# docs/changelog/2026-07-27-one-channel-one-writer.md.
 #
 # The checkpoint reads a JSON payload on stdin (schema in
 # docs/2026-07-27-checkpoint-channel-design.md), applies task/todo

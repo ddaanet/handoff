@@ -10,8 +10,9 @@
 HANDOFF_REL_TASK=".claude/handoff-task.md"
 # The remainder ledger: open todo items only, never completion state. Tracked
 # on the same terms as the task file (write-stage.sh force-adds both) — it is
-# overflow from that file, so it earns the same persistence. See DESIGN.md,
-# "A place for the todo list" and "Overflow deserves the same persistence".
+# overflow from that file, so it earns the same persistence. See
+# docs/changelog/2026-07-22-a-place-for-the-todo-list.md and
+# docs/changelog/2026-07-23-overflow-deserves-persistence.md.
 # shellcheck disable=SC2034
 HANDOFF_REL_TODO=".claude/handoff-todo.md"
 # shellcheck disable=SC2034

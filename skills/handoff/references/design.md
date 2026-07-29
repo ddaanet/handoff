@@ -1,7 +1,8 @@
 # handoff — Design Notes
 
 Condensed rationale. Full design doc lives at the plugin root
-(`../../../DESIGN.md`).
+(`../../../DESIGN.md`); the dated write-time record of each design change
+is in `../../../docs/changelog/`.
 
 ## The residual
 
@@ -61,8 +62,8 @@ session's work as its own. The two irreducible fields already carry the
 redundant second capture in the one register that does the harm. The
 per-session file list is likewise dropped: the honest working set is
 the harness's own `gitStatus` block at load time, current after the
-prior session's commits landed. See the plugin-root DESIGN.md, "Task
-frame drops the transcript and file list".
+prior session's commits landed. See
+`../../../docs/changelog/2026-07-17-task-frame-drops-transcript.md`.
 
 ## Why markdown template, not JSON schema
 

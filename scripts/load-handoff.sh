@@ -24,8 +24,8 @@ todo="$cwd/$HANDOFF_REL_TODO"
 # The frame is the header plus the agent-authored files inlined verbatim, and
 # it gates itself: either file alone is enough, neither means nothing to
 # inject. The prior session's working set is served by the harness's own
-# gitStatus block, not reproduced here (see DESIGN.md, "Task frame drops the
-# transcript and file list").
+# gitStatus block, not reproduced here (see
+# docs/changelog/2026-07-17-task-frame-drops-transcript.md).
 assembled="$(handoff_frame "$task" "$todo")" || exit 0
 
 bytes=${#assembled}

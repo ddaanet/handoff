@@ -3,8 +3,8 @@
 # checkpoint_is_empty_body, scripts/write-stage.sh. Renamed from
 # _probe-lib.sh: the directive functions below are unchanged in content and
 # composition order (FR9) from the two read-only probes they replaced; only
-# the probe_* -> checkpoint_* names and the mode source moved. See DESIGN.md,
-# "One channel, one writer".
+# the probe_* -> checkpoint_* names and the mode source moved. See
+# docs/changelog/2026-07-27-one-channel-one-writer.md.
 #
 # Sourced, never executed. Each directive function takes the git worktree
 # root and either prints its directive or stays silent; both always return
@@ -44,7 +44,8 @@ checkpoint_is_empty_body() {
 # Both end with one parent commit carrying the source change and the gitlink
 # bump, so the second is not a history fix — it is one call instead of two, and
 # agents batch the two writes into a single message only 43% of the time (see
-# DESIGN.md, "Commit awareness"). Couples only to the two IPC filenames — never
+# docs/changelog/2026-07-25-commit-awareness.md). Couples only to the two IPC
+# filenames — never
 # gitlore internals.
 #
 # The with-commit text never mentions the trigger — not its path, not the idea

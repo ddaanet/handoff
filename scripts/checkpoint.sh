@@ -3,13 +3,15 @@
 # Replaces the activation wipe, the agent's three separate Write calls, the
 # activation predicate, and the two read-only probes with a single call: the
 # skill assembles the whole wrap-up as JSON and pipes it to this script on
-# stdin via a heredoc. See DESIGN.md, "One channel, one writer" and
+# stdin via a heredoc. See docs/changelog/2026-07-27-one-channel-one-writer.md and
 # docs/2026-07-27-checkpoint-channel-design.md for the schema and rationale.
 #
 # FR2: a schema violation exits 2 and names the offending field on stderr.
-# NFR1: no git or tmux runs here — this is the agent's sandboxed Bash, where a
-# `git add` can strand .git/index.lock and tmux is unreachable. The checkpoint
-# writes files (task/todo content, the manifest, autorename) and nothing else;
+# NFR1: nothing here mutates git state and no tmux runs at all — this is the
+# agent's sandboxed Bash, where a `git add` can strand .git/index.lock and tmux
+# is unreachable. The directive path queries git read-only (see
+# _checkpoint-lib.sh); beyond that the checkpoint writes files (task/todo
+# content, the manifest, autorename) and nothing else;
 # scripts/bash-post.sh (PostToolUse(Bash)) does the staging and the rename
 # watcher spawn in hook context, driven by the manifest this script leaves.
 set -euo pipefail

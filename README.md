@@ -176,6 +176,8 @@ current project is modified.
 ## Further reading
 
 - [`DESIGN.md`](DESIGN.md) — research, SOTA analysis, decisions.
+- [`docs/changelog.md`](docs/changelog.md) — one line per design change,
+  linking the dated write-time record of each under `docs/changelog/`.
 - [`CLAUDE.md`](CLAUDE.md) — agent instructions for working on the
   plugin itself.
 - [`skills/handoff/SKILL.md`](skills/handoff/SKILL.md) — the skill

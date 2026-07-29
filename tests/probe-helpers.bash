@@ -25,8 +25,8 @@ EOF
     git -C "$repo/memory" -c user.email=t@t -c user.name=t commit -qm seed
     # gitlore.memoryApprovalClauseFile: what a real gitlore SessionStart would
     # have seeded/re-pinned this session — checkpoint_memory_directive discovers
-    # it the same way it discovers gitlore.commitCommand. See DESIGN.md,
-    # "Memory-approval wording is discovered from gitlore, not duplicated".
+    # it the same way it discovers gitlore.commitCommand. See
+    # docs/changelog/2026-07-28-memory-approval-from-gitlore.md.
     printf '%s\n' "$GITLORE_MEMORY_APPROVAL_CLAUSE" > "$repo/.gitlore-memory-approval-clause.txt"
     git -C "$repo" config gitlore.memoryApprovalClauseFile "$repo/.gitlore-memory-approval-clause.txt"
     printf '%s\n' "$repo"

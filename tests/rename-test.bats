@@ -157,7 +157,8 @@ STUB
 
     [ ! -s "$SENT" ]
     # The bail is a non-delivery like any other. It used to exit 0 — the exact
-    # shape DESIGN.md calls indistinguishable from success.
+    # shape docs/changelog/2026-07-22-rename-watcher-failure-channel.md calls
+    # indistinguishable from success.
     [ "$status" -ne 0 ]
     grep -qi 'composing' "$fail_file"
 }
@@ -189,7 +190,7 @@ STUB
 # --- _rename-lib.sh: command-recognition predicate -----------------------------
 # After a slash command is typed with no Enter, the TUI renders either an
 # autocomplete row for the command or `No commands match "…"`. The compact
-# watcher checks this before pressing Enter — see DESIGN.md, type-verify-submit.
+# watcher checks this before pressing Enter (type-verify-submit; see CLAUDE.md).
 
 @test "is_unknown_command true on 'No commands match'" {
     run is_unknown_command <<< $'No commands match "/compzzz"\n❯ /compzzz'

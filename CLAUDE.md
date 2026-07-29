@@ -24,8 +24,8 @@ approval → write gitlore's message file, plus the trigger file only under
 `with-commit` the message file alone leaves the memory commit to the parent
 commit's pre-commit hook — one call instead of two, which is the whole gain,
 since both paths end with one parent commit carrying the source change and
-the gitlink bump. See DESIGN.md, "Commit awareness (2026-07-25)" and "One
-channel, one writer (2026-07-27)".
+the gitlink bump. See `docs/changelog/2026-07-25-commit-awareness.md` and
+`docs/changelog/2026-07-27-one-channel-one-writer.md`.
 
 Second flow, driven by the precompact skill: same `handoff-checkpoint` call
 (`"skill": "precompact"`, no `rename`) → its directive output composes the
@@ -49,9 +49,9 @@ plugin names one (the tool is behind a server-side flag and has already
 changed generations once). A direct agent edit is staged by `write-stage.sh`
 on the spot; the checkpoint stages its own task/todo writes via the manifest
 instead. Content, not activation, decides when either file is considered
-empty and removed: see DESIGN.md, "A place for the todo list (2026-07-22)",
-"Overflow deserves the same persistence (2026-07-23)", and "One channel, one
-writer (2026-07-27)".
+empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
+`docs/changelog/2026-07-23-overflow-deserves-persistence.md`, and
+`docs/changelog/2026-07-27-one-channel-one-writer.md`.
 
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
@@ -142,8 +142,8 @@ writer (2026-07-27)".
   `bash-post.sh`) and both compaction watchers.
   There is no more transcript-scraping activation predicate: with
   `handoff-task.md` written only by the checkpoint (FR3), there is no
-  "before/after activation" distinction left to detect. See DESIGN.md,
-  "One channel, one writer (2026-07-27)".
+  "before/after activation" distinction left to detect. See
+  `docs/changelog/2026-07-27-one-channel-one-writer.md`.
 - `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies any
   direct agent Write/Edit to `handoff-task.md` unconditionally — it is
   checkpoint-only (FR3) — and denies writes whose resolved path is not
@@ -155,7 +155,8 @@ writer (2026-07-27)".
   landed (status bar) and retries up to 3×. Spawned by `write-rename.sh`;
   outlives the agent turn. Both non-delivery paths — the composing-bail and
   three failed verifies — end in `watcher_fail`, so neither is silent. The bail
-  is the shape DESIGN.md calls indistinguishable from success: it used to
+  is the shape `docs/changelog/2026-07-22-rename-watcher-failure-channel.md`
+  calls indistinguishable from success: it used to
   `exit 0` while `write-rename.sh` had already promised the user a rename.
 - `scripts/_rename-lib.sh` — sourced helper for every detached watcher
   (`rename-when-idle.sh` and both compaction watchers, despite the name).
@@ -246,8 +247,8 @@ writer (2026-07-27)".
   `Stop` — days later, possibly in another session. `UserPromptSubmit` is the
   exact discriminator; it cannot fire between the write and that turn's own
   `Stop`. Only the failure branch touches `.pending` — sweeping it on a stale
-  `autocompact` would race a live `SessionStart(compact)`. See DESIGN.md, "A
-  stale autocompact is one a later turn can see (2026-07-22)".
+  `autocompact` would race a live `SessionStart(compact)`. See
+  `docs/changelog/2026-07-22-stale-autocompact.md`.
 - `scripts/compact-when-idle.sh` — detached watcher for line 1.
   Type-verify-submit: sends the command with `send-keys -l` and **no** Enter,
   reads back whether the TUI rendered command recognition, and only then
@@ -327,8 +328,8 @@ writer (2026-07-27)".
   detects **liveness**, not presence: a match under
   `.superpowers/sdd/*/progress.md` counts only with SDD's identity first
   line, the pre-6.2.0 flat path never counts, and among several the
-  most-recently-modified wins. See DESIGN.md, "An orphaned ledger hijacks
-  the handoff (2026-07-26)". `checkpoint_sdd_directive`
+  most-recently-modified wins. See
+  `docs/changelog/2026-07-26-orphaned-ledger.md`. `checkpoint_sdd_directive`
   holds the structured-workflow ledger nudge (precompact only) and ends by
   standing `handoff-todo.md` down; `checkpoint_todo_suppression` is that
   stand-down alone, for the handoff path — composed in
@@ -344,8 +345,8 @@ writer (2026-07-27)".
   `.claude/autorename` if present and spawns the rename watcher through the
   same helper `write-rename.sh` uses, then emits a dual-channel summary and
   deletes the manifest. This is where NFR1's git/tmux work happens instead
-  of in the agent's sandboxed Bash — see DESIGN.md, "One channel, one
-  writer (2026-07-27)".
+  of in the agent's sandboxed Bash — see
+  `docs/changelog/2026-07-27-one-channel-one-writer.md`.
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
   toolkit (currently `v0.4.0`). Provides:
@@ -365,7 +366,20 @@ writer (2026-07-27)".
 - `.claude/settings.json` — project Claude Code settings. Wires the
   toolkit's `version-guard.sh` as a PreToolUse(Write|Edit) hook.
   Tracked in git so the guard applies to every clone.
-- `DESIGN.md` — living design document, research, and decisions
+- `DESIGN.md` — living design document: current architecture, standing
+  decisions, rejected alternatives. Present tense, no dated entries.
+- `docs/changelog.md` — the index: one line per design change, oldest first,
+  `- <date> [Title](changelog/<file>.md) — hook`, same shape as `MEMORY.md`.
+- `docs/changelog/` — one file per design change, dated, holding the full
+  write-time reasoning: the defect, the alternatives weighed, what was
+  believed at the time. Never edited after the fact; a later change that
+  reverses one heads the affected section with a
+  `> **Superseded <date>** (see [<title>](<sibling>.md))` blockquote, scoped
+  to what actually changed. A design change adds a file here plus its index
+  line, and rewrites whatever `DESIGN.md` prose it invalidates — all three
+  in the same pass, not as an optional follow-up. Appending a dated
+  subsection to `DESIGN.md` instead was the earlier rule, and it grew that
+  file to 2036 lines / 113 KB of mostly superseded machinery.
 
 ## Conventions
 
@@ -463,8 +477,8 @@ injected at both transitions — `load-handoff.sh` on `startup|clear`,
 There is no session id, no files-touched list, and no verbatim prompt
 transcript — the working set is the harness's own `gitStatus` block at
 load time, and reproducing prior exchanges verbatim manufactured false
-continuity. See DESIGN.md, "Task frame drops the transcript and file
-list (2026-07-17)".
+continuity. See
+`docs/changelog/2026-07-17-task-frame-drops-transcript.md`.
 
 ## Non-goals
 
