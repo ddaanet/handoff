@@ -6,7 +6,7 @@
 # docs/changelog/2026-07-27-one-channel-one-writer.md.
 #
 # The checkpoint reads a JSON payload on stdin (schema in
-# docs/2026-07-27-checkpoint-channel-design.md), applies task/todo
+# plans/2026-07-27-checkpoint-channel-design.md), applies task/todo
 # Write-or-Edit semantics, removes a file whose body ends up empty, and
 # prints the same directives (memory gate, SDD nudge) the two deleted probes
 # printed. bash-post.sh (PostToolUse(Bash)) consumes the manifest it leaves,

@@ -4,8 +4,8 @@ Living document. States what this plugin is, how it works today, and why
 each standing decision was made. Present tense throughout: when a decision
 is reversed, this document is rewritten rather than annotated.
 
-The write-time record of every design change lives in `docs/changelog/`, one
-file per change, dated, indexed by `docs/changelog.md`. Those files are never
+The write-time record of every design change lives in `changelog/`, one
+file per change, dated, indexed by [`changelog.md`](changelog.md). Those files are never
 edited after the fact — they say what was true and what was believed when
 they were written, which is what makes them worth keeping.
 
@@ -101,15 +101,15 @@ different thing:
   after a compaction it is re-derived from a paraphrase with real error
   probability, failing silently by redoing finished work. See
   [Reconstructable is two categories, not
-  one](docs/changelog/2026-07-22-a-place-for-the-todo-list.md).
+  one](changelog/2026-07-22-a-place-for-the-todo-list.md).
 
 The original analysis carried a fourth category — the last N verbatim user
 prompts, as "the only unreconstructable conversational signal" ([the
-argument, in full](docs/changelog/2026-05-19-original-activation-and-loading.md)).
+argument, in full](changelog/2026-05-19-original-activation-and-loading.md)).
 It was implemented, shipped, and withdrawn: a faithful transcript does not
 read as a report about a past session, it reads as *memory*, and the successor
 narrates a prior session's work as its own. See [Task frame drops the
-transcript and file list](docs/changelog/2026-07-17-task-frame-drops-transcript.md).
+transcript and file list](changelog/2026-07-17-task-frame-drops-transcript.md).
 
 Those categories constitute the artifact this plugin produces. Everything
 else on the SOTA list is already handled, or reconstructible from code /
@@ -293,7 +293,7 @@ The todo file is a ledger the agent maintains all session; wiping it
 destroys the half of the frame a `/clear` discards outright, and after a
 compaction the context it would be re-authored from is a paraphrase. One
 protocol for both was an artifact of their sharing one activation hook.
-[One channel, one writer](docs/changelog/2026-07-27-one-channel-one-writer.md)
+[One channel, one writer](changelog/2026-07-27-one-channel-one-writer.md)
 
 **Both files are tracked, and for the same reason.** `handoff-task.md` pairs
 with a gitlore memory commit as an in-history record; `## Current task` and
@@ -301,7 +301,7 @@ with a gitlore memory commit as an in-history record; `## Current task` and
 discarding the other puts half a frame in history — the half naming work not
 yet done, which is what a reader of the trail is looking for.
 [Overflow deserves the same
-persistence](docs/changelog/2026-07-23-overflow-deserves-persistence.md)
+persistence](changelog/2026-07-23-overflow-deserves-persistence.md)
 
 **Commit/push status never appears in either file.** The routine wrap-up is
 `/handoff` then `/commit`, so any bookkeeping written at handoff time is
@@ -311,13 +311,13 @@ has no slot for it — not a remembered prohibition. The legitimate case
 ("changed X but not committed because tests are red") is an open decision,
 stated as the *why*.
 [Commit status excluded from the task
-frame](docs/changelog/2026-06-24-commit-status-excluded.md)
+frame](changelog/2026-06-24-commit-status-excluded.md)
 
 **The frame carries no transcript.** Verbatim prior exchanges arrive in
 conversational grammar and are read as memory, not as a report; the hazard
 scales with volume, and trimming changes length, not register.
 [Task frame drops the transcript and file
-list](docs/changelog/2026-07-17-task-frame-drops-transcript.md)
+list](changelog/2026-07-17-task-frame-drops-transcript.md)
 
 **The agent supplies one fact; the code owns the branch.** Commit awareness
 — *is a commit going to carry this session's memory?* — is a fact about the
@@ -326,7 +326,7 @@ of the answer is deterministic. It changes what memory *says* (under
 `with-commit`, bodies state present-tense truth, because a body phrased as
 pending is false the moment the change exists and gets re-injected that way)
 and where the memory commit *lands*.
-[Commit awareness](docs/changelog/2026-07-25-commit-awareness.md)
+[Commit awareness](changelog/2026-07-25-commit-awareness.md)
 
 **Withholding is a mechanism.** The standalone memory commit is reachable
 only through one filename, and the `with-commit` directive's reader is a
@@ -334,7 +334,7 @@ fresh agent with no other source for it — so saying nothing makes that path
 unreachable, while a prohibition would introduce the concept it forbids. The
 same cut removes mechanism a reader cannot act on: it does not sit inert, it
 gets verified and narrated back.
-[Commit awareness](docs/changelog/2026-07-25-commit-awareness.md)
+[Commit awareness](changelog/2026-07-25-commit-awareness.md)
 
 **A directive is correct only where in the turn it lands.** handoff runs its
 checkpoint in the same turn as the writes — deliberately, so the snapshot
@@ -343,7 +343,7 @@ after they exist. precompact reads its directive before it writes. Shared
 prompt text is shared only where the flows agree; naming the safe route is
 the load-bearing half of any prohibition.
 [A directive must fit where in the turn it
-lands](docs/changelog/2026-07-22-directive-fits-where-it-lands.md)
+lands](changelog/2026-07-22-directive-fits-where-it-lands.md)
 
 **Hooks are mechanical; anything requiring judgment is in a skill.** A
 `PreCompact` hook cannot run an agent turn. A probe cannot see the agent's
@@ -359,7 +359,7 @@ submit showing no spinner, a 103-second compaction showing none either.
 Confirmation comes from harness-authoritative signals — a file
 `SessionStart(compact)` consumes, or the session transcript.
 [The submit signal, a third
-time](docs/changelog/2026-07-22-confirm-the-compaction.md)
+time](changelog/2026-07-22-confirm-the-compaction.md)
 
 The rename watcher is the one exception, and it is one by age rather than by
 principle: it was written before transcript confirmation existed, and the
@@ -378,7 +378,7 @@ legitimately present (a `.pending` during the whole Stop → compaction
 window): a false-positive-free signal is worth the tail of watchers killed
 outright.
 [A detached watcher's failure has to become a
-file](docs/changelog/2026-07-20-watcher-failure-becomes-a-file.md)
+file](changelog/2026-07-20-watcher-failure-becomes-a-file.md)
 
 **A foreign tool's state file is detected by liveness, not presence.**
 Layouts move and the old path becomes a declared stray; abandoned files are
@@ -386,7 +386,7 @@ never cleaned up. Presence alone false-positives, and here the harm is the
 *suppression* — deferring the real remainder to an abandoned ledger. Detection
 is read-only and fails open.
 [An orphaned ledger hijacks the
-handoff](docs/changelog/2026-07-26-orphaned-ledger.md)
+handoff](changelog/2026-07-26-orphaned-ledger.md)
 
 **The design names no todo tool.** The harness's task-list family is behind
 a server-side killswitch and has already changed generations once; an
@@ -394,7 +394,7 @@ affordance that can vanish between two sessions on the same binary cannot be
 a dependency. The file is the ledger, whatever tracker is live is a cache,
 and the cache may legitimately hold more (identity, ordering, per-item
 history) because that surplus is boundary-local.
-[A place for the todo list](docs/changelog/2026-07-22-a-place-for-the-todo-list.md)
+[A place for the todo list](changelog/2026-07-22-a-place-for-the-todo-list.md)
 
 **With nothing to approve, the wrap-up completes in a single turn.** No
 detection round-trip exists between deciding and writing: the checkpoint is
@@ -410,45 +410,45 @@ must preserve both halves.
 **Loading via an `@.claude/handoff.md` reference** — the reference is
 resident in every turn and cannot be conditional. `SessionStart` +
 `additionalContext` injects once, only when there is something to inject.
-[Original design](docs/changelog/2026-05-19-original-activation-and-loading.md)
+[Original design](changelog/2026-05-19-original-activation-and-loading.md)
 
 **A generated `handoff.md` artifact** — a non-versioned twin shadowing a
 versionable source, which also inlined raw transcript into anything that
 committed it. The frame is assembled in memory at read time instead.
-[Read-time assembly](docs/changelog/2026-06-05-read-time-assembly.md)
+[Read-time assembly](changelog/2026-06-05-read-time-assembly.md)
 
 **A `PreCompact` hook for the memory flush** — hooks are mechanical and the
 flush is judgment; `PreCompact(manual)` can annotate or block a compaction
 but cannot run an agent turn.
-[Session compaction](docs/changelog/2026-07-12-session-compaction.md)
+[Session compaction](changelog/2026-07-12-session-compaction.md)
 
 **Merging handoff into gitlore**, **moving the checkpoint into gitlore**
 behind a `command -v` lookup, and **gitlore superseding handoff** — distinct
 timescales and machinery for the first; the detection round-trip the
 packaging exists to avoid for the second; for the third, supersession means
 gitlore carries all of handoff's machinery, vendored and kept in sync.
-[Session compaction](docs/changelog/2026-07-12-session-compaction.md)
+[Session compaction](changelog/2026-07-12-session-compaction.md)
 
 **Live `git status` in `load-handoff.sh`**, and **reorder + amend** (commit,
 regenerate the handoff, amend) — the first adds a git shell-out to a pure
 assembler for a content problem; the second reopens a closed artifact and
 breaks the paired in-history record. Machinery to make a wrong fact accurate.
 [Commit status excluded from the task
-frame](docs/changelog/2026-06-24-commit-status-excluded.md)
+frame](changelog/2026-06-24-commit-status-excluded.md)
 
 **Trusting the raw `.cwd` field**, or recording the root via
 `WorktreeCreate`/`CwdChanged` — the first drifts with `cd` and `/add-dir`;
 the second is observational, with no clean per-worktree storage, and fragile
 against the stateless `.git` walk.
 [Per-worktree handoff
-root](docs/changelog/2026-06-09-per-worktree-handoff-root.md)
+root](changelog/2026-06-09-per-worktree-handoff-root.md)
 
 **A session-id sidecar or a recency timeout for a stale `autocompact`** —
 the most likely trigger is an Esc in the *same* session, so the id matches
 and the next `Stop` arms it anyway; a timeout is a guess about how long a
 turn may run, and a wrong guess silently drops a wanted compaction.
 [A stale autocompact is one a later turn can
-see](docs/changelog/2026-07-22-stale-autocompact.md)
+see](changelog/2026-07-22-stale-autocompact.md)
 
 **Detecting commit awareness in the checkpoint, and defaulting the answer**
 — a transcript scrape is the maintenance trap this design already refuses,
@@ -456,13 +456,13 @@ and a slash-command name is not the question; a default is the answer given
 by an agent that has not thought about it, and thinking about it is the
 entire contribution. A third mode value would branch identically and only
 rename a shade of prose.
-[Commit awareness](docs/changelog/2026-07-25-commit-awareness.md)
+[Commit awareness](changelog/2026-07-25-commit-awareness.md)
 
 **Injecting the remainder at the first `UserPromptSubmit`** to place a new
 user task ahead of it — position is a weak lever (recency argues the other
 way), explicit conditional wording is the strong one, and it needs a
 once-per-session latch on a per-turn hook.
-[A place for the todo list](docs/changelog/2026-07-22-a-place-for-the-todo-list.md)
+[A place for the todo list](changelog/2026-07-22-a-place-for-the-todo-list.md)
 
 **Accepting SDD's pre-6.2.0 flat ledger path for back-compatibility**, and
 **dropping the todo suppression altogether** — the first honours the bug,
@@ -472,11 +472,11 @@ in the detection, not the policy. Gating on the named plan file still
 existing was rejected too: it false-negatives on a plan that landed and was
 tidied away.
 [An orphaned ledger hijacks the
-handoff](docs/changelog/2026-07-26-orphaned-ledger.md)
+handoff](changelog/2026-07-26-orphaned-ledger.md)
 
 **Merging the three `PostToolUse(Write|Edit)` scripts** into one — they
 share a preamble, now factored into `handoff_match_target()`, but not a job.
-[Consolidation pass](docs/changelog/2026-07-20-consolidation-pass.md)
+[Consolidation pass](changelog/2026-07-20-consolidation-pass.md)
 
 ## Non-goals
 
@@ -511,8 +511,8 @@ extraction + minimal judgment. Non-overlapping. Both can coexist.
 
 ## Changelog
 
-`docs/changelog.md` — one line per design change, oldest first, each linking
-the full write-time record under `docs/changelog/`.
+[`changelog.md`](changelog.md) — one line per design change, newest first,
+each linking the full write-time record under `changelog/`.
 
 ## References
 

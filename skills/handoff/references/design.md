@@ -1,8 +1,8 @@
 # handoff — Design Notes
 
-Condensed rationale. Full design doc lives at the plugin root
-(`../../../DESIGN.md`); the dated write-time record of each design change
-is in `../../../docs/changelog/`.
+Condensed rationale. Full design doc is `../../../docs/design.md`; the
+dated write-time record of each design change is in
+`../../../docs/changelog/`.
 
 ## The residual
 

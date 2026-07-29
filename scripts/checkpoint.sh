@@ -4,7 +4,7 @@
 # activation predicate, and the two read-only probes with a single call: the
 # skill assembles the whole wrap-up as JSON and pipes it to this script on
 # stdin via a heredoc. See docs/changelog/2026-07-27-one-channel-one-writer.md and
-# docs/2026-07-27-checkpoint-channel-design.md for the schema and rationale.
+# plans/2026-07-27-checkpoint-channel-design.md for the schema and rationale.
 #
 # FR2: a schema violation exits 2 and names the offending field on stderr.
 # NFR1: nothing here mutates git state and no tmux runs at all — this is the

@@ -60,8 +60,8 @@ wait_for_idle() {
 #
 # Used by the compact watcher (line 1). Confirmation is the disappearance of
 # $HANDOFF_PENDING_FILE, which SessionStart(compact) consumes: the same signal
-# DESIGN.md calls the authoritative compaction-complete one. Nothing on the pane
-# is consulted. is_busy was the original criterion and false-fails here — on
+# docs/design.md calls the authoritative compaction-complete one. Nothing on
+# the pane is consulted. is_busy was the original criterion and false-fails here — on
 # 2026-07-22 a live `/compact` submitted, compacted for 103s, and was still
 # reported as never submitted, because the TUI shows no chrome is_busy matches
 # in the ~1.5s after the keystroke. is_typing is no better: an Enter absorbed as

@@ -123,8 +123,8 @@ files instead of leaving stale ones, so the next session starts clean.
 | Code state | the repo |
 | **Current task + open decisions across `/clear`** | **this plugin** |
 
-See [`DESIGN.md`](DESIGN.md) for the research and analysis behind this
-split.
+See [`docs/design.md`](docs/design.md) for the research and analysis behind
+this split.
 
 ### Choosing a handoff provider
 
@@ -175,9 +175,11 @@ current project is modified.
 
 ## Further reading
 
-- [`DESIGN.md`](DESIGN.md) — research, SOTA analysis, decisions.
+- [`docs/design.md`](docs/design.md) — research, SOTA analysis, decisions.
 - [`docs/changelog.md`](docs/changelog.md) — one line per design change,
   linking the dated write-time record of each under `docs/changelog/`.
+- [`plans/`](plans) — prospective content: specs, design proposals,
+  implementation plans.
 - [`CLAUDE.md`](CLAUDE.md) — agent instructions for working on the
   plugin itself.
 - [`skills/handoff/SKILL.md`](skills/handoff/SKILL.md) — the skill

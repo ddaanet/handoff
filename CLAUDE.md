@@ -84,7 +84,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   that is only a handle to the task file). The hooks do the rest; the skill
   never runs `/compact` itself. No rename.
 - `skills/handoff/references/design.md` — condensed design notes;
-  full rationale is in the plugin-root `DESIGN.md`
+  full rationale is in `docs/design.md`
 - `hooks/hooks.json` — declares nine hooks.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
@@ -366,20 +366,25 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
 - `.claude/settings.json` — project Claude Code settings. Wires the
   toolkit's `version-guard.sh` as a PreToolUse(Write|Edit) hook.
   Tracked in git so the guard applies to every clone.
-- `DESIGN.md` — living design document: current architecture, standing
+- `docs/design.md` — living design document: current architecture, standing
   decisions, rejected alternatives. Present tense, no dated entries.
-- `docs/changelog.md` — the index: one line per design change, oldest first,
-  `- <date> [Title](changelog/<file>.md) — hook`, same shape as `MEMORY.md`.
+- `docs/changelog.md` — the index: one line per design change, newest first,
+  `- [<date> — Title](changelog/<file>.md) — hook (vX.Y.Z)`, the version only
+  when the entry maps onto one release.
 - `docs/changelog/` — one file per design change, dated, holding the full
   write-time reasoning: the defect, the alternatives weighed, what was
   believed at the time. Never edited after the fact; a later change that
   reverses one heads the affected section with a
   `> **Superseded <date>** (see [<title>](<sibling>.md))` blockquote, scoped
   to what actually changed. A design change adds a file here plus its index
-  line, and rewrites whatever `DESIGN.md` prose it invalidates — all three
-  in the same pass, not as an optional follow-up. Appending a dated
-  subsection to `DESIGN.md` instead was the earlier rule, and it grew that
-  file to 2036 lines / 113 KB of mostly superseded machinery.
+  line, and rewrites whatever `docs/design.md` prose it invalidates — all
+  three in the same pass, not as an optional follow-up. Appending a dated
+  subsection to the design doc instead was the earlier rule, and it grew
+  that file to 2036 lines / 113 KB of mostly superseded machinery.
+- `plans/` — prospective content: specs, design proposals, implementation
+  plans. Anything describing work not yet done, or describing how something
+  was built rather than what it is. Write-time records like `docs/changelog/`
+  entries, so they are not revised as the code moves past them.
 
 ## Conventions
 
@@ -390,7 +395,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   (pinned to the main tree in a worktree session). Anything that requires
   judgement belongs in the skill, not a hook.
 - Keep the skill body lean (≤2000 words); move detailed rationale to
-  references or `DESIGN.md`.
+  references or `docs/design.md`.
 - Output paths: `.claude/handoff-task.md` (checkpoint-only, FR3) and
   `.claude/handoff-todo.md` (agent-editable scratch list, FR4), both
   git-tracked via `git add -f` (listed in `.gitignore` so only a hook adds
