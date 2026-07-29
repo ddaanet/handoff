@@ -78,13 +78,16 @@ checkpoint_memory_directive() {
     # gitlore is the single source of truth for the approval-body wording (see
     # gitlore's docs/design.md D19); this discovers it the same way handoff
     # already discovers gitlore.commitCommand — a key gitlore seeds at install
-    # and re-pins every SessionStart. No fallback copy here: the wording is
-    # only ever needed while gitlore is genuinely active, so a stale local copy
-    # could never be more correct than reporting the gap.
+    # and re-pins every SessionStart, at a path that moves with its version. No
+    # fallback copy here: the wording is only ever needed while gitlore is
+    # genuinely active, so a stale local copy could never be more correct than
+    # reporting the gap. A gap means no SessionStart has pinned the key since
+    # gitlore last moved, so the message states that one fact and the one act
+    # that recovers it.
     clause_file=$(git -C "$root" config --get gitlore.memoryApprovalClauseFile 2>/dev/null) || clause_file=""
     if [ -z "$clause_file" ] || [ ! -r "$clause_file" ]; then
         printf '%s\n' \
-"gitlore memory has uncommitted changes, but this session cannot read the memory-approval wording (git config gitlore.memoryApprovalClauseFile is unset or its file is missing) — the gitlore plugin looks disabled or not installed for this session. Check /plugin to enable gitlore, then retry; nothing has been written and the memory changes are still pending."
+"gitlore memory has uncommitted changes, but this session cannot read the memory-approval wording: git config gitlore.memoryApprovalClauseFile is unset or its file is missing. gitlore pins that key at SessionStart — restart Claude Code and retry. Nothing has been written and the memory changes are still pending."
         return 0
     fi
     clause=$(cat "$clause_file")
@@ -107,13 +110,19 @@ checkpoint_memory_directive() {
 
     # The summary file is the memory commit's message: gitlore feeds it to
     # `git commit -F` verbatim, in the submodule and in each tier. So the shape
-    # asked for is a commit message's — title line, blank line, body.
+    # asked for is a commit message's — and the clause, gitlore's own, states
+    # that shape. It is multi-line and arbitrary, so it gets its own block
+    # between blank lines rather than being spliced into a sentence.
     printf '%s\n' \
 "gitlore memory has uncommitted changes:" \
 "" \
 "$status" \
 "" \
-"Summarize these changes as a commit message: a title line of at most 72 characters, a blank line, then a body with $clause. Present it to the user as a markdown blockquote (lines prefixed with '> ', not a code fence) and get their approval — they may edit it. Do not write $approve_files before the user approves." \
+"Summarize these changes as a commit message, its title line at most 72 characters." \
+"" \
+"$clause" \
+"" \
+"Present it to the user as a markdown blockquote (lines prefixed with '> ', not a code fence) and get their approval — they may edit it. Do not write $approve_files before the user approves." \
 ""
 
     if [ "$mode" = "with-commit" ]; then

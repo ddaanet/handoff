@@ -1,5 +1,13 @@
 # Memory-approval wording is discovered from gitlore, not duplicated (2026-07-28)
 
+> **Superseded 2026-07-29** (see [The approval clause renders as a
+> block](2026-07-29-approval-clause-renders-as-a-block.md)), on two points
+> only: the clause is no longer interpolated into the block-1 sentence but
+> printed as its own block between blank lines, and the unset-key branch no
+> longer says the gitlore plugin looks disabled or points at `/plugin` — it
+> names the key, says gitlore pins it at `SessionStart`, and asks for a
+> restart. The discovery mechanism and the no-fallback decision stand.
+
 `checkpoint_memory_directive`'s approval-body wording — one line per changed
 memory file: kind (New/Update/Augment/Reduce/Remove), tier/slug, one-line
 summary — used to be hardcoded here, a fourth independent copy alongside

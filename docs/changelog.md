@@ -8,6 +8,7 @@ that reverses one heads the affected section with a superseding pointer.
 [`design.md`](design.md) is the other half: present tense, current truth,
 rewritten rather than annotated when a decision is reversed.
 
+- [2026-07-29 — The approval clause renders as a block](changelog/2026-07-29-approval-clause-renders-as-a-block.md) — a clause owned by another plugin cannot be spliced mid-sentence, and the single-line test fixture is why the suite could not see it; the unset-key branch stops blaming the plugin and asks for the restart that actually recovers
 - [2026-07-28 — Memory-approval wording is discovered from gitlore](changelog/2026-07-28-memory-approval-from-gitlore.md) — the approval-body wording was a fourth independent copy; gitlore now owns it as one file and advertises the path through a git-config key, the only gitlore-advertised key the checkpoint reads
 - [2026-07-28 — Stop's systemMessage stops echoing the compact directive](changelog/2026-07-28-stop-systemmessage-no-echo.md) — the arming confirmation interpolated the full `/compact <directive>` that the watcher types into the pane moments later, so the user saw it twice
 - [2026-07-27 — `{"content": null}` is a no-op, not "content supplied"](changelog/2026-07-27-content-null-is-a-no-op.md) — key-presence validation treated an explicit `null` as content, so the literal string `null` was written into the task file, silently, past schema validation; both validators short-circuit to a no-op instead

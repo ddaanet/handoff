@@ -34,8 +34,20 @@ EOF
 
 # The fixture's stand-in for gitlore's canonical clause text (real wording
 # lives in gitlore's reference/memory-approval-clause.txt) — a fixed value so
-# tests can assert on it without reading the file back.
-GITLORE_MEMORY_APPROVAL_CLAUSE="as one line per memory file — New, Update, Augment, Reduce, or Remove, its tier/slug, and a one-line summary of what changed"
+# tests can assert on it without reading the file back. Multi-line, and shaped
+# after the real one: prose lead, blank line, an indented template block. A
+# single-line stand-in cannot see whether the directive renders the clause as
+# its own block or splices it into the middle of a sentence.
+# Must stay free of the words `trigger`, `gitlore-commit-memory` and `two file
+# writes` — the with-commit test asserts their absence over the whole output.
+GITLORE_MEMORY_APPROVAL_CLAUSE="The commit message is a subject line, a blank line, then one paragraph per
+changed memory file, each opening with a bold prefix naming the file's kind and
+its tier/slug. Template:
+
+    <subject line, no conventional-commit prefix>
+
+    **New <tier>/<slug>:** what the fact records, and what prompted writing it
+    now rather than earlier."
 
 # Materialize a live superpowers SDD ledger inside $1 (a repo path) for the plan
 # whose basename is $2 (default feature-plan). Layout and identity line are

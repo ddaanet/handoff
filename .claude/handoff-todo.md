@@ -1,6 +1,4 @@
 ## Remaining
 
-- Compact `memory/MEMORY.md`: 23.4 KiB against the 24.4 KiB point where Claude Code's loader silently truncates the tail. Index lines are functional for agent-matching, so count each trigger literal index-wide before and after rather than shortening mechanically.
-- Fix `checkpoint_memory_directive`'s failure message when `git config gitlore.memoryApprovalClauseFile` is unset: it reports gitlore as disabled or not installed, but the key is re-pinned only at gitlore's `SessionStart`, which a plugin update does not fire.
-- Apply `plans/brief-checkpoint-lib-clause-rendering.md`: `_checkpoint-lib.sh:116` still interpolates gitlore's multi-line approval clause mid-sentence, so it renders as an interruption rather than a block. The brief also asks whether the test fixture should gain a multi-line case.
+- Compact `memory/MEMORY.md`: 23.9 KiB against the 24.4 KiB point where Claude Code's loader silently truncates the tail. Index lines are functional for agent-matching, so count each trigger literal index-wide before and after rather than shortening mechanically.
 - Decide whether `plans/brief-install-recovery.md` (2026-05-29, unapplied) is still wanted — handoff has no install script at all, so adopting gitlore's install-recovery pattern means introducing one.

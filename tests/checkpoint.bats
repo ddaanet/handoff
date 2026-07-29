@@ -421,34 +421,43 @@ precompact_payload() {
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
 }
 
-@test "checkpoint: gitlore.memoryApprovalClauseFile resolved -> its content appears in the directive" {
+# The clause is gitlore's, multi-line, and arbitrary in shape — so it is
+# rendered as its own block rather than spliced into a sentence. `grep -qF`
+# would pass on any single matching line; bash substring matching is what
+# asserts the whole clause arrived contiguous, and the blank-line framing is
+# what asserts it is a block.
+@test "checkpoint: gitlore.memoryApprovalClauseFile resolved -> its content is a block of its own" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
     run_checkpoint "$repo" "$(handoff_payload without-commit)"
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qF "$GITLORE_MEMORY_APPROVAL_CLAUSE"
+    [[ "$output" == *"$GITLORE_MEMORY_APPROVAL_CLAUSE"* ]]
+    [[ "$output" == *$'\n\n'"$GITLORE_MEMORY_APPROVAL_CLAUSE"$'\n\n'* ]]
+    # The title-length limit is handoff's, not the clause's: it survives.
+    echo "$output" | grep -q '72 characters'
 }
 
-@test "checkpoint: gitlore.memoryApprovalClauseFile unset -> reports gitlore disabled, never the IPC instructions" {
+@test "checkpoint: gitlore.memoryApprovalClauseFile unset -> names the key and the restart, never the IPC instructions" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
     git -C "$repo" config --unset gitlore.memoryApprovalClauseFile
     run_checkpoint "$repo" "$(handoff_payload without-commit)"
     [ "$status" -eq 0 ]
     echo "$output" | grep -qi 'gitlore.memoryApprovalClauseFile'
-    echo "$output" | grep -qi 'gitlore plugin looks disabled'
+    echo "$output" | grep -qi 'restart'
     [[ "$output" != *"$repo/.claude/gitlore-memory-message"* ]]
     [[ "$output" != *"$repo/.claude/gitlore-commit-memory"* ]]
     [[ "$output" != *"two file writes"* ]]
 }
 
-@test "checkpoint: gitlore.memoryApprovalClauseFile points at a missing file -> reports gitlore disabled" {
+@test "checkpoint: gitlore.memoryApprovalClauseFile points at a missing file -> same key-and-restart report" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
     git -C "$repo" config gitlore.memoryApprovalClauseFile "$repo/.gitlore-memory-approval-clause-missing.txt"
     run_checkpoint "$repo" "$(handoff_payload without-commit)"
     [ "$status" -eq 0 ]
-    echo "$output" | grep -qi 'gitlore plugin looks disabled'
+    echo "$output" | grep -qi 'gitlore.memoryApprovalClauseFile'
+    echo "$output" | grep -qi 'restart'
     [[ "$output" != *"$repo/.claude/gitlore-memory-message"* ]]
 }
 
