@@ -25,3 +25,8 @@ __pycache__/
 # uv-managed venv (created by `uv sync`; uv.lock IS tracked)
 .venv/
 .pytest_cache/
+
+# macOS Finder metadata and AppleDouble sidecars. Several had accumulated
+# under docs/ and got carried along by directory moves.
+.DS_Store
+._*
