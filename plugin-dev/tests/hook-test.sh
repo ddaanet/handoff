@@ -86,6 +86,62 @@ rc=$?
 set -e
 assert_eq "$rc" "0" "version-guard unrelated-file exit code"
 
+market="$proj/marketplace.json"
+
+# check-version skips non-fatally when MARKETPLACE_DIR is unset and no
+# explicit marketplace path is given.
+echo "=== check-version (MARKETPLACE_DIR unset: skip) ==="
+set +e
+out="$(env -u MARKETPLACE_DIR bash check-version.sh "$proj/.claude-plugin/plugin.json" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "check-version MARKETPLACE_DIR-unset exit code"
+echo "$out" | grep -q "MARKETPLACE_DIR not set" \
+    || fail "check-version did not report MARKETPLACE_DIR unset"
+
+# check-version skips non-fatally when the marketplace file doesn't exist.
+echo "=== check-version (marketplace.json missing: skip) ==="
+set +e
+out="$(bash check-version.sh "$proj/.claude-plugin/plugin.json" "$proj/no-such-marketplace.json" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "check-version missing-marketplace exit code"
+
+# check-version skips non-fatally when the plugin has no marketplace entry
+# yet (pre-first-publication), rather than failing.
+echo "=== check-version (no entry: skip) ==="
+jq -n '{plugins: []}' > "$market"
+set +e
+out="$(bash check-version.sh "$proj/.claude-plugin/plugin.json" "$market" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "check-version no-entry exit code"
+echo "$out" | grep -q "no fixture entry" \
+    || fail "check-version did not report the missing entry"
+
+# check-version passes when plugin.json and the marketplace entry agree,
+# reading the plugin name from plugin.json rather than a hardcoded name.
+echo "=== check-version (in sync: pass) ==="
+jq -n '{plugins: [{name: "fixture", version: "1.2.3"}]}' > "$market"
+set +e
+out="$(bash check-version.sh "$proj/.claude-plugin/plugin.json" "$market" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "0" "check-version in-sync exit code"
+echo "$out" | grep -q "in sync (1.2.3)" \
+    || fail "check-version did not report in sync"
+
+# check-version fails when plugin.json and the marketplace entry disagree.
+echo "=== check-version (drift: fail) ==="
+jq -n '{plugins: [{name: "fixture", version: "1.2.2"}]}' > "$market"
+set +e
+out="$(bash check-version.sh "$proj/.claude-plugin/plugin.json" "$market" 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" "1" "check-version drift exit code"
+echo "$out" | grep -q "version drift" \
+    || fail "check-version did not report drift"
+
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2
     exit 1

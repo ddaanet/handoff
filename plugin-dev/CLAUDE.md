@@ -28,8 +28,12 @@ inversion in mind when editing.
   the self-release recipe; mirrors the latest git tag. Exists so
   consumers (which vendor via subtree, where tags don't propagate) can
   identify the version they're on with `cat plugin-dev/VERSION`.
-- `DESIGN.md` — living rationale for every design decision. Update
-  when design choices change.
+- `docs/design.md` — living rationale for every design decision.
+  States what the toolkit *is*. Update when design choices change.
+- `docs/changelog.md` — index of write-time records, newest first, one
+  line per entry. Bodies live in `docs/changelog/YYYY-MM-DD-slug.md`.
+- `plans/` — specs and implementation plans. Prospective content only;
+  `docs/` holds what is true now.
 
 ## Quality gate
 
@@ -52,18 +56,18 @@ tag, and creates a GitHub release. Refuses to run on a dirty tree or
 when `VERSION` disagrees with the latest tag (same invariant as the
 consumer release recipe protects on `plugin.json`).
 
-Tags only; never expect consumers to track `main`. See DESIGN.md
+Tags only; never expect consumers to track `main`. See docs/design.md
 "Versioning" for the reasoning.
 
 ## Conventions
 
 - **The consumer-defined commit gate is `precommit`**, not `validate`.
   All documentation and example justfiles must use this name. See
-  DESIGN.md "Recipe naming".
+  docs/design.md "Recipe naming".
 - **`release` depends on `prerelease`, never on `precommit` directly.**
   Consumers define both; `prerelease: precommit` is the usual body, and
   a consumer with slow or paid checks widens it. Don't "simplify" the
-  indirection away — see DESIGN.md "Release gate". Any change to the
+  indirection away — see docs/design.md "Release gate". Any change to the
   binding must keep `_import-check`'s three stub shapes passing (plain,
   widened, and missing-`prerelease`).
 - **Hook output is dual-channel.** When `version-guard.sh` denies an
@@ -88,9 +92,13 @@ Tags only; never expect consumers to track `main`. See DESIGN.md
   `release.just`, and the example justfile `install.sh` generates. Put
   longer explanation in a file header or inside the recipe body — but
   never above a shebang recipe's `#!` line, which must come first.
-- **Update `DESIGN.md` when design decisions change.** The History
-  section accretes; overturned decisions are rewritten in place with
-  the new reasoning, not struck through.
+- **Design and changelog are separate files with separate rules.**
+  `docs/design.md` is present-tense: overturned decisions are rewritten
+  in place with the new reasoning, never struck through. Each change
+  also gets a dated write-time record at
+  `docs/changelog/YYYY-MM-DD-slug.md`, pointed at from
+  `docs/changelog.md` — those are never revised, because a dated record
+  is correct forever precisely because it is dated.
 
 ## Non-goals for this repo
 
@@ -103,4 +111,4 @@ Tags only; never expect consumers to track `main`. See DESIGN.md
 - Don't add hybrid Python+plugin support to `release.just`. Repos
   like `edify` are deliberately out of scope; their release shape is
   different enough that wrapping them would obscure the main path.
-  See DESIGN.md "Limitations".
+  See docs/design.md "Limitations".

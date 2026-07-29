@@ -7,12 +7,22 @@ on contributor-side dotfiles).
 
 ## Contents
 
-- **`release.just`** — release recipe + toolkit-update recipe. Imported
-  into the consumer's `justfile`. The `release` recipe validates state,
-  bumps `.claude-plugin/plugin.json`, commits, tags, pushes, creates a
-  GitHub release, and bumps (or creates) the plugin's entry in
-  `marketplace.json`. The `update-plugin-dev` recipe pulls a newer
+- **`release.just`** — the recipes imported into the consumer's
+  `justfile`: `release`, `resume-release`, `check-version` and
+  `update-plugin-dev`. `release` and `resume-release` are one-line
+  wrappers around `release.sh`; `update-plugin-dev` pulls a newer
   toolkit version into the consumer.
+- **`release.sh`** — the release flow itself. Validates state, bumps
+  `.claude-plugin/plugin.json`, commits, tags, pushes, creates a GitHub
+  release, and bumps (or creates) the plugin's entry in
+  `marketplace.json`. Its `--resume` mode completes a release that
+  landed only partially — a rejected push, a failed `gh` call — by
+  probing what already happened and doing only what is missing. It is a
+  no-op that says so when everything already landed.
+- **`check-version.sh`** — compares `plugin.json`'s version against the
+  plugin's `marketplace.json` entry. Exposed as `just check-version` and
+  run as a `release` pre-flight, so a release refuses to start on top of
+  a previous one that never finished.
 - **`version-guard.sh`** — `PreToolUse(Write|Edit)` hook. Refuses agent
   edits that change `.claude-plugin/plugin.json`'s `.version`. The
   release recipe owns version bumps; manual edits desync the manifest

@@ -260,8 +260,18 @@ was pre-added at exactly the version being released — `git commit` would
 exit non-zero under `set -e` and abort the recipe *after* the
 irreversible commit/tag/push/`gh release create` had already run, leaving
 the maintainer staring at `exit code 1` on a release that actually
-succeeded. The step now checks `git diff --cached --quiet` and skips the
-commit/push (reporting "marketplace already at X") when nothing changed.
+succeeded. The step checks `git diff --cached --quiet` and skips the
+commit when nothing changed.
+
+That check answers "should I commit?" and *only* that. Whether to push is
+a separate question with a separate probe: the marketplace repo's own
+`HEAD` against its own `origin`, via `ls-remote` on its own branch. The
+two were once one check, which meant a marketplace commit whose push was
+rejected could never be recovered — the next run found nothing staged,
+skipped the push along with the commit, and reported the release
+complete. Idempotence has to be measured against the remote, not against
+the working tree, or a recovery tool reports success on the state it
+exists to repair.
 
 ### No interactive confirmation in `release`
 
@@ -363,6 +373,85 @@ with `prerelease` missing — and asserts via `--dry-run` that `release`
 resolves to the right gate chain in the first two and that the third fails
 with an error naming `prerelease`. Verified against just 1.46.0.
 
+### `check-version.sh`: catching a partially-completed release
+
+`release`'s marketplace step (see "Marketplace entry" above) runs *after*
+`plugin.json` is bumped, committed, tagged, pushed, and the GitHub release
+created. If anything from `gh release create` onward fails, the plugin is
+left tagged and pushed at the new version while `marketplace.json` is still
+at the old one — invisible to end users, and nothing in the toolkit
+previously detected it: the pre-flight in `release` only compares
+`plugin.json` against the latest tag, and the version-guard hook only fires
+on edits to `plugin.json`, not on marketplace staleness.
+
+`check-version.sh` closes this by comparing `plugin.json`'s `.version`
+against the consumer's entry in `$MARKETPLACE_DIR/.claude-plugin/marketplace.json`.
+It's exposed as a `just check-version` recipe and also runs automatically as
+a `release` pre-flight step, so a new release refuses to start on top of a
+drifted marketplace from a previous incomplete one.
+
+It was originally a gitlore-local script (motivating the `prerelease` gate
+above), hardcoded to gitlore's plugin name and a `../claude-plugins` sibling
+path. Absorbed into the toolkit with two fixes: the plugin name is read from
+`plugin.json` instead of hardcoded, and the marketplace path comes from
+`$MARKETPLACE_DIR` (matching `release.just`'s own convention) instead of an
+assumed sibling directory. A missing marketplace entry is treated as
+pre-first-publication state (skip), not drift (fail) — consistent with how
+`release.just`'s marketplace step treats a missing entry.
+
+### Recovery: `resume-release` and the shared release tail
+
+`check-version.sh` detects a half-landed release but cannot fix one, and the
+guard it feeds is deliberately strict: `release` refuses to start on top of
+drift. Before `resume-release` nothing satisfied that guard except hand-editing
+another repository. `resume-release` is the forward exit.
+
+The last four steps of a release — push the branch, push the tag, create the
+GitHub release, bump the marketplace — are one idempotent block that both
+`release` and `resume-release` run. Each step probes remote state before acting:
+`git ls-remote` for the branch and tag, `gh release view` for the release, and
+`ls-remote` again — against the marketplace repo's own origin — for the
+marketplace push. Probing the remote directly means the
+answer is authoritative without a `git fetch`, so recovery never depends on how
+stale the local remote-tracking refs are. A step that finds its work already
+done says so and returns; only steps that act set `acted`.
+
+Resume takes its version from `plugin.json` and requires the matching local tag
+to already exist. It completes a release; it never starts one. Tagging `HEAD` on
+a guess would tag whatever landed since the interrupted release, so a missing
+tag is a refusal that points at `just release <bump>` instead. When every step
+finds nothing to do, the summary says the release is already complete rather
+than claiming to have completed it — that distinction is what makes running it
+on a healthy repo safe rather than merely harmless.
+
+A tag that exists on the remote at a *different* sha is an error, never a
+force-push. A reused tag means something published under that version already,
+and no recovery path should paper over that.
+
+`resume-release` has no `prerelease` dependency, unlike `release`. The code it
+completes is already committed, tagged, and in most cases pushed — the gate
+already passed once, before the interruption. Re-running it would make recovery
+cost whatever the consumer's slowest gate costs, and a consumer with paid checks
+would route around the recipe and finish by hand, which is the situation this
+exists to end.
+
+The flow moved out of `release.just`'s recipe body into `plugin-dev/release.sh`
+to get three things a justfile recipe cannot have: `shellcheck` coverage,
+offline end-to-end tests driving real git repos with a stubbed `gh`, and no
+just/bash quoting seam — `{{...}}` interpolation inside a shell body is a
+recurring source of quoting bugs that no linter sees. `release.just` keeps the
+two recipes as one-line wrappers, which is also the whole interface consumers
+depend on.
+
+This repo's own self-release recipe stays bespoke. It has the same tail minus
+the marketplace step, and it failed in the same window once — `v0.4.1` has a
+`VERSION` bump commit and no tag. Resuming it by hand is a tag and a `gh release
+create`, which the toolkit's sole maintainer can do; `resume-release` exists as
+a convenience for consumers, who are more numerous and less close to the code.
+Folding it in would also make the toolkit consume its own consumer-shaped code,
+which the "don't run `release.just`'s recipes from this repo" rule exists to
+prevent.
+
 ### Default branch detection via `origin/HEAD`
 
 The release recipe doesn't hardcode `main` — it reads the default
@@ -387,6 +476,14 @@ fallback fires cleanly.
   edify-style flows into the unified recipe would either require
   conditionals that obscure the main path, or break edify outright.
   Edify keeps its bespoke recipe.
+- **`release` is not atomic, but it is recoverable.** The tag push,
+  `gh release create` and marketplace push are outward-facing and cannot
+  be rolled back, so any failure from the version commit onward leaves
+  the plugin tagged at the new version with a stale marketplace entry.
+  That remains true. Its consequence no longer is: `just resume-release`
+  completes the release from wherever it stopped. Recovery only ever
+  moves forward to the version already committed — rolling a release
+  back is still out of scope.
 - **No automated propagation.** When the toolkit ships a new tag,
   each consumer plugin must run `just update-plugin-dev vX.Y.Z`
   individually. Adopting changes is a deliberate per-consumer
@@ -412,73 +509,6 @@ fallback fires cleanly.
 
 ## History
 
-- **Unreleased — breaking.** `release` now depends on a consumer-defined
-  `prerelease` recipe instead of `precommit` directly, so a consumer whose
-  release gate is bigger than its commit gate can express that (raised
-  from `gitlore`, whose paid `evals` gate never ran at release time).
-  **Every consumer must add `prerelease: precommit` to its justfile** when
-  adopting this tag; without it just rejects the whole justfile with
-  `unknown dependency prerelease`. `_import-check` now tests three stub
-  shapes — plain, widened, and missing. See "Release gate: `release`
-  depends on `prerelease`".
-
-- **Unreleased.** Removed the interactive confirmation prompt and the
-  `--yes` argument from the `release` recipe. `just release [bump]` is
-  now non-interactive — the recipe runs behind Claude Code's permission
-  layer (or a human's own invocation), so the inner `read -rp` prompt
-  and its `--yes` skip were redundant. Pre-flight guards unchanged. See
-  "No interactive confirmation in `release`".
-
-- **v0.2.1.** Marketplace step in `release.just` made robust to the
-  entry's pre-state. First publication now creates the `marketplace.json`
-  entry from `plugin.json` (deriving the `github` source from `origin`)
-  instead of aborting with "no entry for '<name>'". The marketplace
-  commit is now idempotent — a no-op rewrite (entry already at the target
-  version) is reported and skipped rather than failing the recipe after
-  the release already landed. See "Marketplace entry: bump if present,
-  create on first publication". Closes
-  `BUG-release-marketplace-noop-commit.md`.
-
-- **2026-04-27 — Initial extraction (`v0.1.0`).** Toolkit broken out
-  of `handoff/scripts/version-guard.sh` and the inline release recipes
-  in `handoff/justfile` and `gitmoji/justfile`. Unified the two
-  recipes (commit-message format settled on `release: X`, dynamic
-  default-branch detection from edify, manifest-vs-tag mismatch guard
-  added during the work). Toolkit not yet adopted by either consumer
-  — handoff's `0.2.0` release postponed pending migration.
-
-  Next: migrate `handoff` to consume the toolkit (subtree-add, run
-  `install.sh`, delete its local `scripts/version-guard.sh` and
-  inline release recipe). Then `gitmoji`. After that, evaluate
-  whether to absorb a small standard-hooks set (shellcheck,
-  trailing-whitespace) for consumer plugins, or leave each consumer
-  to define its own `precommit` shape.
-
-- **2026-04-29 — `v0.2.0`.** Three changes shipped together:
-  - **`VERSION` file + self-release recipe.** The toolkit had no way
-    to self-identify from inside a consumer's subtree (tags don't
-    propagate). Added a plain-text `VERSION` at the repo root and a
-    local `release` recipe in this repo's `justfile` that bumps
-    `VERSION`, tags, and pushes. Same manifest-vs-tag mismatch guard
-    as the consumer recipe, applied to `VERSION`. See "Toolkit
-    version source of truth" above.
-  - **Marketplace bump in `release.just`.** The consumer release
-    recipe now also bumps the corresponding entry in
-    `$MARKETPLACE_DIR/.claude-plugin/marketplace.json` and pushes
-    that repo. Pre-flight checks (env var set, file exists, entry
-    exists, repo clean) run before any destructive op. Rationale: a
-    tag without a marketplace bump is invisible to end users, so
-    treating them as one atomic release matches reality.
-  - **`symbolic-ref` fix for default-branch detection.** See
-    "Default branch detection" above.
-
-  Also added a hook-test for `version-guard.sh` under `tests/`.
-
-  Adoption: `handoff` migrated to the toolkit during this cycle
-  (subtree-add v0.2.0, ran `install.sh`, deleted its local
-  `scripts/version-guard.sh` and inline release recipe). `gitmoji`
-  migration in progress.
-
-  Next: finish `gitmoji` migration. Then revisit the
-  standard-hooks-set question with two real consumers' `precommit`
-  recipes side-by-side.
+Write-time records of each change — what moved and the reasoning available at
+the time — live in [changelog.md](changelog.md), one file per entry. This
+document states what the toolkit *is*; the changelog states how it got there.
