@@ -11,9 +11,10 @@
 # agent's sandboxed Bash, where a `git add` can strand .git/index.lock and tmux
 # is unreachable. The directive path queries git read-only (see
 # _checkpoint-lib.sh); beyond that the checkpoint writes files (task/todo
-# content, the manifest, autorename) and nothing else;
-# scripts/bash-post.sh (PostToolUse(Bash)) does the staging and the rename
-# watcher spawn in hook context, driven by the manifest this script leaves.
+# content, the manifest, the armed transition) and nothing else;
+# scripts/bash-post.sh (PostToolUse(Bash)) does the staging in hook context,
+# driven by the manifest this script leaves, and the sentinel is armed at Stop
+# by stop-drive.sh like any other.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
@@ -35,11 +36,17 @@ field_has_key() { jq -e ".$1 | has(\"$2\")" >/dev/null 2>&1 <<<"$payload"; }
 
 root="$(handoff_root "$PWD")"
 
+# Four skills, two boundaries. The judgment the directive output encodes is
+# per-boundary — the same whether or not the agent types the command afterwards
+# — so the composition below keys on the boundary and the two skills at each
+# one cannot drift in what they tell the agent.
+skills='"handoff", "handoff-continue", "precompact" or "compact-continue"'
 skill="$(field_get skill)"
 case "$skill" in
-    handoff | precompact) ;;
-    "" | null) err "skill" 'required, one of "handoff" or "precompact"' ;;
-    *) err "skill" "must be \"handoff\" or \"precompact\", got \"$skill\"" ;;
+    handoff | handoff-continue) boundary=clear ;;
+    precompact | compact-continue) boundary=compact ;;
+    "" | null) err "skill" "required, one of $skills" ;;
+    *) err "skill" "must be one of $skills, got \"$skill\"" ;;
 esac
 
 commit_mode="$(field_get commit)"
@@ -49,9 +56,12 @@ case "$commit_mode" in
     *) err "commit" "must be \"with-commit\" or \"without-commit\", got \"$commit_mode\"" ;;
 esac
 
-# rename: required under skill:"handoff", forbidden (schema error, not a
-# silent ignore) under skill:"precompact" — a rename is /handoff:autoname's
-# job, and precompact already lists writing autorename as an anti-pattern.
+# rename: required under skill:"handoff", forbidden (a schema error, not a
+# silent ignore) under all three others. The two driven skills carry their
+# title in the sentinel they write, as one of its lines; precompact renames
+# nothing at all. Keeping it required in the one place it belongs is what makes
+# a `handoff` call that forgot its title an error rather than a silent
+# non-rename.
 rename=""
 if ! field_is_null rename; then
     rename="$(field_get rename)"
@@ -59,7 +69,7 @@ fi
 if [ "$skill" = "handoff" ]; then
     [ -n "$rename" ] || err "rename" 'required when skill is "handoff"'
 else
-    [ -z "$rename" ] || err "rename" 'forbidden when skill is "precompact"'
+    [ -z "$rename" ] || err "rename" "forbidden when skill is \"$skill\""
 fi
 
 # Validate one Write-form-or-null field ($1 = "task", never Edit) or one
@@ -219,7 +229,16 @@ if [ "$todo_action" != "none" ]; then
 fi
 
 if [ -n "$rename" ]; then
-    printf '%s' "$rename" > "$root/$HANDOFF_REL_RENAME"
+    # The sentinel holds the literal keystrokes, so the title becomes the
+    # argument of a `/rename` line under a `rename` kind line. It has to be one
+    # line: the format is line-oriented and handoff_drive_read would reject a
+    # title carrying its own newline. bash-post.sh used to flatten whitespace at
+    # consume time; with the sentinel written in its final form there is no
+    # consumer left to do it, so it happens here.
+    title="$(printf '%s' "$rename" | tr -s '[:space:]' ' ')"
+    title="${title# }"; title="${title% }"
+    [ -n "$title" ] || err "rename" "must be a non-empty title"
+    printf 'rename\n/rename %s\n' "$title" > "$root/$HANDOFF_REL_DRIVE"
 fi
 
 # Always written, even with zero lines: bash-post.sh's fast-exit gate is the
@@ -233,25 +252,18 @@ else
 fi
 
 # FR9: directive output (memory gate, SDD ledger nudge) unchanged in content
-# and composition order from the probes this replaces.
-if [ "$skill" = "handoff" ]; then
-    memory="$(checkpoint_memory_directive "$root" "$commit_mode")"
-    todo_suppress="$(checkpoint_todo_suppression "$root")"
-    if [ -n "$memory" ] && [ -n "$todo_suppress" ]; then
-        printf '%s\n\n%s\n' "$memory" "$todo_suppress"
-    elif [ -n "$memory" ]; then
-        printf '%s\n' "$memory"
-    elif [ -n "$todo_suppress" ]; then
-        printf '%s\n' "$todo_suppress"
-    fi
-else
-    memory="$(checkpoint_memory_directive "$root" "$commit_mode")"
-    sdd="$(checkpoint_sdd_directive "$root")"
-    if [ -n "$memory" ] && [ -n "$sdd" ]; then
-        printf '%s\n\n%s\n' "$memory" "$sdd"
-    elif [ -n "$memory" ]; then
-        printf '%s\n' "$memory"
-    elif [ -n "$sdd" ]; then
-        printf '%s\n' "$sdd"
-    fi
+# and composition order from the probes this replaces. Keyed on the boundary,
+# not the skill: preparation is identical on both sides of the drive/no-drive
+# split, so the pair at each boundary composes the same thing.
+memory="$(checkpoint_memory_directive "$root" "$commit_mode")"
+case "$boundary" in
+    clear)   second="$(checkpoint_todo_suppression "$root")" ;;
+    compact) second="$(checkpoint_sdd_directive "$root")" ;;
+esac
+if [ -n "$memory" ] && [ -n "$second" ]; then
+    printf '%s\n\n%s\n' "$memory" "$second"
+elif [ -n "$memory" ]; then
+    printf '%s\n' "$memory"
+elif [ -n "$second" ]; then
+    printf '%s\n' "$second"
 fi

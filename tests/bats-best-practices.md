@@ -403,7 +403,7 @@ STUB
 }
 ```
 
-This is exactly the pattern `rename-test.bats` uses to stub `tmux`
+This is exactly the pattern `watcher-test.bats` uses to stub `tmux`
 (a per-test `$STUBDIR` script that logs `send-keys` and emits scripted
 `capture-pane` output). Reviewer expectations for a PATH stub: it lives
 under a bats tmpdir (auto-cleaned), it is `chmod +x`, and it is put on

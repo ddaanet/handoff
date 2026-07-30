@@ -117,7 +117,7 @@ git / memory.
 
 ## Architecture
 
-Three skills, one write path, nine hooks, and two files that cross a
+Five skills, one write path, eight hooks, and two files that cross a
 boundary.
 
 ### The seam
@@ -166,47 +166,87 @@ included, plus the rename watcher spawn.
 (`checkpoint.sh` and `write-stage.sh`, sharing `checkpoint_is_empty_body`),
 not an instruction the agent has to remember.
 
-### The three skills
+### The five skills
 
-- **`/handoff:handoff`** — the `/clear` wrap-up. Decides commit awareness,
-  captures memory, decides title / task / remainder, issues one checkpoint
-  call, follows the directive.
-- **`/handoff:precompact`** — commit memory → compact → continue. Same
-  checkpoint call with `"skill": "precompact"` and no `rename`, then writes
-  `.claude/autocompact`. Continuation is intrinsic: nobody compacts before
-  a `/clear` or before stopping.
-- **`/handoff:autoname`** — rename only. Decides a title and writes
-  `.claude/autorename` with the Write tool. For `/btw` side conversations
-  and any session worth a name while the main thread stays live.
+Two boundaries, and at each one a skill that prepares and a skill that also
+carries the transition out:
+
+| boundary | prepare only | prepare + drive |
+|---|---|---|
+| compaction | `/handoff:precompact` | `/handoff:compact-continue` |
+| clear | `/handoff:handoff` | `/handoff:handoff-continue` |
+
+The judgment is per-boundary, not per-drive-mode: commit awareness, memory
+capture, the task/todo drafting rules and the file-vs-prompt seam are
+identical whether or not the agent types the command afterwards. So each
+boundary's full protocol lives in one file — `handoff/SKILL.md` and
+`precompact/SKILL.md` — and the two driven skills are short bodies that
+execute their sibling's protocol by reference and then arm. The alternative
+is two drifting copies of the paragraphs the whole design rests on.
+
+The pair at each boundary is told apart by trigger vocabulary, not by
+inferring the situation from context: *prepare* and *end* against
+*continue*, with the bare boundary word falling to the prepare-only skill.
+An operator who wants the other default sets it in a user memory or a
+`CLAUDE.local.md`; the plugin ships no nudge, because that default is one
+operator's habit rather than a property of the boundary.
+
+- **`/handoff:autoname`** — rename only, neither boundary. Decides a title
+  and writes the sentinel with the Write tool. For `/btw` side
+  conversations and any session worth a name while the main thread stays
+  live.
 
 ### Driving the TUI
 
-Two lines have to be *typed* into the session: `/compact` and the
-continuation prompt. Mid-turn input has four distinct classes, and prose —
-not the slash command — is the dangerous one: it is injected into the
-running turn's next model call. So neither line is ever typed from inside a
-live turn. Both go through detached tmux watchers spawned by hooks at
-harness-authoritative boundaries: `Stop` arms the compaction
-(`stop-compact.sh` renames `autocompact` → `autocompact.pending` *before*
-spawning, so a later `Stop` cannot re-arm), and `SessionStart(compact)`
-fires the continuation (`load-compact.sh`).
+A **driven transition** is a sequence of lines to type, plus the
+`SessionStart` source that confirms it happened:
 
-Watchers read the pane only where the pane is the sole witness — gating
-*typing into* the composer (`is_typing`, `is_unknown_command`). Nothing that
-asks whether an action *took effect* looks at the pane: line 1 confirms by
-waiting for `SessionStart(compact)` to consume `autocompact.pending`, line 2
-confirms against the session transcript. The rename watcher is the one
-exception, and an unfinished one — see the design decision below. Every
-pane-derived
-did-it-take-effect predicate that was tried failed, each in a different way.
+| kind | typed before | typed after | confirming source |
+|---|---|---|---|
+| `rename` | `/rename <title>` | — | — |
+| `compact` | `/compact [directive]` | continuation prose | `compact` |
+| `clear` | `/rename <title>`, `/clear` | continuation prose | `clear` |
+| `compact` (prepared) | — | — | `compact` |
 
-A detached watcher's exit status is read by nothing, so non-delivery is
-written to a file (`autocompact.failed`, `autorename.failed`) and reported
-by `report-watcher-failure.sh` at the next `UserPromptSubmit` — the first
+One sentinel, `.claude/autodrive`, whose first line is the kind. The
+remaining lines are the **literal keystrokes**, so the walker never needs to
+know which command belongs to which kind; validation anchors it instead —
+the *n*th line of kind *k* must begin with the expected command literal, so
+the file cannot be made to type something else.
+
+Mid-turn input has four distinct classes, and prose — not the slash command
+— is the dangerous one: it is injected into the running turn's next model
+call. So no line is ever typed from inside a live turn. `Stop`
+(`stop-drive.sh`) arms the before-lines, moving the sentinel to `.pending`
+*before* spawning so a later `Stop` cannot re-arm; the transition's own
+`SessionStart` consumes that file and spawns the after-line. One walker,
+`drive-when-idle.sh`, serves every case: wait for idle, type, confirm,
+re-gate on idle, next line. A line that fails to confirm stops the sequence,
+which is what makes a `/rename` that never lands under kind `clear` cost a
+wrong title and nothing more.
+
+Confirmation dispatches on the **command**, not the kind — which is what
+lets `/rename` appear in two kinds with two different fates, and carries the
+recognition check for free, since any line beginning `/` takes the
+type-read-back-Enter path. Three primitives: a `custom-title` transcript
+entry for `/rename`, the `.pending` file disappearing for `/compact` and
+`/clear`, a genuine user-prompt transcript entry for prose. The walker reads
+the pane only where the pane is the sole witness — gating *typing into* the
+composer (`is_typing`, `is_unknown_command`). Nothing that asks whether an
+action *took effect* looks at it.
+
+A detached walker's exit status is read by nothing, so non-delivery is
+written to `.claude/autodrive.failed` and reported by
+`report-watcher-failure.sh` at the next `UserPromptSubmit` — the first
 moment anything can act on the news. That hook also sweeps a bare
-`.claude/autocompact` left by a turn that ended on Esc or a crash:
+`.claude/autodrive` left by a turn that ended on Esc or a crash:
 `UserPromptSubmit` is the exact discriminator, since it cannot fire between
 the write and that turn's own `Stop`.
+
+The prepare-only compact path arms the kind line alone. Nothing is typed,
+but the transition is *expected*, and that expectation is what
+`SessionStart(compact)` gates the frame's re-injection on — otherwise a
+hand-typed `/compact` re-injects nothing.
 
 ### Scoping
 
@@ -356,19 +396,26 @@ has already sprung once.
 pane-derived predicate is a guess about undocumented chrome, and three
 independent ones failed: a stale scrollback timer reading as busy, a queued
 submit showing no spinner, a 103-second compaction showing none either.
-Confirmation comes from harness-authoritative signals — a file
-`SessionStart(compact)` consumes, or the session transcript.
+Confirmation comes from harness-authoritative signals — a file the
+transition's own `SessionStart` consumes, or the session transcript. The
+rule holds without exception: the rename was the last holdout, confirming by
+grepping the pane for the title's first 20 characters, which matches
+whenever the title is on screen for any other reason. It now counts
+`custom-title` entries in the transcript, and the harness's own auto-titling
+writes a distinct `type`, so an exact match cannot false-positive on it.
 [The submit signal, a third
 time](changelog/2026-07-22-confirm-the-compaction.md)
 
-The rename watcher is the one exception, and it is one by age rather than by
-principle: it was written before transcript confirmation existed, and the
-retrofit never reached back to it. A `/rename` does log a `custom-title`
-entry to the session transcript, so the signal is unwired rather than
-absent — `write-rename.sh` and `bash-post.sh` export the failure path to the
-watcher but not `transcript_path`. Meanwhile the exception costs little: a
-mistimed `/rename` lands a wrong title, not a wrong action, and a failed
-verify is reported rather than swallowed.
+**The armed transition is one file whose body names the transition.** One
+composer, one session, at most one transition in flight — so the invariant
+needs somewhere to live, and the filename is not it. While identity sat in
+the name (`autorename`, `autocompact`), each instance cost a full parallel
+pipeline: a constant pair, a validator, a `Stop` arm, a watcher, a failure
+channel, a stale sweep. Two `Stop` hooks would then race for one composer
+whenever both files existed, and nothing anywhere represented the fact that
+they could not both be armed. Moving the kind into the body makes the
+invariant structural, and collapses three watchers into one walker.
+[Driven transitions](changelog/2026-07-29-driven-transitions.md)
 
 **Observability is not gated on the happy path.** A clean run says nothing
 about whether a dirty one would be noticed, and the failing run is exactly
@@ -400,10 +447,10 @@ history) because that surplus is boundary-local.
 detection round-trip exists between deciding and writing: the checkpoint is
 unconditional, and it decides for itself whether memory or a ledger is in
 play. When memory *is* pending, the directive asks for approval — a user
-response, which ends the turn — and precompact therefore writes
-`autocompact` only in the turn after the answer, or it would compact away
-the conversation the answer applies to. Any rebalancing of the gitlore seam
-must preserve both halves.
+response, which ends the turn — and a driven skill therefore arms the
+sentinel only in the turn after the answer, or it would compact or clear
+away the conversation the answer applies to. Any rebalancing of the gitlore
+seam must preserve both halves.
 
 ## Rejected alternatives
 
@@ -443,7 +490,7 @@ against the stateless `.git` walk.
 [Per-worktree handoff
 root](changelog/2026-06-09-per-worktree-handoff-root.md)
 
-**A session-id sidecar or a recency timeout for a stale `autocompact`** —
+**A session-id sidecar or a recency timeout for a stale sentinel** —
 the most likely trigger is an Esc in the *same* session, so the id matches
 and the next `Stop` arms it anyway; a timeout is a guess about how long a
 turn may run, and a wrong guess silently drops a wanted compaction.
@@ -474,9 +521,38 @@ tidied away.
 [An orphaned ledger hijacks the
 handoff](changelog/2026-07-26-orphaned-ledger.md)
 
-**Merging the three `PostToolUse(Write|Edit)` scripts** into one — they
-share a preamble, now factored into `handoff_match_target()`, but not a job.
+**Merging the `PostToolUse(Write|Edit)` scripts** into one — they share a
+preamble, now factored into `handoff_match_target()`, but not a job.
 [Consolidation pass](changelog/2026-07-20-consolidation-pass.md)
+
+**A parallel pipeline per transition** — the driven clear's first draft:
+`.claude/autoclear` beside `autocompact`, its own validator, `Stop` arm,
+watcher, failure channel and stale sweep. Sibling-over-parameterisation is
+house style and the per-kind validation rules genuinely do differ, which is
+why the kind line survives into the unified format. What does not differ is
+the pipeline around them. Also rejected: **omitting `/clear` from the
+sentinel body** as ceremony (true only while the filename named the
+transition), **naming the skills `compact` and `clear`** (namespaced anyway,
+so the short name is never available and the collision is paid for in every
+doc sentence), **`autocompact`/`autoclear` as skill names** (collides with
+the harness's own threshold auto-compaction, a real named feature), and
+**one skill per boundary with a prepare/drive mode argument** — the
+description is what triggers invocation, so the mode would be inferred from
+phrasing, and a false positive compacts or clears a session where the user
+asked only for preparation.
+[Driven transitions](changelog/2026-07-29-driven-transitions.md)
+
+**Injecting the frame on any compaction where one exists**, closing the
+auto-compaction gap for free — but `handoff-task.md` is durable and
+git-tracked and sits on disk across days of unrelated work, so this injects
+a stale frame into every threshold compaction in every session in the repo,
+unrequested and mid-session. The asymmetry is principled: compaction is the
+one boundary the harness enters on its own, so it is the one that needs a
+signal of intent. Also rejected: **prepare-only with a driven continuation**
+— a sentinel whose before-lines are empty but whose after-line is not. Cheap
+and appealing, but a skill that types one of the two lines has no sentence
+that describes it.
+[Driven transitions](changelog/2026-07-29-driven-transitions.md)
 
 ## Non-goals
 

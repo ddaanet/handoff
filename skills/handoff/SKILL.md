@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Snapshot the in-progress task and still-open decisions before a `/clear` or new session, so the next session resumes where this one left off. A lightweight, local task frame — not a conversation summary. Use when the user asks to "save handoff", "save context", "prepare handoff", "write handoff", "before /clear", "before I clear", "clear handoff", "discard handoff", "clean handoff", "finalize", "wrap up", "I'm done", "/handoff", "handoff", "conversation too long", "let's pick this up in a new chat", "end", or "goodbye", or otherwise signals an imminent `/clear` or end of task.
+description: Snapshot the in-progress task and still-open decisions before a `/clear` or new session, so the next session resumes where this one left off. A lightweight, local task frame — not a conversation summary. Prepares only; it types nothing. Use when the user asks to "save handoff", "save context", "prepare handoff", "prepare clear", "write handoff", "before /clear", "before I clear", "clear handoff", "discard handoff", "clean handoff", "finalize", "wrap up", "I'm done", "/handoff", "handoff", "conversation too long", "end", or "goodbye", or otherwise signals an imminent `/clear` or end of task. When the user wants the reset carried out rather than prepared — "continue after clear", "continue in a new session" — use the handoff-continue skill instead.
 ---
 
 # handoff — Pre-Clear Task Snapshot
@@ -76,11 +76,18 @@ finished item without regenerating the whole list.
 
 ### Step 4: Follow the directive
 
-`handoff-checkpoint` prints nothing when there is nothing further to do —
-finish normally. If it prints a directive, follow it exactly; the
-directive carries its own instructions. The checkpoint owns the decision —
-do not re-derive or verify it. A non-zero exit names the offending field on
-stderr — fix the payload and retry.
+`handoff-checkpoint` prints nothing when there is nothing further to do. If
+it prints a directive, follow it exactly; the directive carries its own
+instructions. The checkpoint owns the decision — do not re-derive or verify
+it. A non-zero exit names the offending field on stderr — fix the payload
+and retry.
+
+### Step 5: Say what the boundary is ready for
+
+Once nothing is left awaiting an answer, end on one line naming what comes
+next. Under `with-commit` that is the commit, then the clear — "Ready to
+commit, then /clear". Under `without-commit` it is the clear alone. One
+line: the frame is on disk and this is a handover, not a report.
 
 **Task file template:**
 
@@ -135,6 +142,34 @@ Todo file rules:
 - No location other than `./.claude/handoff-todo.md`.
 - It is a remainder, not a plan of record — but it is versioned like the
   task file, so write it as something that reads well in history.
+
+## The seam: files vs. continuation prompt
+
+Both files are re-injected verbatim on the far side of the transition. A
+continuation prompt — which the driven skills author and this one does not
+— is one line typed into a composer. So they carry different things:
+
+- **Task file** — everything that must survive exactly: in-flight threads,
+  open questions, identifiers, commit ranges, paths a decision hinges on.
+- **Todo file** — the open items of an active task list, and only those.
+- **Prompt** — a handle to that context plus the next concrete action.
+  Nothing else.
+
+The failure mode is a prompt carrying facts. `report on the driver, then
+cut the release covering 7f3c70c..a3b9cef` is wrong: that commit range is
+content, and it belongs in the task file. `pick up the release described
+in the task file` is right.
+
+Write the prompt as an instruction to the agent on the far side, which will
+have the files and the repo — and, after a compaction, a summary — but not
+this conversation. Name the next action, not the topic.
+
+- Good: `continue with the watcher tests per the task file`
+- Bad: `continue` / `keep going with the plugin work`
+
+Author it **silently**. Do not reprint it in the reply: it gets typed
+visibly into the prompt and lands in scrollback, so echoing it shows the
+same text twice with no veto value.
 
 ## Anti-patterns
 

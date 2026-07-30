@@ -17,13 +17,17 @@ calls** to decide it. Title rules: ≤ ~50 characters, Title Case, no
 surrounding quotes, no trailing punctuation. The title is always
 derived from the conversation — autoname takes no argument.
 
-Then issue a single `Write` of that title as the sole line of
-`./.claude/autorename`. That is the only tool call.
+Then issue a single `Write` to `./.claude/autodrive`, of exactly two lines
+— the literal word `rename`, then the rename as it will be typed:
 
-A `PostToolUse(Write|Edit)` hook picks the file up, renames the session
-via tmux `send-keys` once the prompt goes idle, then deletes it. Outside
-tmux the hook's `systemMessage` carries a `/rename <title>` line
-instead — relay it in a fenced code block so the user can paste it.
+```
+rename
+/rename <title>
+```
+
+That is the only tool call. The hooks do the rest at the end of the turn:
+the session is renamed once the prompt goes idle, and outside tmux the
+lines are emitted for the user to paste instead.
 
 ## Anti-patterns
 
@@ -31,5 +35,5 @@ instead — relay it in a fenced code block so the user can paste it.
   autoname is rename-only; for residual task state use the handoff skill.
 - Taking a title from the user's words verbatim when the conversation
   implies a better one. Derive the title; do not transcribe the request.
-- Any location other than `./.claude/autorename` — the hook reads this
+- Any location other than `./.claude/autodrive` — the hook reads this
   exact path.

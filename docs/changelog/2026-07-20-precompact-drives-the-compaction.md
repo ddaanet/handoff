@@ -1,5 +1,18 @@
 # precompact drives the compaction (2026-07-20)
 
+> **Superseded 2026-07-29** (see [Driven
+> transitions](2026-07-29-driven-transitions.md)) on one point: the driving
+> moves to a separate skill. `precompact` no longer arms the compaction —
+> it prepares and stops — and the hands-off ending this entry reversed
+> returns as a *first-class* ending rather than the unconsidered caution it
+> was. Everything else here carries over unchanged to `compact-continue`,
+> which is where the arming now lives: memory still commits before the
+> summariser runs, the flow still has exactly one interactive pause, and the
+> ordering constraint on the sentinel write is unchanged in force. What made
+> the split right is naming honesty, not a reversal of the intent argument —
+> continuation is still intrinsic to compacting, and both skills still end
+> aimed at it.
+
 > **Superseded 2026-07-25** (see [Commit
 > awareness](2026-07-25-commit-awareness.md)) on one point: the file-trigger
 > IPC described below — approved message file *plus* trigger file — is now

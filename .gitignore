@@ -6,14 +6,22 @@
 .claude/handoff-task.md
 .claude/handoff-todo.md
 
-# Driver files for the rename and compaction watchers. Each exists for part of
-# one turn (or one Stop -> compaction window) and is consumed by a hook.
-.claude/autorename*
-.claude/autocompact*
+# The armed transition and its siblings (.pending, .failed). One file, because
+# at most one transition can be in flight; each exists for part of one turn (or
+# one Stop -> transition window) and is consumed by a hook.
+.claude/autodrive*
 
 # handoff-checkpoint's IPC to bash-post.sh: exists for one Bash-call turn,
 # consumed and deleted by the PostToolUse(Bash) hook.
 .claude/checkpoint-manifest
+
+# The checkpoint's IPC to gitlore, written on the memory directive's
+# instruction and consumed by gitlore's own hooks. Listed because a `git add
+# -A` in the same turn races the consumer and commits a spent trigger.
+# `.claude/gitlore-hook-setup` is deliberately NOT here — that one is gitlore's
+# tracked install state, not IPC.
+.claude/gitlore-memory-message
+.claude/gitlore-commit-memory
 
 # Local-only Claude Code settings
 .claude/settings.local.json

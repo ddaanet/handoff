@@ -29,23 +29,15 @@ setup() {
     BASHPOST="$repo_root/scripts/bash-post.sh"
     load probe-helpers
 
-    # bash-post.sh's positive path spawns rename-when-idle.sh via tmux, same
-    # as tests/hook-test.bats's setup(): stub tmux to an idle empty composer
-    # and shorten the watcher tunables so a spawned watcher exits quickly
-    # instead of driving whatever real pane this suite happens to run under.
-    mkdir -p "$BATS_TEST_TMPDIR/bin"
-    cat > "$BATS_TEST_TMPDIR/bin/tmux" <<'STUB'
-#!/usr/bin/env bash
-case "$1" in
-  capture-pane) printf '%s\n' '──── x ──' '❯ ' ;;
-esac
-STUB
-    chmod +x "$BATS_TEST_TMPDIR/bin/tmux"
-    PATH="$BATS_TEST_TMPDIR/bin:$PATH"
-    export PATH
-    export HANDOFF_WATCHER_TIMEOUT=1 HANDOFF_WATCHER_POLL=0.01 \
-           HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
-           HANDOFF_WATCHER_CONSUME_TIMEOUT=1 HANDOFF_WATCHER_CONSUME_POLL=0.05
+    # No tmux stub here, unlike tests/hook-test.bats: neither script this suite
+    # exercises reaches a pane. checkpoint.sh is forbidden to (NFR1 — it runs in
+    # the agent's sandboxed Bash), and bash-post.sh only stages, since a
+    # checkpoint-written sentinel is armed at Stop like any other.
+
+    # For asserting that what the checkpoint writes is what the arming hook
+    # will accept.
+    # shellcheck source-path=SCRIPTDIR source=../scripts/_lib.sh disable=SC1091
+    source "$repo_root/scripts/_lib.sh"
 }
 
 # A plain git repo with .claude/ present — for the schema/write/manifest
@@ -116,11 +108,29 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     [[ "$stderr" == *"rename"* ]]
 }
 
-@test "checkpoint: rename present under skill:precompact -> error naming rename" {
+# Four values, two boundaries. The enum names the skill again, honestly: what
+# it buys over two values is the check that a `handoff` invocation which forgot
+# its title is an error rather than a silent non-rename.
+@test "checkpoint: each of the four skill values is accepted" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", rename:"Not Allowed", task:null, todo:null}')
-    run_checkpoint_err "$repo" "$payload"
-    [[ "$stderr" == *"rename"* ]]
+    for s in handoff-continue precompact compact-continue; do
+        payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", task:null, todo:null}')
+        run_checkpoint "$repo" "$payload"
+        [ "$status" -eq 0 ]
+    done
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"T", task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+}
+
+@test "checkpoint: rename present under any non-handoff skill -> error naming rename and the skill" {
+    repo="$(make_repo)"
+    for s in handoff-continue precompact compact-continue; do
+        payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"with-commit", rename:"Not Allowed", task:null, todo:null}')
+        run_checkpoint_err "$repo" "$payload"
+        [[ "$stderr" == *"rename"* ]]
+        [[ "$stderr" == *"$s"* ]]
+    done
 }
 
 @test "checkpoint: precompact with rename omitted entirely -> accepted" {
@@ -344,14 +354,51 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 # Manifest (FR7) and rename (FR8)
 # ==========================================================================
 
-@test "checkpoint: rename only, no task/todo -> manifest present but empty, autorename written" {
+# The sentinel holds literal keystrokes, so the title becomes the argument of a
+# /rename line under a kind line — the same file every other transition uses.
+@test "checkpoint: rename only, no task/todo -> manifest present but empty, sentinel written" {
     repo="$(make_repo)"
     payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"Two Words Title", task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
     [ -f "$repo/.claude/checkpoint-manifest" ]
     [ ! -s "$repo/.claude/checkpoint-manifest" ]
-    [ "$(cat "$repo/.claude/autorename")" = "Two Words Title" ]
+    [ "$(cat "$repo/.claude/autodrive")" = "rename
+/rename Two Words Title" ]
+    # And what it wrote is what the arming hook will accept.
+    run handoff_drive_read "$repo/.claude/autodrive"
+    [ "$status" -eq 0 ]
+}
+
+# A title carrying its own newline would make the line-oriented sentinel
+# unreadable, so it is flattened at write time — there is no consumer left to do
+# it. Whitespace-only is a schema error, not an empty rename.
+@test "checkpoint: a multi-line title is flattened to one line" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"Two  Words\nAnd More", task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(wc -l < "$repo/.claude/autodrive")" -eq 2 ]
+    grep -qx '/rename Two Words And More' "$repo/.claude/autodrive"
+}
+
+@test "checkpoint: a whitespace-only title -> error naming rename" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"   ", task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"rename"* ]]
+}
+
+# The load-bearing negative. handoff-continue carries its title in the sentinel
+# it writes for itself, as one of that file's lines. A checkpoint that wrote a
+# `rename` sentinel here would arm a bare rename at the very Stop the clear was
+# meant to use, and the clear would never happen.
+@test "checkpoint: handoff-continue writes no sentinel" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff-continue", commit:"without-commit", task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/autodrive" ]
 }
 
 @test "checkpoint: precompact, nothing touched -> manifest still written (empty)" {
@@ -361,7 +408,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     [ "$status" -eq 0 ]
     [ -f "$repo/.claude/checkpoint-manifest" ]
     [ ! -s "$repo/.claude/checkpoint-manifest" ]
-    [ ! -e "$repo/.claude/autorename" ]
+    [ ! -e "$repo/.claude/autodrive" ]
 }
 
 @test "checkpoint: task and todo both written -> manifest lists both" {
@@ -524,6 +571,38 @@ precompact_payload() {
     [ "$mem_line" -lt "$sdd_line" ]
 }
 
+# Boundary, not skill, decides what gets composed, so the two skills at each
+# boundary cannot drift in what they tell the agent. Each row asserts both
+# halves: the directive its boundary composes, and the absence of the other
+# boundary's — a positive-only check passes on a hook that emits both.
+@test "checkpoint: the boundary decides the composition, not the skill" {
+    for s in handoff handoff-continue precompact compact-continue; do
+        repo="$(make_gitlore_repo "$BATS_TEST_TMPDIR/bnd")"
+        dirty_memory "$repo"
+        add_sdd_ledger "$repo"
+        if [ "$s" = handoff ]; then
+            payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", rename:"T", task:null, todo:null}')
+        else
+            payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", task:null, todo:null}')
+        fi
+        run_checkpoint "$repo" "$payload"
+        [ "$status" -eq 0 ]
+        case "$s" in
+            handoff | handoff-continue)
+                echo "$output" | grep -qF 'survives the /clear'
+                [[ "$output" != *"re-dispatched"* ]] ;;
+            precompact | compact-continue)
+                echo "$output" | grep -qF 're-dispatched'
+                [[ "$output" != *"survives the /clear"* ]] ;;
+        esac
+        # Memory first at both boundaries — the composition order the two
+        # deleted probes used, unchanged (FR9).
+        mem=$(echo "$output" | grep -nF 'gitlore-memory-message' | head -1 | cut -d: -f1)
+        led=$(echo "$output" | grep -nF '.superpowers/sdd/feature-plan/progress.md' | head -1 | cut -d: -f1)
+        [ "$mem" -lt "$led" ]
+    done
+}
+
 @test "checkpoint: precompact, no ledger -> memory directive only, no SDD nudge" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
@@ -636,20 +715,23 @@ precompact_payload() {
     echo "$output" | jq -e '.systemMessage | test("staged 1, deleted 1")' >/dev/null
 }
 
-@test "bash-post: empty manifest (rename-only checkpoint call) -> still consumes autorename" {
+# Staging is all this hook does. A sentinel the checkpoint wrote is armed at
+# Stop like any other, so this must leave it alone — consuming it here would
+# spawn the walker mid-turn, which is the one thing the Stop gate exists to
+# prevent.
+@test "bash-post: empty manifest (rename-only checkpoint call) -> consumed, sentinel untouched" {
     repo="$BATS_TEST_TMPDIR/bp-rename"; mkdir -p "$repo/.claude"
     git -C "$repo" init -q
     : > "$repo/.claude/checkpoint-manifest"
-    echo "New Title" > "$repo/.claude/autorename"
+    printf 'rename\n/rename New Title\n' > "$repo/.claude/autodrive"
     run bash -c '
         jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
         | CLAUDE_PROJECT_DIR="$1" TMUX=fake TMUX_PANE="%0" bash "$2"
     ' _ "$repo" "$BASHPOST"
     [ "$status" -eq 0 ]
     [ ! -e "$repo/.claude/checkpoint-manifest" ]
-    [ ! -e "$repo/.claude/autorename" ]
-    echo "$output" | jq -e '.systemMessage | test("will rename")' >/dev/null
-    echo "$output" | jq -e '.systemMessage | test("New Title")' >/dev/null
+    [ -f "$repo/.claude/autodrive" ]
+    echo "$output" | jq -e '.systemMessage | test("staged 0, deleted 0")' >/dev/null
 }
 
 @test "bash-post: worktree cwd -> resolves the worktree root, not the main tree" {
@@ -660,12 +742,11 @@ precompact_payload() {
     mkdir -p "$wt/.claude" "$tmp/.git/worktrees/wtbp"
     printf 'gitdir: %s\n' "$tmp/.git/worktrees/wtbp" > "$wt/.git"
     : > "$wt/.claude/checkpoint-manifest"
-    echo "WT Title" > "$wt/.claude/autorename"
     run bash -c '
         jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
         | TMUX=fake TMUX_PANE="%0" bash "$2"
     ' _ "$wt" "$BASHPOST"
     [ "$status" -eq 0 ]
-    [ ! -e "$wt/.claude/autorename" ]
-    echo "$output" | jq -e '.systemMessage | test("WT Title")' >/dev/null
+    [ ! -e "$wt/.claude/checkpoint-manifest" ]
+    echo "$output" | jq -e '.systemMessage | test("staged 0")' >/dev/null
 }

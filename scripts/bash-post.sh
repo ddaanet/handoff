@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # PostToolUse(Bash) hook: consumes .claude/checkpoint-manifest, which
 # handoff-checkpoint (scripts/checkpoint.sh) leaves behind because its own
-# invocation runs in the agent's sandboxed Bash, where NFR1 forbids both git
-# staging (a sandboxed `git add` can strand .git/index.lock) and tmux (the
-# rename watcher's socket is unreachable there).
+# invocation runs in the agent's sandboxed Bash, where NFR1 forbids git staging
+# (a sandboxed `git add` can strand .git/index.lock).
+#
+# Staging is all it does. A sentinel the checkpoint writes needs nothing from
+# this hook: it is armed at Stop like any other, by stop-drive.sh.
 #
 # This hook fires on every Bash call in every session with the plugin
 # installed (NFR2) — the checkpoint runs once per wrap-up, so the negative
@@ -41,31 +43,8 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$manifest"
 rm -f "$manifest"
 
-# Consume .claude/autorename the same way write-rename.sh does for the
-# Write-tool path — the checkpoint wrote it with a plain redirect, so no
-# PostToolUse(Write|Edit) fired for it, and this is the only hook context
-# that will.
-rename_note=""
-rename_file="$cwd/$HANDOFF_REL_RENAME"
-if [ -f "$rename_file" ]; then
-    title="$(tr -s '[:space:]' ' ' < "$rename_file")"
-    title="${title## }"; title="${title%% }"
-    rm -f "$rename_file"
-    if [ -n "${title// /}" ]; then
-        if [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
-            export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_RENAME_FAILED"
-            handoff_spawn_detached rename-when-idle.sh "$TMUX_PANE" "$title"
-            rename_note="will rename to \"$title\" once prompt is idle (tmux pane $TMUX_PANE)"
-        else
-            rename_note="not in tmux — paste to rename: /rename $title"
-        fi
-    fi
-fi
-
 summary="handoff-checkpoint: staged ${#staged[@]}, deleted ${#deleted[@]}"
-[ -n "$rename_note" ] && summary="$summary; $rename_note"
 agent_ctx="checkpoint manifest consumed — staged: ${staged[*]:-none}; deleted: ${deleted[*]:-none}."
-[ -n "$rename_note" ] && agent_ctx="$agent_ctx $rename_note."
 
 jq -nc --arg s "$summary" --arg c "$agent_ctx" \
     '{systemMessage: $s, hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $c}}'

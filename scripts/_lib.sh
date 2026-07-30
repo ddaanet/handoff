@@ -15,22 +15,21 @@ HANDOFF_REL_TASK=".claude/handoff-task.md"
 # docs/changelog/2026-07-23-overflow-deserves-persistence.md.
 # shellcheck disable=SC2034
 HANDOFF_REL_TODO=".claude/handoff-todo.md"
+# The armed transition. One composer, one session, at most one transition in
+# flight — so one file, whose *body* names the transition rather than its
+# filename. See docs/design.md, "The armed transition is a singleton".
 # shellcheck disable=SC2034
-HANDOFF_REL_RENAME=".claude/autorename"
+HANDOFF_REL_DRIVE=".claude/autodrive"
+# The armed target. Stop moves the sentinel here before spawning, so a later
+# Stop in the same session cannot re-arm; the confirming SessionStart consumes
+# it, which is also how the walker knows the transition landed.
 # shellcheck disable=SC2034
-HANDOFF_REL_COMPACT=".claude/autocompact"
-# The armed rename target. Stop moves autocompact here before spawning, so a
-# later Stop in the same session cannot re-arm; SessionStart(compact) consumes it.
+HANDOFF_REL_DRIVE_PENDING=".claude/autodrive.pending"
+# Where the walker records a line it could not deliver. A watcher's exit status
+# goes nowhere, so this is the only path back to the agent; consumed and
+# reported by report-watcher-failure.sh at the next UserPromptSubmit.
 # shellcheck disable=SC2034
-HANDOFF_REL_COMPACT_PENDING=".claude/autocompact.pending"
-# Where a detached watcher records a line it could not deliver, one file per
-# driven line. A watcher's exit status goes nowhere, so these are the only path
-# back to the agent; both are consumed and reported by report-watcher-failure.sh
-# at the next UserPromptSubmit.
-# shellcheck disable=SC2034
-HANDOFF_REL_COMPACT_FAILED=".claude/autocompact.failed"
-# shellcheck disable=SC2034
-HANDOFF_REL_RENAME_FAILED=".claude/autorename.failed"
+HANDOFF_REL_DRIVE_FAILED=".claude/autodrive.failed"
 
 # Assemble the injectable frame from the task file ($1) and the optional todo
 # remainder ($2): a timestamp header plus each file inlined verbatim, in that
@@ -57,42 +56,128 @@ handoff_frame() {
     printf '%s\n' "$out"
 }
 
-# Parse and validate an autocompact file ($1) into the caller's COMPACT_L1
-# (the literal /compact command to type) and COMPACT_L2 (the continuation
-# prompt). Returns 0 when well-formed; otherwise returns 1 with COMPACT_ERR set
-# to a one-phrase reason naming the constraint that failed.
+# Shape helpers for handoff_drive_read. Each sets DRIVE_ERR and returns 1.
+_handoff_drive_expect() {  # <found> <want>
+    [ "$1" -eq "$2" ] && return 0
+    DRIVE_ERR="kind \`$DRIVE_KIND\` takes exactly $2 lines (found $1)"
+    return 1
+}
+
+# <line> <lineno> <literal> <arg|optional|none>. The kind fixes which command
+# belongs in which slot, so the file cannot be made to type something else.
+_handoff_drive_command() {
+    local line="$1" no="$2" cmd="$3" mode="$4"
+    case "$mode" in
+        none)
+            [ "$line" = "$cmd" ] && return 0
+            DRIVE_ERR="line $no must be exactly \`$cmd\`" ;;
+        optional)
+            case "$line" in "$cmd"|"$cmd "*) return 0 ;; esac
+            DRIVE_ERR="line $no must be \`$cmd\` or \`$cmd <argument>\`" ;;
+        arg)
+            case "$line" in "$cmd "*)
+                if [ -n "$(printf '%s' "${line#"$cmd" }" | tr -d '[:space:]')" ]; then
+                    return 0
+                fi ;;
+            esac
+            DRIVE_ERR="line $no must be \`$cmd <argument>\`, with a non-empty argument" ;;
+    esac
+    return 1
+}
+
+# <line> <lineno>. Prose is submitted with a bare Enter, so a line that looks
+# like a command would take the recognition path instead and be confirmed by
+# the wrong primitive.
+_handoff_drive_prose() {
+    local line="$1" no="$2"
+    if [ -z "$(printf '%s' "$line" | tr -d '[:space:]')" ]; then
+        DRIVE_ERR="line $no is the continuation prompt, and must not be empty"
+        return 1
+    fi
+    case "$line" in /*)
+        DRIVE_ERR="line $no is the continuation prompt, and must not begin with \`/\`"
+        return 1 ;;
+    esac
+    return 0
+}
+
+# Parse and validate the sentinel ($1) into the caller's DRIVE_KIND, DRIVE_BEFORE
+# (lines typed before the transition) and DRIVE_AFTER (lines typed into the
+# session the transition opens). Returns 0 when well-formed; otherwise returns 1
+# with DRIVE_ERR set to a one-phrase reason naming the constraint that failed.
 #
-# Exactly two lines, a single trailing newline tolerated. Line 2 must be a
-# single line because in the TUI one Enter is one submit — an embedded newline
-# would submit the continuation early. Read with a `read` loop rather than
-# mapfile: bash 3.2 (macOS system bash) has no mapfile.
+# Line 1 is the kind, and the kind fixes the shape — so the remaining lines need
+# no separator, and each kind keeps its own rules:
+#
+#   rename   /rename <title>
+#   compact  /compact [directive]         + continuation prose
+#   compact  (kind line alone: a transition is expected, nothing is typed)
+#   clear    /rename <title>, /clear      + continuation prose
+#
+# The lines are literal keystrokes: the walker must not know which command any
+# kind uses. Every prose line is a single line because in the TUI one Enter is
+# one submit — an embedded newline would submit it early. Read with a `read`
+# loop rather than mapfile: bash 3.2 (macOS system bash) has no mapfile, and for
+# the same reason callers must expand the arrays as
+# `${DRIVE_BEFORE[@]+"${DRIVE_BEFORE[@]}"}` — an empty array is an unbound
+# variable under `set -u` before bash 4.4.
 # shellcheck disable=SC2034  # assigned for the caller's scope
-handoff_compact_read() {
-    local file="$1" line count=0
-    COMPACT_L1=""; COMPACT_L2=""; COMPACT_ERR=""
+handoff_drive_read() {
+    local file="$1" line n
+    local -a lines=()
+    DRIVE_KIND=""; DRIVE_BEFORE=(); DRIVE_AFTER=(); DRIVE_ERR=""
 
     while IFS= read -r line || [ -n "$line" ]; do
-        count=$((count + 1))
-        case $count in
-            1) COMPACT_L1="$line" ;;
-            2) COMPACT_L2="$line" ;;
-        esac
+        lines+=("$line")
     done < "$file"
 
-    if [ "$count" -ne 2 ]; then
-        COMPACT_ERR="the file must hold exactly two lines (found $count)"
+    n=${#lines[@]}
+    if [ "$n" -eq 0 ]; then
+        DRIVE_ERR="the file is empty; line 1 must be the transition kind"
         return 1
     fi
-    case "$COMPACT_L1" in
-        "/compact"|"/compact "*) ;;
-        *) COMPACT_ERR="line 1 must be \`/compact\` or \`/compact <directive>\`"
-           return 1 ;;
+    DRIVE_KIND="${lines[0]}"
+
+    case "$DRIVE_KIND" in
+        rename)
+            _handoff_drive_expect "$n" 2 || return 1
+            _handoff_drive_command "${lines[1]}" 2 "/rename" arg || return 1
+            DRIVE_BEFORE=("${lines[1]}")
+            ;;
+        compact)
+            # The kind line alone is the prepare-only marker: nothing is typed,
+            # but the transition is expected, so the loader still injects.
+            [ "$n" -eq 1 ] && return 0
+            _handoff_drive_expect "$n" 3 || return 1
+            _handoff_drive_command "${lines[1]}" 2 "/compact" optional || return 1
+            _handoff_drive_prose "${lines[2]}" 3 || return 1
+            DRIVE_BEFORE=("${lines[1]}")
+            DRIVE_AFTER=("${lines[2]}")
+            ;;
+        clear)
+            _handoff_drive_expect "$n" 4 || return 1
+            _handoff_drive_command "${lines[1]}" 2 "/rename" arg || return 1
+            _handoff_drive_command "${lines[2]}" 3 "/clear" none || return 1
+            _handoff_drive_prose "${lines[3]}" 4 || return 1
+            DRIVE_BEFORE=("${lines[1]}" "${lines[2]}")
+            DRIVE_AFTER=("${lines[3]}")
+            ;;
+        *)
+            DRIVE_ERR="line 1 must be the transition kind — rename, compact or clear — not \`$DRIVE_KIND\`"
+            return 1
+            ;;
     esac
-    if [ -z "${COMPACT_L2// /}" ]; then
-        COMPACT_ERR="line 2 must be the continuation prompt, and must not be empty"
-        return 1
-    fi
     return 0
+}
+
+# Kinds whose transition is confirmed by a SessionStart. `rename` is not one:
+# no loader consumes it, so stop-drive.sh deletes its sentinel outright instead
+# of arming a .pending nobody would clear.
+handoff_drive_has_source() {
+    case "$1" in
+        compact|clear) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # Portable path canonicalization. `realpath -m` is GNU-only; BSD

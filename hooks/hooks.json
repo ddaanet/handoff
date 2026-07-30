@@ -1,5 +1,5 @@
 {
-  "description": "Hooks for the handoff skill: SessionStart load, write guard (handoff-task.md, checkpoint-only), post-write staging (handoff-todo.md), the checkpoint channel's PostToolUse(Bash) manifest consumer, and the precompact compaction driver (write validate, Stop arm, SessionStart(compact) resume, watcher-failure report). See CLAUDE.md for details.",
+  "description": "Hooks for the handoff skill: SessionStart load, write guard (handoff-task.md, checkpoint-only), post-write staging (handoff-todo.md), the checkpoint channel's PostToolUse(Bash) manifest consumer, and the driven-transition machinery (write validate, Stop arm, SessionStart(compact|clear) resume, watcher-failure report). See CLAUDE.md for details.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -35,12 +35,7 @@
           },
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-rename.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-compact.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/write-drive.sh",
             "timeout": 5
           }
         ]
@@ -61,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/stop-compact.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/stop-drive.sh",
             "timeout": 10
           }
         ]

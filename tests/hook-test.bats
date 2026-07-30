@@ -25,8 +25,8 @@ hook smoke test
 - none
 TASK
 
-    # Three hooks here (write-rename, stop-compact, load-compact) spawn a
-    # detached watcher, which drives tmux. Without a stub they reach the real
+    # Three hooks here (stop-drive, load-compact, load-handoff) spawn the
+    # detached walker, which drives tmux. Without a stub they reach the real
     # server: TMUX=fake does not stop tmux falling back to the default socket,
     # so `%0` is somebody's actual pane. Stub it to an idle, empty composer —
     # the spawned watchers then find nothing to do and exit on their own
@@ -161,6 +161,137 @@ $tmp" ]
     : > "$fr/task.md"; : > "$fr/todo.md"
     run handoff_frame "$fr/task.md" "$fr/todo.md"
     [ "$status" -eq 1 ]
+}
+
+# --- _lib.sh: handoff_drive_read shape matrix ---
+#
+# Line 1 is the kind and the kind fixes the shape, so the remaining lines need
+# no separator and each kind keeps its own rules. The lines are the literal
+# keystrokes: the walker must not know which command any kind uses, and
+# validation is what anchors it — the nth line of kind k must begin with the
+# expected command literal, so the file cannot be made to type something else.
+
+# Write the args as lines of a sentinel and read it back. On rejection the
+# reason is printed, so a `run read_drive ...` can assert on it — the reader
+# itself only sets DRIVE_ERR, which a subshell would swallow. Call it bare (not
+# under `run`) when the test needs the DRIVE_* variables it populates.
+read_drive() {
+    printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/sentinel"
+    handoff_drive_read "$BATS_TEST_TMPDIR/sentinel" && return 0
+    printf '%s\n' "$DRIVE_ERR"
+    return 1
+}
+
+@test "handoff_drive_read (rename): one before-line, no after-line" {
+    read_drive "rename" "/rename Driven Transitions"
+    [ "$DRIVE_KIND" = rename ]
+    [ "${#DRIVE_BEFORE[@]}" -eq 1 ]
+    [ "${DRIVE_BEFORE[0]}" = "/rename Driven Transitions" ]
+    [ "${#DRIVE_AFTER[@]}" -eq 0 ]
+}
+
+@test "handoff_drive_read (compact): command before, prose after" {
+    read_drive "compact" "/compact focus on the parser" "continue with task 3"
+    [ "$DRIVE_KIND" = compact ]
+    [ "${DRIVE_BEFORE[0]}" = "/compact focus on the parser" ]
+    [ "${DRIVE_AFTER[0]}" = "continue with task 3" ]
+}
+
+@test "handoff_drive_read (compact, bare command): accepted, /compact takes no argument" {
+    read_drive "compact" "/compact" "continue with task 3"
+    [ "${DRIVE_BEFORE[0]}" = "/compact" ]
+}
+
+# FR-G: the kind line alone. Nothing is typed, but the transition is expected,
+# and that expectation is what the frame's re-injection is gated on.
+@test "handoff_drive_read (compact, kind line alone): legal, both sequences empty" {
+    read_drive "compact"
+    [ "$DRIVE_KIND" = compact ]
+    [ "${#DRIVE_BEFORE[@]}" -eq 0 ]
+    [ "${#DRIVE_AFTER[@]}" -eq 0 ]
+}
+
+@test "handoff_drive_read (clear): two before-lines in order, prose after" {
+    read_drive "clear" "/rename A Title" "/clear" "pick up per the task file"
+    [ "$DRIVE_KIND" = clear ]
+    [ "${#DRIVE_BEFORE[@]}" -eq 2 ]
+    [ "${DRIVE_BEFORE[0]}" = "/rename A Title" ]
+    [ "${DRIVE_BEFORE[1]}" = "/clear" ]
+    [ "${DRIVE_AFTER[0]}" = "pick up per the task file" ]
+}
+
+@test "handoff_drive_read (unknown kind): rejected, naming the kinds" {
+    run read_drive "reboot" "/reboot"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"transition kind"* ]]
+}
+
+# The old autorename shape. No back-compat branch: a bare title has no kind
+# line, so it is simply an unknown kind.
+@test "handoff_drive_read (bare title, the old autorename shape): rejected" {
+    run read_drive "Some Session Title"
+    [ "$status" -ne 0 ]
+}
+
+@test "handoff_drive_read (empty file): rejected" {
+    run read_drive ""
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"transition kind"* ]]
+}
+
+@test "handoff_drive_read (wrong line count for the kind): rejected, naming the count" {
+    run read_drive "rename" "/rename A Title" "extra line"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly 2 lines"* ]]
+
+    run read_drive "clear" "/rename A Title" "/clear"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly 4 lines"* ]]
+
+    run read_drive "compact" "/compact" "continue" "extra"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly 3 lines"* ]]
+}
+
+@test "handoff_drive_read (command literal not in the kind's slot): rejected" {
+    run read_drive "clear" "/clear" "/rename A Title" "resume"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"line 2"* ]]
+
+    run read_drive "compact" "compact now" "continue"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"/compact"* ]]
+}
+
+@test "handoff_drive_read (/rename with no argument): rejected" {
+    run read_drive "rename" "/rename"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"non-empty argument"* ]]
+
+    run read_drive "rename" "/rename    "
+    [ "$status" -ne 0 ]
+}
+
+@test "handoff_drive_read (/clear with an argument): rejected" {
+    run read_drive "clear" "/rename A Title" "/clear now" "resume"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly"* ]]
+}
+
+@test "handoff_drive_read (empty continuation prompt): rejected" {
+    run read_drive "compact" "/compact" ""
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"must not be empty"* ]]
+}
+
+# The walker dispatches on the leading character: a `/` line takes the
+# recognition path and is confirmed by a command primitive, prose takes the
+# direct path. A prose line that looks like a command would be confirmed by the
+# wrong one.
+@test "handoff_drive_read (continuation prompt beginning with /): rejected" {
+    run read_drive "clear" "/rename A Title" "/clear" "/resume the work"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"must not begin"* ]]
 }
 
 # --- write-stage ---
@@ -395,7 +526,7 @@ ASMTASK
         | CLAUDE_PROJECT_DIR="$1" bash scripts/load-handoff.sh
     ' _ "$sz_tmp"
     [ "$status" -eq 0 ]
-    echo "$output" | jq -r '.systemMessage // ""' | grep -Eq '^handoff loaded — [0-9]+\.[0-9]+ KiB, saved'
+    echo "$output" | jq -r '.systemMessage // ""' | grep -Eq '^handoff: loaded — [0-9]+\.[0-9]+ KiB, saved'
 }
 
 @test "load-handoff (worktree cwd: reads worktree task, not main)" {
@@ -417,248 +548,306 @@ WTTASK
     echo "$output" | jq -r '.hookSpecificOutput.additionalContext' | grep -q 'worktree handoff body'
 }
 
-# --- write-rename ---
+# --- load-handoff on source: "clear" (consume the armed clear, spawn line 4) ---
+#
+# `/clear` mints a new session and a new transcript, and this payload reports
+# both, so the after-line confirms against .transcript_path here exactly as it
+# does at the compact boundary.
 
-@test "write-rename (matching path, in tmux): deletes file, systemMessage confirms rename" {
-    echo "the title" > "$tmp/.claude/autorename"
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autorename" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | TMUX=fake TMUX_PANE="%0" bash scripts/write-rename.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autorename" ]
-    echo "$output" | jq -e '.systemMessage | test("will rename")' >/dev/null
-    echo "$output" | jq -e '.systemMessage | test("the title")' >/dev/null
+# Write a .claude/autodrive.pending under $1 with the remaining args as lines.
+seed_pending() {
+    local dir="$1"; shift
+    printf '%s\n' "$@" > "$dir/.claude/autodrive.pending"
 }
 
-@test "write-rename (not in tmux): systemMessage + agent-facing additionalContext carry /rename line" {
-    echo "the title" > "$tmp/.claude/autorename"
+run_load_handoff() {
     run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autorename" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | env -u TMUX -u TMUX_PANE bash scripts/write-rename.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autorename" ]
-    echo "$output" | jq -e '.systemMessage | test("/rename the title")' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/rename the title")' >/dev/null
+        jq -nc --arg cwd "$1" --arg s "$2" \
+            "{cwd:\$cwd, hook_event_name:\"SessionStart\", source:\$s, transcript_path:(\$cwd + \"/t.jsonl\")}" \
+        | '"$3"' bash scripts/load-handoff.sh
+    ' _ "$1" "$2"
 }
 
-@test "write-rename (unrelated path: no-op)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/README.md" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-rename.sh
-    ' _ "$tmp"
+@test "load-handoff (clear, pending present: consumes it and reports the continuation)" {
+    seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("pick up per the task file")' >/dev/null
+    # The frame still goes out alongside it.
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("hook smoke test")' >/dev/null
 }
 
-@test "write-rename (empty file: error message, file deleted)" {
-    : > "$tmp/.claude/autorename"
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autorename" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-rename.sh
-    ' _ "$tmp"
+# The ordering hazard, and the regression this row exists to catch: the script
+# exits when handoff_frame finds nothing to inject, so the consume and the spawn
+# have to come first. Otherwise a driven clear whose task file is empty strands
+# the pending file and never continues.
+@test "load-handoff (clear, pending present but NO frame: still continues)" {
+    rm -f "$tmp/.claude/handoff-task.md" "$tmp/.claude/handoff-todo.md"
+    seed_pending "$tmp" "clear" "/rename A Title" "/clear" "resume anyway"
+    run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autorename" ]
-    echo "$output" | jq -e '.systemMessage | test("empty")' >/dev/null
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("resume anyway")' >/dev/null
+    echo "$output" | jq -e 'has("hookSpecificOutput") | not' >/dev/null
 }
 
-@test "write-rename (worktree cwd: resolves worktree autorename)" {
-    wt="$(make_worktree wtN)"
-    echo "WT Title" > "$wt/.claude/autorename"
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autorename" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | env -u TMUX -u TMUX_PANE bash scripts/write-rename.sh
-    ' _ "$wt"
+@test "load-handoff (clear, no pending: frame only, silent about any transition)" {
+    run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$wt/.claude/autorename" ]
-    echo "$output" | jq -e '.systemMessage | test("/rename WT Title")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("loaded")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("resume") | not' >/dev/null
 }
 
-# --- write-compact (PostToolUse validator) ---
+# Each loader consumes only its own transition. A hand-typed /clear fires the
+# same hook, and a compact armed in the outgoing session must survive it.
+@test "load-handoff (clear, pending of kind compact: left for SessionStart(compact))" {
+    seed_pending "$tmp" "compact" "/compact" "continue with task 3"
+    run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ -f "$tmp/.claude/autodrive.pending" ]
+}
+
+@test "load-handoff (startup with a pending present: does not consume it)" {
+    seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_load_handoff "$tmp" startup 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ -f "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("pick up") | not' >/dev/null
+}
+
+@test "load-handoff (clear, not in tmux: emits the after-line to paste)" {
+    seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_load_handoff "$tmp" clear 'env -u TMUX -u TMUX_PANE'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("pick up per the task file")' >/dev/null
+}
+
+@test "load-handoff (clear, malformed pending: discarded, reported, not armed)" {
+    seed_pending "$tmp" "clear" "/rename A Title" "not a clear" "resume"
+    run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
+}
+
+# --- write-drive (PostToolUse validator) ---
 #
 # Validate only: never spawns, never deletes. The file must survive to Stop,
-# which is the hook that actually arms the compaction.
+# which is the hook that actually arms the transition.
 
-# Write a .claude/autocompact under $1 with the remaining args as lines.
-seed_autocompact() {
+# Write a .claude/autodrive under $1 with the remaining args as lines.
+seed_drive() {
     local dir="$1"; shift
-    printf '%s\n' "$@" > "$dir/.claude/autocompact"
+    printf '%s\n' "$@" > "$dir/.claude/autodrive"
 }
 
-run_write_compact() {
+run_write_drive() {
     run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autocompact" \
+        jq -nc --arg cwd "$1" --arg fp "$2/.claude/autodrive" \
             "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-compact.sh
-    ' _ "$1"
+        | bash scripts/write-drive.sh
+    ' _ "$1" "${2:-$1}"
 }
 
-@test "write-compact (well-formed: silent, file survives)" {
-    seed_autocompact "$tmp" "/compact focus on the parser" "continue with task 3"
-    run_write_compact "$tmp"
+@test "write-drive (well-formed rename: silent, file survives)" {
+    seed_drive "$tmp" "rename" "/rename Driven Transitions"
+    run_write_drive "$tmp"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
-    [ -f "$tmp/.claude/autocompact" ]
+    [ -f "$tmp/.claude/autodrive" ]
 }
 
-@test "write-compact (bare /compact: accepted)" {
-    seed_autocompact "$tmp" "/compact" "continue with task 3"
-    run_write_compact "$tmp"
+@test "write-drive (well-formed compact: silent)" {
+    seed_drive "$tmp" "compact" "/compact focus on the parser" "continue with task 3"
+    run_write_drive "$tmp"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
-@test "write-compact (one line: directive names the two-line constraint)" {
-    seed_autocompact "$tmp" "/compact"
-    run_write_compact "$tmp"
+@test "write-drive (well-formed clear: silent)" {
+    seed_drive "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_write_drive "$tmp"
     [ "$status" -eq 0 ]
-    [ -f "$tmp/.claude/autocompact" ]
-    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("two lines")' >/dev/null
+    [ "$output" = "" ]
+}
+
+@test "write-drive (prepare-only compact marker: silent)" {
+    seed_drive "$tmp" "compact"
+    run_write_drive "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "write-drive (malformed: directive on both channels, file survives)" {
+    seed_drive "$tmp" "clear" "/rename A Title" "/clear"
+    run_write_drive "$tmp"
+    [ "$status" -eq 0 ]
+    [ -f "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("4 lines")' >/dev/null
 }
 
-@test "write-compact (three lines: directive)" {
-    seed_autocompact "$tmp" "/compact" "continue" "extra"
-    run_write_compact "$tmp"
+@test "write-drive (unknown kind: directive names the kinds)" {
+    seed_drive "$tmp" "reboot" "/reboot now"
+    run_write_drive "$tmp"
     [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("two lines")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("transition kind")' >/dev/null
 }
 
-@test "write-compact (line 1 not /compact: directive names the prefix)" {
-    seed_autocompact "$tmp" "compact now" "continue with task 3"
-    run_write_compact "$tmp"
-    [ "$status" -eq 0 ]
-    [ -f "$tmp/.claude/autocompact" ]
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/compact")' >/dev/null
-}
-
-@test "write-compact (unrelated path: no-op)" {
+@test "write-drive (unrelated path: no-op)" {
     run bash -c '
         jq -nc --arg cwd "$1" --arg fp "$1/README.md" \
             "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-compact.sh
+        | bash scripts/write-drive.sh
     ' _ "$tmp"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
-@test "write-compact (cross-project autocompact: no-op)" {
-    seed_autocompact "$other" "/compact" "continue"
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$2/.claude/autocompact" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-compact.sh
-    ' _ "$tmp" "$other"
+@test "write-drive (cross-project autodrive: no-op)" {
+    seed_drive "$other" "clear" "/rename A Title" "/clear"
+    run_write_drive "$tmp" "$other"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
-@test "write-compact (worktree cwd: validates worktree autocompact)" {
+@test "write-drive (worktree cwd: validates the worktree autodrive)" {
     wt="$(make_worktree wtC)"
-    seed_autocompact "$wt" "bad first line" "continue"
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autocompact" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-compact.sh
-    ' _ "$wt"
+    seed_drive "$wt" "bad kind" "/whatever"
+    run_write_drive "$wt"
     [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/compact")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("transition kind")' >/dev/null
 }
 
-# --- stop-compact (Stop: arm the compaction) ---
+# --- stop-drive (Stop: arm the transition) ---
 
-run_stop_compact() {
+run_stop_drive() {
     run bash -c '
-        jq -nc --arg cwd "$1" "{cwd:\$cwd, stop_hook_active:false}" \
-        | '"$2"' bash scripts/stop-compact.sh
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, stop_hook_active:false, transcript_path:(\$cwd + \"/t.jsonl\")}" \
+        | '"$2"' bash scripts/stop-drive.sh
     ' _ "$1"
 }
 
-@test "stop-compact (no autocompact: silent no-op)" {
-    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+@test "stop-drive (no autodrive: silent no-op)" {
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
-@test "stop-compact (in tmux: renames to .pending and reports armed)" {
-    seed_autocompact "$tmp" "/compact keep the parser work" "continue with task 3"
-    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+@test "stop-drive (kind with a confirming source: renames to .pending, reports armed)" {
+    seed_drive "$tmp" "compact" "/compact keep the parser work" "continue with task 3"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact" ]
-    [ -f "$tmp/.claude/autocompact.pending" ]
-    echo "$output" | jq -e '.systemMessage | test("compact")' >/dev/null
+    [ ! -e "$tmp/.claude/autodrive" ]
+    [ -f "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("/compact keep the parser work")' >/dev/null
 }
 
-@test "stop-compact (arms once only: second Stop is silent)" {
-    seed_autocompact "$tmp" "/compact" "continue with task 3"
-    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+# `rename` has no loader, so nothing would ever clear a .pending armed for it.
+@test "stop-drive (kind rename: deletes the sentinel, arms no .pending)" {
+    seed_drive "$tmp" "rename" "/rename Driven Transitions"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ ! -e "$tmp/.claude/autodrive" ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("/rename Driven Transitions")' >/dev/null
+}
+
+@test "stop-drive (arms once only: second Stop is silent)" {
+    seed_drive "$tmp" "compact" "/compact" "continue with task 3"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
-@test "stop-compact (not in tmux: emits both lines to paste, clears pending)" {
-    seed_autocompact "$tmp" "/compact keep the parser work" "continue with task 3"
-    run_stop_compact "$tmp" 'env -u TMUX -u TMUX_PANE'
+# FR-G: the prepare-only marker. Nothing is typed and nothing is spawned; the
+# .pending file alone is the whole effect, and it is what SessionStart(compact)
+# gates the frame re-injection on.
+@test "stop-drive (empty before-sequence: arms .pending, spawns nothing)" {
+    seed_drive "$tmp" "compact"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact" ]
-    [ ! -e "$tmp/.claude/autocompact.pending" ]
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("/compact keep the parser work")' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("continue with task 3")' >/dev/null
+    [ -f "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("nothing to type")' >/dev/null
 }
 
-@test "stop-compact (malformed file survived write-compact: no arming)" {
-    seed_autocompact "$tmp" "not a command" "continue"
-    run_stop_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+@test "stop-drive (not in tmux: emits every line to paste, in order, clears pending)" {
+    seed_drive "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_stop_drive "$tmp" 'env -u TMUX -u TMUX_PANE'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    echo "$ctx" | grep -q '^/rename A Title$'
+    echo "$ctx" | grep -q '^/clear$'
+    echo "$ctx" | grep -q '^pick up per the task file$'
+    # Before-lines precede the after-line: the paste order is the run order.
+    r=$(echo "$ctx" | grep -n '^/rename A Title$' | cut -d: -f1)
+    c=$(echo "$ctx" | grep -n '^/clear$' | cut -d: -f1)
+    p=$(echo "$ctx" | grep -n '^pick up per the task file$' | cut -d: -f1)
+    [ "$r" -lt "$c" ] && [ "$c" -lt "$p" ]
+}
+
+@test "stop-drive (malformed file survived write-drive: discarded, not armed)" {
+    seed_drive "$tmp" "clear" "/rename A Title"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
     echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
 }
 
-@test "stop-compact (worktree cwd: arms the worktree file)" {
+@test "stop-drive (worktree cwd: arms the worktree file)" {
     wt="$(make_worktree wtS)"
-    seed_autocompact "$wt" "/compact" "continue with task 3"
-    run_stop_compact "$wt" 'TMUX=fake TMUX_PANE="%0"'
+    seed_drive "$wt" "compact" "/compact" "continue with task 3"
+    run_stop_drive "$wt" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ -f "$wt/.claude/autocompact.pending" ]
+    [ -f "$wt/.claude/autodrive.pending" ]
 }
 
 # --- load-compact (SessionStart(compact): fire the continuation) ---
+#
+# The regression this matrix guards is silent: a frame that stops being injected
+# fails by the successor knowing less, not by anything going red.
 
 run_load_compact() {
     run bash -c '
-        jq -nc --arg cwd "$1" "{cwd:\$cwd, source:\"compact\"}" \
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, source:\"compact\", transcript_path:(\$cwd + \"/t.jsonl\")}" \
         | '"$2"' bash scripts/load-compact.sh
     ' _ "$1"
 }
 
-@test "load-compact (no pending: silent no-op)" {
+@test "load-compact (no pending: silent, and no frame — a hand-typed /compact injects nothing)" {
     run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
 }
 
 @test "load-compact (pending present: consumes it and reports the continuation)" {
-    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact.pending"
+    seed_pending "$tmp" "compact" "/compact" "continue with task 3"
     run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact.pending" ]
-    echo "$output" | jq -e '.systemMessage | test("continue")' >/dev/null
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.systemMessage | test("continue with task 3")' >/dev/null
+}
+
+@test "load-compact (pending of kind clear: left for SessionStart(clear))" {
+    seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ -f "$tmp/.claude/autodrive.pending" ]
 }
 
 @test "load-compact (not in tmux: emits continuation to paste, clears pending)" {
-    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact.pending"
+    seed_pending "$tmp" "compact" "/compact" "continue with task 3"
     run_load_compact "$tmp" 'env -u TMUX -u TMUX_PANE'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact.pending" ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("continue with task 3")' >/dev/null
 }
 
@@ -666,7 +855,7 @@ run_load_compact() {
 # a handle to it. So the frame has to be injected here, the same way
 # load-handoff.sh injects it at startup|clear.
 @test "load-compact (task file present: injects the frame)" {
-    printf '%s\n' "/compact" "resume per the task file" > "$tmp/.claude/autocompact.pending"
+    seed_pending "$tmp" "compact" "/compact" "resume per the task file"
     printf '%s\n' "## Now" "- rewire the parser" > "$tmp/.claude/handoff-task.md"
     run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
@@ -678,15 +867,26 @@ run_load_compact() {
 
 @test "load-compact (no task file: continuation still fires, no frame)" {
     rm -f "$tmp/.claude/handoff-task.md"
-    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact.pending"
+    seed_pending "$tmp" "compact" "/compact" "continue with task 3"
     run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
     echo "$output" | jq -e '.systemMessage | test("continue")' >/dev/null
     echo "$output" | jq -e 'has("hookSpecificOutput") | not' >/dev/null
 }
 
+# FR-G's other half: the prepare-only marker arrives here as a pending file with
+# no after-line. Inject the frame, type nothing.
+@test "load-compact (empty after-sequence: frame injected, nothing typed)" {
+    seed_pending "$tmp" "compact"
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("hook smoke test")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("frame re-injected")' >/dev/null
+}
+
 @test "load-compact (not in tmux, task file present: frame and prompt both emitted)" {
-    printf '%s\n' "/compact" "resume per the task file" > "$tmp/.claude/autocompact.pending"
+    seed_pending "$tmp" "compact" "/compact" "resume per the task file"
     printf '%s\n' "## Now" "- rewire the parser" > "$tmp/.claude/handoff-task.md"
     run_load_compact "$tmp" 'env -u TMUX -u TMUX_PANE'
     [ "$status" -eq 0 ]
@@ -695,18 +895,19 @@ run_load_compact() {
 }
 
 @test "load-compact (worktree cwd: consumes the worktree pending file)" {
-    wt="$(make_worktree wtL)"
-    printf '%s\n' "/compact" "continue with task 3" > "$wt/.claude/autocompact.pending"
+    wt="$(make_worktree wtLC)"
+    seed_pending "$wt" "compact" "/compact" "continue with task 3"
     run_load_compact "$wt" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$wt/.claude/autocompact.pending" ]
+    [ ! -e "$wt/.claude/autodrive.pending" ]
 }
 
-# --- report-watcher-failure (UserPromptSubmit: surface a watcher non-delivery) ---
+# --- report-watcher-failure (UserPromptSubmit: surface a non-delivery) ---
 #
-# Detached watchers have no channel back: a line that never lands is invisible to
-# the agent, and the compact watcher's C-u abort leaves the pane looking
-# untouched. The watcher drops a reason file; this hook is what reads it.
+# The walker is detached and has no channel back: a line that never lands is
+# invisible to the agent, and the recognition abort leaves the pane looking
+# untouched. The walker drops a reason file; this hook is what reads it. One
+# channel now, not two — the transition is a singleton.
 
 run_report_failure() {
     run bash -c '
@@ -723,7 +924,7 @@ run_report_failure() {
 
 @test "report-watcher-failure (failure present: reports on both channels)" {
     printf '%s\n' "the TUI did not recognize \`/compact\`" \
-        > "$tmp/.claude/autocompact.failed"
+        > "$tmp/.claude/autodrive.failed"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
     echo "$output" | jq -e '.systemMessage | test("did not recognize")' >/dev/null
@@ -734,53 +935,52 @@ run_report_failure() {
 }
 
 @test "report-watcher-failure (consumes the file: reports once, not every prompt)" {
-    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autodrive.failed"
     run_report_failure "$tmp"
-    [ ! -e "$tmp/.claude/autocompact.failed" ]
+    [ ! -e "$tmp/.claude/autodrive.failed" ]
 
     run_report_failure "$tmp"
     [ "$output" = "" ]
 }
 
-# A line-1 failure leaves the armed file stranded as .pending: no compaction will
-# consume it, and Stop cannot re-arm from it. Clear it with the report.
+# A failure part-way through a sequence leaves the armed file stranded as
+# .pending: no transition will consume it, and Stop cannot re-arm from it.
 @test "report-watcher-failure (clears a stranded pending file)" {
-    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
-    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autodrive.failed"
+    seed_pending "$tmp" "compact" "/compact" "continue"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact.pending" ]
+    [ ! -e "$tmp/.claude/autodrive.pending" ]
 }
 
 @test "report-watcher-failure (worktree cwd: reads the worktree file)" {
     wt="$(make_worktree wtF)"
-    printf '%s\n' "typed but never submitted" > "$wt/.claude/autocompact.failed"
+    printf '%s\n' "typed but never submitted" > "$wt/.claude/autodrive.failed"
     run_report_failure "$wt"
     [ "$status" -eq 0 ]
-    [ ! -e "$wt/.claude/autocompact.failed" ]
+    [ ! -e "$wt/.claude/autodrive.failed" ]
     echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
 }
 
-# An autocompact is armed at the Stop of the turn that writes it, and Stop
-# renames it away. So one still present at a *later* turn's UserPromptSubmit
-# never armed — its turn ended abnormally (Esc, crash, quit). Left alone it is
-# armed by the next normal Stop, days later and possibly in another session,
-# driving a stale /compact into unrelated work.
-@test "report-watcher-failure (stale autocompact: discards it and reports)" {
-    printf '%s\n' "/compact keep the parser work" "continue with task 3" \
-        > "$tmp/.claude/autocompact"
+# An autodrive is armed at the Stop of the turn that writes it, and Stop renames
+# or removes it. So one still present at a *later* turn's UserPromptSubmit never
+# armed — its turn ended abnormally (Esc, crash, quit). Left alone it is armed by
+# the next normal Stop, days later and possibly in another session, driving a
+# stale transition into unrelated work.
+@test "report-watcher-failure (stale autodrive: discards it and reports)" {
+    seed_drive "$tmp" "compact" "/compact keep the parser work" "continue with task 3"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
     echo "$output" | jq -e \
         '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
     echo "$output" | jq -e \
-        '.hookSpecificOutput.additionalContext | test("autocompact")' >/dev/null
+        '.hookSpecificOutput.additionalContext | test("autodrive")' >/dev/null
 }
 
-@test "report-watcher-failure (stale autocompact: reports once, not every prompt)" {
-    printf '%s\n' "/compact" "continue with task 3" > "$tmp/.claude/autocompact"
+@test "report-watcher-failure (stale autodrive: reports once, not every prompt)" {
+    seed_drive "$tmp" "compact" "/compact" "continue with task 3"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
@@ -789,22 +989,22 @@ run_report_failure() {
     [ "$output" = "" ]
 }
 
-# .pending is legitimate for the whole Stop -> compaction window, and that
-# window contains the watcher's own /compact submit — a UserPromptSubmit. Only
-# a watcher-observed failure may clear it; a stale autocompact must not, or the
-# sweep would race SessionStart(compact) and kill a live continuation.
-@test "report-watcher-failure (stale autocompact leaves .pending alone)" {
-    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact"
-    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
+# .pending is legitimate for the whole Stop -> transition window, and that window
+# contains the walker's own submit — a UserPromptSubmit. Only a watcher-observed
+# failure may clear it; a stale autodrive must not, or the sweep would race
+# SessionStart(compact|clear) and kill a live continuation.
+@test "report-watcher-failure (stale autodrive leaves .pending alone)" {
+    seed_drive "$tmp" "compact" "/compact" "continue"
+    seed_pending "$tmp" "compact" "/compact" "continue"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autocompact" ]
-    [ -f "$tmp/.claude/autocompact.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    [ -f "$tmp/.claude/autodrive.pending" ]
 }
 
 @test "report-watcher-failure (failure and stale file: one report covering both)" {
-    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
-    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact"
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autodrive.failed"
+    seed_drive "$tmp" "compact" "/compact" "continue"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | jq -sr 'length')" = "1" ]
@@ -812,48 +1012,11 @@ run_report_failure() {
     echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
 }
 
-# The rename watcher is detached on the same terms as the compaction ones, so
-# its non-deliveries need the same path back. One hook reads both files: they
-# differ only in which line never landed.
-@test "report-watcher-failure (rename failure: reports on both channels)" {
-    printf '%s\n' "the user was composing a prompt" \
-        > "$tmp/.claude/autorename.failed"
-    run_report_failure "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autorename.failed" ]
-    echo "$output" | jq -e '.systemMessage | test("composing")' >/dev/null
-    echo "$output" | jq -e \
-        '.hookSpecificOutput.additionalContext | test("rename")' >/dev/null
-}
-
-@test "report-watcher-failure (both watchers failed: one report covering both)" {
-    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autocompact.failed"
-    printf '%s\n' "the user was composing a prompt" \
-        > "$tmp/.claude/autorename.failed"
-    run_report_failure "$tmp"
-    [ "$status" -eq 0 ]
-    [ "$(echo "$output" | jq -sr 'length')" = "1" ]
-    echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
-    echo "$output" | jq -e '.systemMessage | test("composing")' >/dev/null
-}
-
-# A rename failure says nothing about a compaction, so it must not clear the
-# armed file — same reasoning as the stale-autocompact sweep.
-@test "report-watcher-failure (rename failure leaves .pending alone)" {
-    printf '%s\n' "the user was composing a prompt" \
-        > "$tmp/.claude/autorename.failed"
-    printf '%s\n' "/compact" "continue" > "$tmp/.claude/autocompact.pending"
-    run_report_failure "$tmp"
-    [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autorename.failed" ]
-    [ -f "$tmp/.claude/autocompact.pending" ]
-}
-
 @test "report-watcher-failure (worktree cwd: sweeps the worktree file)" {
     wt="$(make_worktree wtG)"
-    printf '%s\n' "/compact" "continue" > "$wt/.claude/autocompact"
+    seed_drive "$wt" "compact" "/compact" "continue"
     run_report_failure "$wt"
     [ "$status" -eq 0 ]
-    [ ! -e "$wt/.claude/autocompact" ]
+    [ ! -e "$wt/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
 }

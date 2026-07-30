@@ -8,14 +8,14 @@ to edit the plugin's skill, hook, or script.
 High-level flow: the skill decides the task/todo/rename content, then issues
 one `handoff-checkpoint` Bash call carrying the whole wrap-up as a
 schema-validated JSON payload on stdin → `checkpoint.sh` writes
-`.claude/handoff-task.md`/`.claude/handoff-todo.md`/`.claude/autorename` (per
+`.claude/handoff-task.md`/`.claude/handoff-todo.md`/`.claude/autodrive` (per
 FR5/FR6 write semantics — a Write or Edit form, empty body ⟹ removed) and
-leaves `.claude/checkpoint-manifest` behind, since staging and the tmux
-rename watcher can't run from the agent's sandboxed Bash (NFR1) →
-`PostToolUse(Bash)` (`bash-post.sh`) consumes the manifest: stages every
-listed path with `git add -f` (deletions included) and spawns the rename
-watcher → next session's `SessionStart(startup|clear)` assembles the frame in
-memory (header + inlined task file) and injects it. `README.md` has the
+leaves `.claude/checkpoint-manifest` behind, since staging can't run from the
+agent's sandboxed Bash (NFR1) → `PostToolUse(Bash)` (`bash-post.sh`) consumes
+the manifest and stages every listed path with `git add -f` (deletions
+included) → `Stop` (`stop-drive.sh`) arms whatever transition the sentinel
+describes → next session's `SessionStart(startup|clear)` assembles the frame
+in memory (header + inlined task file) and injects it. `README.md` has the
 user-facing version of this. The checkpoint also emits, on stdout, the same
 directives the two probes it replaced used to print: when a gitlore-memory
 submodule is dirty, a memory directive tells the agent to summarize → get
@@ -27,18 +27,25 @@ since both paths end with one parent commit carrying the source change and
 the gitlink bump. See `docs/changelog/2026-07-25-commit-awareness.md` and
 `docs/changelog/2026-07-27-one-channel-one-writer.md`.
 
-Second flow, driven by the precompact skill: same `handoff-checkpoint` call
-(`"skill": "precompact"`, no `rename`) → its directive output composes the
-memory gate with the SDD ledger nudge instead of the todo-file suppression →
-skill writes `.claude/autocompact` → `PostToolUse` validates it → `Stop` arms
-the compaction → `SessionStart(compact)` re-injects the task file and fires
-the continuation prompt. Both typed lines go through detached tmux watchers
-spawned by hooks at turn boundaries, never from inside a live turn.
+**Two boundaries, four skills, one flow.** At each boundary a skill prepares
+and a sibling also drives: `handoff`/`handoff-continue` for `/clear`,
+`precompact`/`compact-continue` for `/compact`. All four route through the
+same checkpoint call, discriminated by the payload's `skill` field, from which
+`checkpoint.sh` derives the **boundary** — that is what keys the directive
+composition (memory gate + todo suppression for clear, memory gate + SDD
+ledger nudge for compact), so the pair at each boundary cannot drift. All four
+can carry `task` — the durable side of the seam, content that must survive
+verbatim — while the continuation prompt is only a handle to it.
 
-Both skills route through the same checkpoint call, discriminated by the
-payload's `skill` field, and both can carry `task` — the durable side of the
-seam, content that must survive verbatim — while the continuation prompt is
-only a handle to it. `handoff-task.md` is written **only** by the checkpoint
+The judgment is per-boundary, not per-drive-mode, so each boundary's full
+protocol lives in one file (`handoff/SKILL.md`, `precompact/SKILL.md`) and the
+driven skills are short bodies that run their sibling's protocol by reference
+and then arm. What the driven skills add is `.claude/autodrive` with lines to
+type; the prepare-only compact path arms the kind line alone (FR-G), which
+types nothing but is what `SessionStart(compact)` gates the frame's
+re-injection on. Every typed line goes through the detached walker spawned by
+a hook at a turn boundary, never from inside a live turn. See
+`docs/changelog/2026-07-29-driven-transitions.md`. `handoff-task.md` is written **only** by the checkpoint
 (FR3): a direct agent Write/Edit is denied outright by `write-guard.sh`.
 
 `handoff-todo.md` is different: it is a scratch list the agent edits freely
@@ -54,53 +61,64 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
 `docs/changelog/2026-07-27-one-channel-one-writer.md`.
 
 - `.claude-plugin/plugin.json` — manifest
-- `skills/handoff/SKILL.md` — the main skill (`/handoff:handoff`),
-  contains the markdown templates for `handoff-task.md` and
-  `handoff-todo.md` (both are the single source of truth for their shape).
-  Its first step is the commit-awareness decision — is a commit going to
-  carry this session's memory — which it passes to the checkpoint call and
-  which makes it write memory as if the change has landed. Step 3 decides
-  the title/task/remainder, then issues one `handoff-checkpoint` Bash call
-  with the whole wrap-up as a JSON heredoc; step 4 follows whatever
-  directive the checkpoint prints.
+- `skills/handoff/SKILL.md` — the clear boundary's full protocol
+  (`/handoff:handoff`), and the single source of truth for the markdown
+  templates of `handoff-task.md` and `handoff-todo.md`, plus the seam between
+  what belongs in a file and what belongs in a continuation prompt (the seam
+  lives here rather than in `precompact/SKILL.md` because both driven skills
+  read this file). Its first step is the commit-awareness decision — is a
+  commit going to carry this session's memory — which it passes to the
+  checkpoint call and which makes it write memory as if the change has
+  landed. Step 3 decides the title/task/remainder, then issues one
+  `handoff-checkpoint` Bash call with the whole wrap-up as a JSON heredoc;
+  step 4 follows whatever directive the checkpoint prints; step 5 reports what
+  the boundary is ready for, in one line. Prepares only — it arms nothing.
+- `skills/handoff-continue/SKILL.md` — the `/handoff:handoff-continue` skill.
+  Runs `handoff`'s protocol by reference with `"skill": "handoff-continue"`
+  and **no** `rename` (schema-forbidden — the title is a line of the
+  sentinel), then writes `.claude/autodrive`: `clear`, `/rename <title>`,
+  `/clear`, continuation prose. Carries the arming discipline `handoff` has no
+  need of — never in the same turn as a question the directive requires, and
+  the commit lands before the sentinel is written.
 - `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
-  session title from the conversation (no tool calls) and writes it to
-  `.claude/autorename` directly with the Write tool; the same
-  `write-rename.sh` PostToolUse(Write|Edit) hook that handoff's checkpoint
-  call ultimately triggers (via `bash-post.sh`, since the checkpoint writes
-  the same file from Bash) does the rename. Rename-only — no task file, no
-  memory. For `/btw` side conversations and any session worth a name
-  while the main thread stays live.
-- `skills/precompact/SKILL.md` — the `/handoff:precompact` skill.
-  Drives **commit memory → compact → continue**: decide commit awareness
-  (same first step as handoff, with the extra load-bearing rule that when
-  the commit is part of the request it lands *before* `.claude/autocompact`
-  is written — arming the compaction ends the turn), capture durable
-  learnings in auto-memory, decide the task/todo content, then run one
-  `handoff-checkpoint` Bash call (`"skill": "precompact"`, no `rename` —
-  schema-forbidden there) and follow whatever directive it prints (memory
-  commit and/or ledger flush), then write `.claude/autocompact` (line 1 the
-  literal `/compact [directive]`, line 2 a single-line continuation prompt
-  that is only a handle to the task file). The hooks do the rest; the skill
-  never runs `/compact` itself. No rename.
+  session title from the conversation (no tool calls) and writes
+  `.claude/autodrive` directly with the Write tool, two lines: `rename`, then
+  `/rename <title>`. Rename-only — no task file, no memory. For `/btw` side
+  conversations and any session worth a name while the main thread stays live.
+- `skills/precompact/SKILL.md` — the compact boundary's full protocol
+  (`/handoff:precompact`). Decide commit awareness (same first step as
+  handoff), capture durable learnings in auto-memory, decide the task/todo
+  content, run one `handoff-checkpoint` Bash call (`"skill": "precompact"`, no
+  `rename` — schema-forbidden there), follow whatever directive it prints
+  (memory commit and/or ledger flush), write `.claude/autodrive` containing
+  the single line `compact` (FR-G's expectation marker), and report readiness
+  in one line. Prepares only: no compact directive, no continuation prompt, no
+  keystrokes, no tmux.
+- `skills/compact-continue/SKILL.md` — the `/handoff:compact-continue` skill.
+  Runs `precompact`'s steps 1–3 by reference with
+  `"skill": "compact-continue"`, then writes `.claude/autodrive`: `compact`,
+  `/compact [directive]`, continuation prose. Carries the same arming
+  discipline as `handoff-continue`, and the anti-patterns that used to forbid
+  `precompact` from stopping short ("telling the user to run `/compact`";
+  "invoking it is the authorization to compact") live here now.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in `docs/design.md`
-- `hooks/hooks.json` — declares nine hooks.
+- `hooks/hooks.json` — declares eight hooks.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
-  `additionalContext`.
+  `additionalContext`; on `clear`, also consume an armed transition of kind
+  `clear` and spawn the walker for its after-line.
   `PreToolUse(Write|Edit)`: deny any direct agent Write/Edit to
   `handoff-task.md` — it is checkpoint-only (FR3) — and deny writes whose
   resolved path is not `$cwd/.claude/<file>` (cross-project guard).
   `PostToolUse(Write|Edit)`: stage `handoff-todo.md` for commit when the
-  agent writes it directly; rename the session on an `autorename` write;
-  validate an `autocompact` write.
+  agent writes it directly; validate an `autodrive` write.
   `PostToolUse(Bash)`: consume `.claude/checkpoint-manifest` after
-  `handoff-checkpoint` runs — stage every listed path (deletions included)
-  and spawn the rename watcher for a checkpoint-written `autorename`.
-  `Stop`: arm the compaction when `.claude/autocompact` exists.
-  `SessionStart(compact)`: fire the continuation prompt after a
-  compaction completes.
+  `handoff-checkpoint` runs — stage every listed path (deletions included).
+  `Stop`: arm the transition when `.claude/autodrive` exists.
+  `SessionStart(compact)`: re-inject the frame and fire the continuation
+  prompt after a compaction completes.
+  `UserPromptSubmit`: report a non-delivery and sweep a stale sentinel.
 - `scripts/load-handoff.sh` — SessionStart(startup|clear) entry
   point. Gates on `.claude/handoff-task.md`, assembles the frame in
   memory (a timestamp header plus the inlined task file), and emits it
@@ -136,10 +154,22 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   variadic over (basename, rel) pairs and sets `MATCHED_NAME` — the guards
   cover two files, and the jq parse is on the Write/Edit hot path, so N
   files must stay one parse.
+  `handoff_drive_read()` parses and validates the sentinel into `DRIVE_KIND`,
+  `DRIVE_BEFORE[]`, `DRIVE_AFTER[]` — or `DRIVE_ERR` naming the constraint that
+  failed. Line 1 is the kind and the kind fixes the shape, so the remaining
+  lines need no separator: `rename` takes 2 lines, `compact` 3 or the kind line
+  alone (FR-G), `clear` 4. Each command literal is pinned to its slot, so the
+  file cannot be made to type something else, and a prose line may not begin
+  with `/` — the walker dispatches on the leading character, and a prose line
+  that looked like a command would be confirmed by the wrong primitive. Read
+  with a `read` loop, not `mapfile` (bash 3.2 has none), and for the same
+  vintage callers must expand the arrays as `${DRIVE_BEFORE[@]+"${DRIVE_BEFORE[@]}"}`.
+  `handoff_drive_has_source()` says whether a kind's transition is confirmed by
+  a `SessionStart`; `rename` is not one, so `stop-drive.sh` deletes its sentinel
+  outright rather than arming a `.pending` nobody would clear.
   `handoff_spawn_detached()` is the shared setsid-else-nohup detach used
-  by all watcher-spawning hooks (setsid is Linux-only; nohup is the
-  macOS fallback) — `rename-when-idle.sh` (from both `write-rename.sh` and
-  `bash-post.sh`) and both compaction watchers.
+  by every hook that spawns the walker (setsid is Linux-only; nohup is the
+  macOS fallback) — `stop-drive.sh`, `load-compact.sh` and `load-handoff.sh`.
   There is no more transcript-scraping activation predicate: with
   `handoff-task.md` written only by the checkpoint (FR3), there is no
   "before/after activation" distinction left to detect. See
@@ -149,56 +179,52 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   checkpoint-only (FR3) — and denies writes whose resolved path is not
   `$cwd/.claude/<file>` (cross-project misfires). No longer covers
   `handoff-todo.md`, which the agent is meant to edit directly (FR4).
-- `scripts/rename-when-idle.sh` — detached watcher. Polls for the Claude TUI
-  spinner to be absent (idle), checks the user isn't composing, then fires
-  `tmux send-keys -l` to type `/rename <title>` + Enter. Verifies the rename
-  landed (status bar) and retries up to 3×. Spawned by `write-rename.sh`;
-  outlives the agent turn. Both non-delivery paths — the composing-bail and
-  three failed verifies — end in `watcher_fail`, so neither is silent. The bail
-  is the shape `docs/changelog/2026-07-22-rename-watcher-failure-channel.md`
-  calls indistinguishable from success: it used to
-  `exit 0` while `write-rename.sh` had already promised the user a rename.
-- `scripts/_rename-lib.sh` — sourced helper for every detached watcher
-  (`rename-when-idle.sh` and both compaction watchers, despite the name).
-  Defines `is_busy` (spinner present), `is_typing` (prompt has content) and
-  `is_unknown_command` over captured tmux pane text — pure predicates, tested
-  directly in `tests/rename-test.bats`. Also the shared watcher scaffold:
-  the `HANDOFF_WATCHER_*` tunables, `snap` (visible-pane capture — never
-  scrollback), `wait_for_idle` (stable-idle poll loop) and two submit
-  confirmations, neither of which reads the pane. `submit_consumed_or_fail` is
-  for line 1: it Enters, then waits for `$HANDOFF_PENDING_FILE` (exported by
-  `stop-compact.sh`) to disappear, which `SessionStart(compact)` is what does —
-  confirming the compaction rather than the keystroke. `is_busy` was the
+- `scripts/drive-when-idle.sh` — the one detached watcher: the walker.
+  Spawned by `stop-drive.sh` for the lines typed before a transition, and by
+  the transition's own `SessionStart` loader for the lines typed after it. One
+  argument per line, and the lines are the literal keystrokes — it never learns
+  which command belongs to which kind. Per line: `wait_for_idle`, bail if
+  `is_typing`, `send-keys -l`, then a `VERIFY_DELAY` gap that is the
+  recognition read-back for a `/` line and the paste-window settle for prose,
+  then confirm by the command's own primitive. A line that fails to confirm
+  ends the sequence, so a `/rename` that never lands under kind `clear` costs a
+  wrong title and nothing more. The re-gate at the top of each iteration is
+  FR-H: confirming a line can take `CONSUME_TIMEOUT` (300s) and the pane is
+  live throughout.
+- `scripts/_watcher-lib.sh` — sourced helper for the walker. Defines `is_busy`
+  (spinner present), `is_typing` (prompt has content) and `is_unknown_command`
+  over captured tmux pane text — pure predicates, tested directly in
+  `tests/watcher-test.bats`. Also the shared scaffold: the `HANDOFF_WATCHER_*`
+  tunables, `snap` (visible-pane capture — never scrollback), `wait_for_idle`
+  (stable-idle poll loop), and the three confirmation primitives, none of which
+  reads the pane. `_submit_until` is their shared body: Enter, three fast
+  retries at `VERIFY_DELAY` (the first Enter can be absorbed into the paste
+  window as a line break), then a long poll without resending, since a
+  registered Enter can take far longer than `VERIFY_DELAY` to reach the signal.
+  `submit_consumed` waits for `$HANDOFF_PENDING_FILE` (exported by the spawning
+  hook) to disappear, which the confirming `SessionStart` is what does —
+  confirming the transition rather than the keystroke. `is_busy` was the
   original criterion and false-fails here: the TUI shows no matching chrome in
   the ~1.5s after the keystroke, so a live 103-second compaction was reported as
   never submitted. The trade is latency, since a real non-delivery now waits out
-  `CONSUME_TIMEOUT`; with no file to confirm against it exits 0, because an
-  unconfirmable submit is not a failed one. The continuation
-  watcher instead uses `submit_confirmed_or_fail` + `transcript_prompt_count`,
-  which confirm via the session transcript (`$HANDOFF_TRANSCRIPT`, exported by
-  `load-compact.sh`) rather than the spinner — line 2 fires into the
-  post-compaction settle where a submit is *queued* (accepted, transcript-logged
+  `CONSUME_TIMEOUT`; with no file to confirm against it returns success, because
+  an unconfirmable submit is not a failed one. `submit_prompted` +
+  `transcript_prompt_count` confirm prose via the session transcript
+  (`$HANDOFF_TRANSCRIPT`, exported by the spawning hook): prose fires into a
+  post-transition settle where a submit is *queued* (accepted, transcript-logged
   at once) but shows no spinner until the queued turn starts seconds later, so
   `is_busy` would false-fail it. The count keys on structural flags (isMeta,
-  isCompactSummary, isSidechain) rather than content, and is baselined before
-  the first Enter, so neither a
-  quoted echo in the summary/frame nor a stale pre-compaction copy reads as a
-  submit. Each watcher keeps only its distinct middle — rename-verify vs
-  type-verify-submit vs prose-settle-confirm. And `watcher_fail`, which records a
+  isCompactSummary, isSidechain) rather than content. `submit_titled` +
+  `transcript_title_count` confirm a `/rename` by an exact `customTitle` match
+  on a `custom-title` entry — the harness's own auto-titling writes `ai-title`,
+  a distinct type, so it cannot false-positive; this retired the last
+  pane-reading confirmation, a grep for the title's first 20 characters that
+  matched whenever the title was on screen for any other reason. All three
+  baseline before the first Enter, so a stale pre-transition copy never reads as
+  a submit. All three **return** rather than exit: the walker owns failure for
+  the whole sequence and calls `watcher_fail` once, at the top — which records a
   non-delivery reason to `$HANDOFF_FAIL_FILE` (set by the spawning hook, which
   owns the path) and exits 1; unset is tolerated.
-- `scripts/write-rename.sh` — PostToolUse(Write|Edit) entry point for session
-  renaming. Matches writes whose resolved path is `$cwd/.claude/autorename`,
-  reads the title from that file, deletes it, then either spawns a detached
-  `rename-when-idle.sh` watcher (in tmux) or emits a `/rename <title>` line
-  for the user to paste (outside tmux). Running as a hook rather than via the
-  Bash tool means the tmux socket is accessible with no sandbox bypass.
-  Exports `HANDOFF_FAIL_FILE` (`.claude/autorename.failed`) before spawning,
-  the same arrangement `stop-compact.sh` uses: the hook owns the path, the
-  watcher stays ignorant of the layout. Fires only for the `/handoff:autoname`
-  path, which still writes `autorename` with the Write tool; `bash-post.sh`
-  covers the same file when `handoff-checkpoint` writes it from Bash instead,
-  sharing the watcher-spawn body but not this hook.
 - `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point: matches
   writes/edits that resolve to `$cwd/.claude/handoff-todo.md` — the one path
   the checkpoint never sees, since the agent edits that scratch list directly
@@ -207,60 +233,59 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   the removal when the edit left it with no substantive content (a `##
   Remaining` with no items). `handoff-task.md` no longer takes this path; it
   is checkpoint-only (FR3) and staged via the manifest instead.
-- `scripts/write-compact.sh` — PostToolUse(Write|Edit) entry point for the
-  compaction driver. Matches writes resolving to `$cwd/.claude/autocompact`
-  and **validates only**: exactly two lines, line 1 begins `/compact`. Never
-  spawns, never deletes — the file must survive to `Stop`. A malformed file
-  gets a `systemMessage` plus an imperative `additionalContext` so the agent
-  can fix it in the same turn instead of hitting a silent no-op at `Stop`.
-  Path matching is the consume-time cross-project guard (same shape as
-  `autorename`): no PreToolUse guard, no activation gate.
-- `scripts/stop-compact.sh` — `Stop` entry point: arms the compaction.
-  Renames `autocompact` → `autocompact.pending` **before** spawning, so a
-  later `Stop` in the same session cannot re-arm, then spawns a detached
-  `compact-when-idle.sh` (or emits both lines to paste outside tmux). Silent
-  no-op when the file is absent — `Stop` fires every turn. `Stop` does not
-  fire on Esc, so an interrupted turn cannot arm compaction.
+- `scripts/write-drive.sh` — PostToolUse(Write|Edit) entry point for the
+  transition driver. Matches writes resolving to `$cwd/.claude/autodrive` and
+  **validates only**, via `handoff_drive_read`. Never spawns, never deletes —
+  the file must survive to `Stop`. A malformed file gets a `systemMessage` plus
+  an imperative `additionalContext` naming the constraint that failed, so the
+  agent can fix it in the same turn instead of hitting a silent no-op at `Stop`;
+  it deliberately does not restate the legal shapes, since the skill body that
+  wrote the file is their source of truth. Path matching is the consume-time
+  cross-project guard: no PreToolUse guard, no activation gate.
+- `scripts/stop-drive.sh` — `Stop` entry point: arms the transition. Consumes
+  the sentinel **before** spawning, so a later `Stop` in the same session
+  cannot re-arm — `mv` to `.pending` for a kind with a confirming source, `rm`
+  for `rename`, which no loader would ever clear. Then spawns the walker with
+  the before-lines, exporting `HANDOFF_FAIL_FILE`, `HANDOFF_PENDING_FILE` and
+  `HANDOFF_TRANSCRIPT` (this session's, from `Stop`'s own payload — what a
+  `/rename` line confirms against): the hook owns the paths, the walker stays
+  ignorant of the layout. An empty before-sequence (FR-G) arms the `.pending`
+  and spawns nothing. Outside tmux it emits every line, before then after, for
+  the user to paste in order — and it is the *single* producer of that
+  pasteable form, which is why no skill body prints one. Silent no-op when the
+  file is absent — `Stop` fires every turn. `Stop` does not fire on Esc, so an
+  interrupted turn cannot arm a transition.
 - `scripts/load-compact.sh` — `SessionStart(compact)` entry point: consumes
-  `autocompact.pending`, injects the task-file frame via `additionalContext`
-  (`handoff_frame`; omitted when there is no task file), and spawns
-  `continue-when-idle.sh` with the session `transcript_path` exported as
-  `$HANDOFF_TRANSCRIPT` (the watcher's delivery-confirmation signal).
+  `autodrive.pending` — which is itself the confirmation the walker was waiting
+  on for the `/compact` line it typed — injects the task-file frame via
+  `additionalContext` (`handoff_frame`; omitted when there is no task file),
+  and spawns the walker for the after-line with the session `transcript_path`
+  exported as `$HANDOFF_TRANSCRIPT`. Gates on `DRIVE_KIND == compact`: each
+  loader consumes only its own kind, so a `clear` armed in this session and
+  overtaken by a threshold auto-compaction is not consumed here.
   `source: "compact"` is the authoritative compaction-complete signal — no pane
   scraping. Silent when there is no pending file (auto-compaction fires the same
-  hook). Reading the task file does not consume it.
+  hook), which is also what keeps a hand-typed `/compact` from re-injecting a
+  days-old frame. Reading the task file does not consume it.
 - `scripts/report-watcher-failure.sh` — `UserPromptSubmit` entry point:
-  reconciles watcher and compaction state at the start of a turn.
-  It consumes `.claude/autocompact.failed` and `.claude/autorename.failed` —
-  one file per driven line, differing only in which line never landed — and
-  reports the reasons on both channels in a single message, also clearing a
-  stranded `autocompact.pending` (compaction failure only). Detached watchers'
-  exit status is read by nothing, so these files are their only path back to the
-  agent — most of all on the line-1 recognition abort, which wipes the composer
-  and leaves the pane looking untouched. `UserPromptSubmit` rather than `Stop`
-  because a watcher runs *after* the Stop that spawned it. Reports only what a
-  watcher observed itself; a stale `.pending` alone is never treated as failure
-  (it is legitimate for the whole Stop → compaction window).
-  It also sweeps a bare `.claude/autocompact`: the file is armed at the `Stop`
-  of the turn that writes it and renamed away, so one still present when a
+  reconciles the armed-transition state at the start of a turn.
+  It consumes `.claude/autodrive.failed` — one channel now, since the
+  transition is a singleton — and reports the reason on both channels, also
+  clearing a stranded `autodrive.pending`. The detached walker's exit status is
+  read by nothing, so that file is its only path back to the agent — most of all
+  on the recognition abort, which wipes the composer and leaves the pane looking
+  untouched. `UserPromptSubmit` rather than `Stop` because the walker runs
+  *after* the Stop that spawned it. Reports only what the walker observed
+  itself; a stale `.pending` alone is never treated as failure (it is legitimate
+  for the whole Stop → transition window).
+  It also sweeps a bare `.claude/autodrive`: the file is armed at the `Stop`
+  of the turn that writes it and renamed or removed, so one still present when a
   later turn begins never armed, and would otherwise be armed by the next
   `Stop` — days later, possibly in another session. `UserPromptSubmit` is the
   exact discriminator; it cannot fire between the write and that turn's own
   `Stop`. Only the failure branch touches `.pending` — sweeping it on a stale
-  `autocompact` would race a live `SessionStart(compact)`. See
+  sentinel would race a live `SessionStart(compact|clear)`. See
   `docs/changelog/2026-07-22-stale-autocompact.md`.
-- `scripts/compact-when-idle.sh` — detached watcher for line 1.
-  Type-verify-submit: sends the command with `send-keys -l` and **no** Enter,
-  reads back whether the TUI rendered command recognition, and only then
-  Enters — sending `C-u` and aborting if it rendered `No commands match`.
-  Retries the Enter alone (re-sending the text would concatenate a copy).
-- `scripts/continue-when-idle.sh` — detached watcher for line 2. Same idle
-  wait, no recognition check: line 2 is prose, and prose at idle is the safe
-  class. Confirms delivery via the transcript (`submit_confirmed_or_fail`), not
-  `is_busy`: it fires into the post-compaction settle, where the submit is
-  queued and shows no spinner in the confirm window even though it was accepted.
-  Both watchers read only the **visible** pane — a `capture-pane -S`
-  history read matches a stale timer and reports busy long after `Stop`.
 - `scripts/worktree_root.py` — pure resolver `worktree_root(cwd, project)`:
   walks up from the session cwd via on-disk `.git` linkage to the enclosing
   linked-worktree root, else returns `project`. Backs `_lib.sh`'s
@@ -278,9 +303,15 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   or-null only), removes a file whose resulting body is empty via
   `checkpoint_is_empty_body` (FR6), writes `.claude/checkpoint-manifest` —
   always, even with zero lines, so `bash-post.sh`'s presence-gate still
-  fires for a rename-only call — and `.claude/autorename` when `rename` is
-  present (FR8), then prints the same directive output the two probes it
-  replaced used to (FR9, via `_checkpoint-lib.sh`). NFR1: it does no `git`
+  fires for a rename-only call — and `.claude/autodrive` when `rename` is
+  present (FR8), as the two-line `rename` kind, flattening the title's
+  whitespace on the way (`bash-post.sh` used to do that at consume time, and
+  there is no consumer left to). `rename` is required under `skill: "handoff"`
+  and forbidden under the other three, which is the whole reason the enum has
+  four values rather than two: it makes a `handoff` call that forgot its title
+  an error rather than a silent non-rename. Then it prints the directive output
+  (FR9, via `_checkpoint-lib.sh`), composed on the **boundary** derived from
+  `skill`, not on `skill` itself. NFR1: it does no `git`
   or `tmux` work itself — see `bash-post.sh`. The Edit form's exact string
   replacement (first occurrence, error if `old_string` is absent or
   ambiguous) is applied by a `python3` heredoc, not shell, so a multi-line
@@ -342,9 +373,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   worktree-aware root resolution (a `python3` spawn via `handoff_root`) is
   deferred to the rare positive path. When the manifest is present, stages
   every listed path with `git add -f` (deletions included), consumes
-  `.claude/autorename` if present and spawns the rename watcher through the
-  same helper `write-rename.sh` uses, then emits a dual-channel summary and
-  deletes the manifest. This is where NFR1's git/tmux work happens instead
+  then emits a dual-channel summary and deletes the manifest. Staging is all it
+  does: a sentinel the checkpoint wrote is armed at `Stop` like any other, so
+  consuming it here would spawn the walker mid-turn, which is the one thing the
+  `Stop` gate exists to prevent. This is where NFR1's git/tmux work happens instead
   of in the agent's sandboxed Bash — see
   `docs/changelog/2026-07-27-one-channel-one-writer.md`.
 - `plugin-dev/` — vendored
@@ -434,7 +466,7 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   `release` recipe depends on this name; it is also gitlore's
   `precommitCommand`, so it runs on every memory commit (needs the
   direnv-activated venv).
-- `just hook-test` — `bats tests/hook-test.bats tests/rename-test.bats
+- `just hook-test` — `bats tests/hook-test.bats tests/watcher-test.bats
   tests/checkpoint.bats`: end-to-end test of the handoff-specific hook
   scripts (and the rename scripts) against synthetic tool-event payloads. `bats run` captures
   exit codes/output without the `set +e` dance. `version-guard.sh` is
@@ -462,12 +494,24 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   (`old_string` absent, ambiguous, successful), empty-body removal through
   both writers (`checkpoint.sh` and `write-stage.sh`) including that the
   deletion reaches the manifest, and `bash-post.sh` (manifest absent,
-  manifest present, `autorename` present).
+  manifest present, a sentinel left untouched). The `skill` enum's four values
+  each accepted, `rename` rejected under each of the three that forbid it, the
+  boundary derivation asserted through the directive output, and the
+  load-bearing negative — `handoff-continue` writes no sentinel — mutation-
+  checked rather than observed passing.
   The compaction driver is covered in the two existing suites rather than a
-  new file: `tests/hook-test.bats` for `write-compact.sh` / `stop-compact.sh`
-  / `load-compact.sh` / `report-watcher-failure.sh`, `tests/rename-test.bats`
-  for the two watchers, the `is_unknown_command` predicate and the
-  `watcher_fail` recording (they share `_rename-lib.sh` and the tmux stub).
+  new file: `tests/hook-test.bats` for the `handoff_drive_read` shape matrix,
+  `write-drive.sh` / `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on
+  `source: "clear"` / `report-watcher-failure.sh`, and `tests/watcher-test.bats`
+  for the walker, the pane predicates,
+  `transcript_title_count`, and the `watcher_fail` recording. Two rows there are
+  load-bearing and mutation-checked: the FR-H re-idle gate, asserted on the
+  *delay* between two literal sends rather than on suppression (`wait_for_idle`
+  falls through on timeout by design, so a busy pane is typed into eventually),
+  and that the confirmation primitives return rather than exit. The same holds
+  for `load-handoff.sh`'s ordering hazard — a driven clear with an empty task
+  file must still continue, so the consume and the spawn precede the no-frame
+  exit.
 - `just py-test` — `pytest`: unit tests of `worktree_root.py`
   (`tests/test_worktree_root.py`) — the worktree-root resolver's branch
   matrix.
