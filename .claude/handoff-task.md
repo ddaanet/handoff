@@ -1,41 +1,28 @@
 ## Current task
 
-The session-root drift work is **committed** as `db1903c` (18 files, 1061
-insertions), with the memory commit `1459033` bundled in via the gitlink bump.
-`just precommit` passed before it — 199 bats + 11 pytest. Nothing is pushed.
-
-What is left before it ships, in order:
-
-- `write-guard.sh`'s rc 2 wording under drift. A legitimate agent edit to the
-  cwd repo's `handoff-todo.md` resolves outside `$root/.claude/` and is denied
-  as cross-project with no mention of the drift that caused it. Decide whether
-  the drift report rides there.
-- The lifecycle of `/tmp/claude/handoff-root-<session_id>` and
-  `/tmp/claude/handoff-drift-<session_id>`. Nothing removes either, and
-  `/tmp/claude` is not swept — it holds hand-made files weeks old.
-- Then `just release`, which owns the version bump (`version-guard.sh` denies
-  agent edits to `plugin.json`'s `.version`). Name both `handoff` and
-  `claude-plugins` up front so the marketplace push is authorised too.
-
-Still untracked, and untouched by that commit: `brief-driven-restart.md`,
-`brief-stale-config-after-mid-session-upgrade.md`,
-`plans/2026-07-31-python-rewrite-brief.md`. They were untracked before this
-session; placing them is a todo item, not part of this change.
+Nothing is mid-flight. The context-size trigger mechanism is verified and
+recorded in `brief-context-threshold-trigger.md`; the design pass it opens is
+the new work. Otherwise the queue is unchanged — the memory-index decision
+below, then the todo list in order, starting with the bash/Python split in
+`plans/2026-07-31-python-rewrite-brief.md`.
 
 ## Open decisions
 
-- `SessionStart` hooks are frozen at session start, so `session-pointer.sh` has
-  never actually run. `checkpoint.sh` is read from disk per call, so its refusal
-  *is* live: what keeps the wrap-up working here is a pointer written by hand at
-  `/tmp/claude/handoff-root-dd4de2fc-3e91-44e8-9577-2c48fdb31b48`. A compaction
-  keeps the session id so it survives; only a restart exercises the hook.
-- Two assumptions the design records as unverified. That a hook payload's
-  `session_id` carries the same id as `CLAUDE_CODE_SESSION_ID` — half-settled,
-  since the variable matches the id in this session's scratchpad path, but the
-  payload half needs the hook to have run. And that `systemMessage` honours
-  ANSI at all: if it does not, a literal `ESC[0m` heads the drift line and the
-  `--arg lead` in `report-watcher-failure.sh` comes back out.
-- `memory/MEMORY.md` is at 98% of the 25600-byte loader budget — a
-  `${n:-default}` fact went into `ddaanet/reference_bats_shellcheck_gotchas`
-  this session. Merging is exhausted; retiring facts outright is the only lever
-  left, and which ones is the user's call.
+- The root memory index is 26630 bytes against a 25600-byte budget — 104%.
+  Past Claude Code's loader cap the tail truncates silently, and the
+  project-local lines are what sit in that tail. Merging overlapping facts is
+  exhausted and stripping triggers is ruled out by
+  `ddaanet/feedback_index_compaction_triggers`, so retiring facts outright is
+  the only lever left. Which ones is not decided.
+- Two assumptions the drift design recorded as unverified are still unverified,
+  because `SessionStart` hooks freeze at session start and `session-pointer.sh`
+  has therefore never run: that a hook payload's `session_id` matches
+  `CLAUDE_CODE_SESSION_ID`, and that `systemMessage` honours ANSI at all. The
+  first session after a restart settles both — check that
+  `/tmp/claude/handoff-root-<session_id>` appears without being hand-written,
+  and whether the drift line's leading reset renders or shows as literal bytes.
+- The threshold trigger's shape is open: soft nudge versus hard halt, where the
+  context-window size comes from (a hardcoded figure or the undocumented
+  `autoCompactWindow` key), which script owns it, and whether subagent batches
+  are measured at all. The questions and the verified constraints they answer
+  to are in `brief-context-threshold-trigger.md`.

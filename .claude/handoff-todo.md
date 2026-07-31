@@ -1,12 +1,13 @@
 ## Remaining
 
-- `just release` — it owns the version bump, so there is no separate bump
-  step. Name both `handoff` and `claude-plugins` up front.
-- Then the bash/Python split per `plans/2026-07-31-python-rewrite-brief.md`.
-- Retire memory facts for index headroom: `MEMORY.md` is at 98% of its loader
-  budget, so any new entry pushes the tail out of reach. Record the
-  `claude --resume` finding in `ddaanet/reference_stale_plugin_code` in the same
-  pass.
+- Design pass on the context-size threshold trigger per
+  `brief-context-threshold-trigger.md`.
+- Split bash/Python per `plans/2026-07-31-python-rewrite-brief.md`.
+- Retire memory facts for index headroom: the root index is at 104% of its
+  loader budget, so the tail is already out of reach.
+- Apply `brief-merge-dispatch-authorization.md` in gitlore: its merge directive
+  should state that the dispatch is authorized, so an agent bound by a blanket
+  no-unsolicited-dispatch rule can act on it without a round trip.
 - Implement gitlore's stale-plugin-root detector per
   `docs/plans/2026-07-31-14-stale-plugin-root-notice.md`, red bats first.
 - Add handoff's `restart` transition kind per `brief-driven-restart.md`,
