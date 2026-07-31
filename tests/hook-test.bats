@@ -1029,6 +1029,44 @@ run_session_pointer() {
     [ ! -d "$HANDOFF_POINTER_DIR" ]
 }
 
+# Nothing else removes these. The pointer outlives the session that published
+# it, the drift marker outlives the episode it recorded, and the directory they
+# share is swept by nobody. The producer sweeps its own leavings — once per
+# session start, which is the only moment anything of this plugin's runs there.
+
+@test "session-pointer (sweeps its own long-stale files)" {
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    touch -t 202001010000 "$HANDOFF_POINTER_DIR/handoff-root-ancient" \
+        "$HANDOFF_POINTER_DIR/handoff-drift-ancient"
+    run_session_pointer "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-root-ancient" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-drift-ancient" ]
+}
+
+@test "session-pointer (keeps another live session's files)" {
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    touch "$HANDOFF_POINTER_DIR/handoff-root-other" \
+        "$HANDOFF_POINTER_DIR/handoff-drift-other"
+    run_session_pointer "$tmp"
+    [ "$status" -eq 0 ]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-root-other" ]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-drift-other" ]
+}
+
+# The load-bearing negative: the directory is shared and holds files this
+# plugin never wrote, some of them weeks old. The sweep is scoped to the two
+# names it publishes, at the one level it publishes them.
+@test "session-pointer (never sweeps a file it does not own)" {
+    mkdir -p "$HANDOFF_POINTER_DIR/sub"
+    touch -t 202001010000 "$HANDOFF_POINTER_DIR/somebody-elses-file" \
+        "$HANDOFF_POINTER_DIR/sub/handoff-root-nested"
+    run_session_pointer "$tmp"
+    [ "$status" -eq 0 ]
+    [ -e "$HANDOFF_POINTER_DIR/somebody-elses-file" ]
+    [ -e "$HANDOFF_POINTER_DIR/sub/handoff-root-nested" ]
+}
+
 # --- report-watcher-failure (UserPromptSubmit: surface a non-delivery) ---
 #
 # The walker is detached and has no channel back: a line that never lands is

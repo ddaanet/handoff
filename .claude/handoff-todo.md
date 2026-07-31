@@ -1,12 +1,6 @@
 ## Remaining
 
-- Decide `write-guard.sh`'s rc 2 wording under drift: a legitimate agent edit to
-  the cwd repo's `handoff-todo.md` is denied as cross-project with no mention of
-  the drift that caused it.
-- Decide the lifecycle of `/tmp/claude/handoff-root-<session_id>` and
-  `handoff-drift-<session_id>`: nothing removes either and `/tmp/claude` is not
-  swept.
-- Then `just release` — it owns the version bump, so there is no separate bump
+- `just release` — it owns the version bump, so there is no separate bump
   step. Name both `handoff` and `claude-plugins` up front.
 - Then the bash/Python split per `plans/2026-07-31-python-rewrite-brief.md`.
 - Retire memory facts for index headroom: `MEMORY.md` is at 98% of its loader

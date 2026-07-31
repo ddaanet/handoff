@@ -290,6 +290,17 @@ there, and a `$PWD` fallback is wrong in exactly the drift case. So
 address blind, since the two share no environment but the session id, and
 the checkpoint cannot read a file under the root it is trying to find.
 
+That pointer and the drift marker beside it are the plugin's only state
+outside a project, and neither has an owner that outlives the session. So
+the producer sweeps: right after publishing, `session-pointer.sh` deletes
+files older than seven days, scoped by name to the two it writes and by
+`-maxdepth 1` to the level it writes them at — the directory is shared and
+holds files this plugin never wrote. A `SessionEnd` hook would clean up
+only the ends that fire one, which is the opposite of the set that strands
+a file. The trade is that a session open seven days without any
+`SessionStart` loses its pointer, and finds out when the checkpoint refuses
+and names the restart that republishes one.
+
 `handoff_match_target()` is the shared preamble of every path-scoped hook:
 one jq parse, basename fast-path, root resolution, and resolved-path
 comparison, variadic over (basename, rel) pairs — the jq spawn is on the

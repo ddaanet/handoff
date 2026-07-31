@@ -1,10 +1,10 @@
 ## Current task
 
-The session-root drift work is implemented and green — `just precommit` passes
-(199 bats + 11 pytest) — and **uncommitted**. The whole diff sits in the working
-tree; `scripts/session-pointer.sh` and
-`docs/changelog/2026-07-31-session-root-drift.md` are untracked. What is left
-before it ships, in order:
+The session-root drift work is **committed** as `db1903c` (18 files, 1061
+insertions), with the memory commit `1459033` bundled in via the gitlink bump.
+`just precommit` passed before it — 199 bats + 11 pytest. Nothing is pushed.
+
+What is left before it ships, in order:
 
 - `write-guard.sh`'s rc 2 wording under drift. A legitimate agent edit to the
   cwd repo's `handoff-todo.md` resolves outside `$root/.claude/` and is denied
@@ -16,6 +16,11 @@ before it ships, in order:
 - Then `just release`, which owns the version bump (`version-guard.sh` denies
   agent edits to `plugin.json`'s `.version`). Name both `handoff` and
   `claude-plugins` up front so the marketplace push is authorised too.
+
+Still untracked, and untouched by that commit: `brief-driven-restart.md`,
+`brief-stale-config-after-mid-session-upgrade.md`,
+`plans/2026-07-31-python-rewrite-brief.md`. They were untracked before this
+session; placing them is a todo item, not part of this change.
 
 ## Open decisions
 
@@ -30,7 +35,7 @@ before it ships, in order:
   payload half needs the hook to have run. And that `systemMessage` honours
   ANSI at all: if it does not, a literal `ESC[0m` heads the drift line and the
   `--arg lead` in `report-watcher-failure.sh` comes back out.
-- `memory/MEMORY.md` is now at 98% of the 25600-byte loader budget — a
+- `memory/MEMORY.md` is at 98% of the 25600-byte loader budget — a
   `${n:-default}` fact went into `ddaanet/reference_bats_shellcheck_gotchas`
   this session. Merging is exhausted; retiring facts outright is the only lever
   left, and which ones is the user's call.

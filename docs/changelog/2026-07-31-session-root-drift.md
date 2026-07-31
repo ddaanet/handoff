@@ -114,6 +114,11 @@ literal bytes at the head of the line and comes back out.
 
 ## Left open
 
+> **Superseded 2026-07-31** (see
+> [The pointer directory sweeps itself](2026-07-31-pointer-lifecycle.md)) —
+> both items are settled: the first rested on a false premise, the second got
+> a sweep in `session-pointer.sh`.
+
 - **`write-guard.sh` rc 2.** Under drift, a legitimate agent edit to the cwd
   repo's `handoff-todo.md` resolves outside `$root/.claude/` and is denied as
   cross-project, with no mention of the drift that caused it.

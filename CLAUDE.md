@@ -324,7 +324,13 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   matcher (the only hook that reaches `resume`): writes the resolved root as
   one line at `/tmp/claude/handoff-root-<session_id>`. Its own script rather
   than a preamble on the two loaders because the write must be unconditional
-  and both of those are gated. Silent no-op without a session id.
+  and both of those are gated. Silent no-op without a session id. Then sweeps
+  the pointer directory — `-mtime +7`, scoped by name to `handoff-root-*` and
+  `handoff-drift-*` and by `-maxdepth 1`, since that directory is shared and
+  holds files this plugin never wrote. The producer sweeps because neither file
+  has an owner that outlives the session, and the ends that strand one are the
+  ends no `SessionEnd` fires for. After the write, so this session's own
+  pointer is fresh. See `docs/changelog/2026-07-31-pointer-lifecycle.md`.
 - `bin/handoff-checkpoint` — PATH-resident shim (Claude Code adds each
   plugin's `bin/` to PATH) that execs `scripts/checkpoint.sh`. Both skill
   bodies invoke it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
@@ -543,7 +549,11 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   path labelling its own branch, `session-pointer.sh`, and the drift report's
   episode semantics, and `tests/checkpoint.bats` for the pointer refusals plus
   the load-bearing negative — a drifted cwd gets nothing written into its
-  `.claude/`, mutation-checked against the old `$PWD` fallback.
+  `.claude/`, mutation-checked against the old `$PWD` fallback. The pointer
+  sweep's two guard-rails are load-bearing and each mutation-checked twice: a
+  file the plugin did not write, and one a directory deeper, both survive
+  (widen the name filter, drop `-maxdepth 1`), and another session's fresh
+  files survive (drop `-mtime +7`).
   The compaction driver is covered in the two existing suites rather than a
   new file: `tests/hook-test.bats` for the `handoff_drive_read` shape matrix,
   `write-drive.sh` / `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on

@@ -31,3 +31,24 @@ root="$(handoff_root "$hook_cwd")"
 
 mkdir -p "$HANDOFF_POINTER_DIR"
 printf '%s\n' "$root" > "$(handoff_pointer_path "$session_id")"
+
+# Sweep what earlier sessions left behind. Neither file has an owner that
+# outlives the session: the pointer is published here and read by the agent's
+# Bash, the drift marker is written by the report hook and cleared only if the
+# cwd comes back — and a session ends without either being told. SessionEnd
+# would not close it, since a crash or a kill fires nothing.
+#
+# So the producer sweeps, on the way in. This runs once per session start,
+# which is the only moment anything of this plugin's runs in that directory,
+# and it happens after the write above so this session's own pointer is fresh
+# whatever the threshold.
+#
+# Scoped to the two names published here, at the one level they are published
+# at: the directory is a shared literal path holding files this plugin never
+# wrote. A week is far past any session that would still read its pointer, and
+# every SessionStart of a live session — resume, clear, compact — refreshes it.
+# A session idle past that loses its pointer and the checkpoint refuses by
+# naming the restart that republishes one.
+find "$HANDOFF_POINTER_DIR" -maxdepth 1 \
+    \( -name 'handoff-root-*' -o -name 'handoff-drift-*' \) \
+    -mtime +7 -delete
