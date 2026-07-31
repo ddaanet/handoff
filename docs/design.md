@@ -152,6 +152,11 @@ an Edit. The task file is authored whole at every boundary, so it takes no
 Edit form and the schema refuses one. A violation exits non-zero naming the
 offending field.
 
+It gets its root from the pointer `SessionStart` published, keyed by
+`CLAUDE_CODE_SESSION_ID`, and refuses when there is none — a live session
+always has one, so its absence is abnormal, and the old fallback to `$PWD`
+was silently wrong whenever the session cwd had drifted.
+
 The checkpoint applies the writes, removes any file whose resulting body is
 empty, leaves `.claude/checkpoint-manifest` behind, and prints a directive
 on stdout. It **changes no git state** and touches tmux not at all — it
@@ -258,6 +263,32 @@ the raw hook-input `.cwd` (drifts with `cd` and `/add-dir`) and never
 session). So a worktree session owns its own `.claude/`. The resolution is
 short-circuited in bash for the trivial cases, so the every-turn hooks skip
 the `python3` spawn.
+
+The resolver also reports **which branch** produced that answer — `inside`,
+`worktree`, `foreign`, `unrelated` — because the root alone collapses four
+different situations into one. `handoff_root_read()` sets the caller's
+`HANDOFF_ROOT` and `HANDOFF_ROOT_BRANCH` (the `handoff_drive_read` idiom);
+`handoff_root()` is the printing form, since every other caller captures it
+in a `$(...)` where a global would die with the subshell. Containment beats
+the branch the walk took: a submodule or vendored checkout inside the
+project is `inside`, not `foreign`.
+
+The last two labels are **drift** — the session cwd has left the launch repo
+while the root, and every handoff file under it, has not. Nothing else
+announces that: the environment block, `gitStatus` and the project
+`CLAUDE.md` all follow cwd. `report-watcher-failure.sh` reports it at
+`UserPromptSubmit`, where the root is resolved every turn anyway, because
+drift can be transient and a later gate would see nothing while the split
+was live for the whole blip. One report per episode: a marker holds the
+destination last announced, and returning clears it.
+
+The agent's own Bash cannot do any of this — `CLAUDE_PROJECT_DIR` is unset
+there, and a `$PWD` fallback is wrong in exactly the drift case. So
+`SessionStart` publishes the resolved root, on a wildcard matcher
+(`session-pointer.sh`, the only hook that reaches `resume`), as one line at
+`/tmp/claude/handoff-root-<session_id>` — a literal path both sides can
+address blind, since the two share no environment but the session id, and
+the checkpoint cannot read a file under the root it is trying to find.
 
 `handoff_match_target()` is the shared preamble of every path-scoped hook:
 one jq parse, basename fast-path, root resolution, and resolved-path

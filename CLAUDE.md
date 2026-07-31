@@ -103,7 +103,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   "invoking it is the authorization to compact") live here now.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in `docs/design.md`
-- `hooks/hooks.json` — declares eight hooks.
+- `hooks/hooks.json` — declares nine hooks.
+  `SessionStart` (every source, wildcard matcher): publish this session's
+  resolved root at `/tmp/claude/handoff-root-<session_id>` via
+  `session-pointer.sh`, so the agent's own Bash can reach it.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
   `additionalContext`; on `clear`, also consume an armed transition of kind
@@ -118,7 +121,8 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `Stop`: arm the transition when `.claude/autodrive` exists.
   `SessionStart(compact)`: re-inject the frame and fire the continuation
   prompt after a compaction completes.
-  `UserPromptSubmit`: report a non-delivery and sweep a stale sentinel.
+  `UserPromptSubmit`: report a non-delivery, sweep a stale sentinel, and
+  report a session cwd that has left the launch repo.
 - `scripts/load-handoff.sh` — SessionStart(startup|clear) entry
   point. Gates on `.claude/handoff-task.md`, assembles the frame in
   memory (a timestamp header plus the inlined task file), and emits it
@@ -138,14 +142,26 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `handoff_deny()` (shared PreToolUse deny emitter; calls `exit 0`
   after printing the deny JSON, so only safe from a standalone hook
   script).
-  Also defines `handoff_root()` — the effective handoff root for the session:
-  `handoff_root "<.cwd>"` shells out to `worktree_root.py`, returning the
-  enclosing worktree root or `CLAUDE_PROJECT_DIR`. Every cwd-scoped hook
-  anchors on this rather than `CLAUDE_PROJECT_DIR` directly, so worktree
-  sessions resolve to their own `.claude/`. An empty or project-root cwd
-  short-circuits in bash (mirroring `worktree_root.py`'s trivial branches)
-  so the every-turn hooks (`Stop`, `UserPromptSubmit`) skip the python3
-  spawn in the common case.
+  Also defines `handoff_root_read()` — the effective handoff root for the
+  session, plus the branch that produced it. `handoff_root_read "<.cwd>"`
+  shells out to `worktree_root.py` and sets the caller's `HANDOFF_ROOT`
+  (the enclosing worktree root or `CLAUDE_PROJECT_DIR`) and
+  `HANDOFF_ROOT_BRANCH` (`inside`, `worktree`, `foreign`, `unrelated` — the
+  last two are drift). Caller-scope globals in the `handoff_drive_read`
+  idiom, because `handoff_root()`, the printing form every other caller
+  uses, is invoked inside a `$(...)` where a global would die with the
+  subshell; `handoff_root()` still prints the root alone, one line. Every
+  cwd-scoped hook anchors on this rather than `CLAUDE_PROJECT_DIR` directly,
+  so worktree sessions resolve to their own `.claude/`. An empty or
+  project-root cwd short-circuits in bash (mirroring `worktree_root.py`'s
+  trivial branches) so the every-turn hooks (`Stop`, `UserPromptSubmit`)
+  skip the python3 spawn in the common case — and labels the branch itself,
+  or a caller would read the previous resolution's label.
+  `HANDOFF_POINTER_DIR` (`/tmp/claude`, overridable for tests) and
+  `handoff_pointer_path()` address the session root pointer: a literal
+  directory rather than `$TMPDIR`, since its producer is a hook and its
+  consumer the agent's sandboxed Bash, and the two share no environment but
+  the session id.
   `handoff_match_target()` is the shared preamble of every path-scoped
   hook: one call does the jq field parse, basename fast-path, root
   resolution, and resolved-path comparison against the expected
@@ -278,6 +294,16 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   *after* the Stop that spawned it. Reports only what the walker observed
   itself; a stale `.pending` alone is never treated as failure (it is legitimate
   for the whole Stop → transition window).
+  It also reports **session-root drift** — a cwd whose branch is `foreign` or
+  `unrelated`, meaning it has left the launch repo while the root and every
+  handoff file under it have not. Here rather than at a later gate because
+  drift can be transient, and this hook resolves the root every turn anyway.
+  One report per episode: `/tmp/claude/handoff-drift-<session_id>` holds the
+  destination last announced, so a second turn in the same place is silent, a
+  move elsewhere is not swallowed, and returning clears the marker so a
+  re-drift is a new episode. Its `systemMessage` leads with an ANSI style
+  reset — this hook speaks only when something went wrong, and the chatter
+  around it renders dimmed.
   It also sweeps a bare `.claude/autodrive`: the file is armed at the `Stop`
   of the turn that writes it and renamed or removed, so one still present when a
   later turn begins never armed, and would otherwise be armed by the next
@@ -288,17 +314,29 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `docs/changelog/2026-07-22-stale-autocompact.md`.
 - `scripts/worktree_root.py` — pure resolver `worktree_root(cwd, project)`:
   walks up from the session cwd via on-disk `.git` linkage to the enclosing
-  linked-worktree root, else returns `project`. Backs `_lib.sh`'s
-  `handoff_root`; lets each worktree own its `.claude/`. Unit-tested in
+  linked-worktree root, else returns `project`. Returns `(root, branch)` and
+  the CLI prints both, one per line; containment wins over the branch the walk
+  took, so a submodule or vendored checkout inside the project is `inside`
+  rather than `foreign` (or `cd memory/` would read as drift). Backs `_lib.sh`'s
+  `handoff_root_read`; lets each worktree own its `.claude/`. Unit-tested in
   `tests/test_worktree_root.py` (pytest).
+- `scripts/session-pointer.sh` — `SessionStart` entry point on the wildcard
+  matcher (the only hook that reaches `resume`): writes the resolved root as
+  one line at `/tmp/claude/handoff-root-<session_id>`. Its own script rather
+  than a preamble on the two loaders because the write must be unconditional
+  and both of those are gated. Silent no-op without a session id.
 - `bin/handoff-checkpoint` — PATH-resident shim (Claude Code adds each
   plugin's `bin/` to PATH) that execs `scripts/checkpoint.sh`. Both skill
   bodies invoke it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
   the agent's Bash, so the shim is the entry point. Replaces
   `bin/handoff-memory-probe` and `bin/handoff-precompact-probe`.
 - `scripts/checkpoint.sh` — the one write path for the handoff/precompact
-  wrap-up (FR1). Reads the JSON payload on stdin, validates it against the
-  schema (FR2 — a violation exits 2 naming the offending field on stderr),
+  wrap-up (FR1). Takes its root from the pointer `session-pointer.sh`
+  published, keyed by `CLAUDE_CODE_SESSION_ID`, and refuses when there is
+  none: it runs in the agent's Bash, where `CLAUDE_PROJECT_DIR` is unset and
+  the old fallback to `$PWD` wrote one repo's handoff files while every reader
+  stayed in the other. Reads the JSON payload on stdin, validates it against
+  the schema (FR2 — a violation exits 2 naming the offending field on stderr),
   applies the `task`/`todo` Write-or-Edit forms (FR5; `task` is Write-form-
   or-null only), removes a file whose resulting body is empty via
   `checkpoint_is_empty_body` (FR6), writes `.claude/checkpoint-manifest` —
@@ -499,6 +537,13 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   boundary derivation asserted through the directive output, and the
   load-bearing negative — `handoff-continue` writes no sentinel — mutation-
   checked rather than observed passing.
+  Session-root drift is covered across all three: `tests/test_worktree_root.py`
+  for the branch matrix (including the containment rule that keeps a submodule
+  `inside`), `tests/hook-test.bats` for `handoff_root_read`'s labels, the fast
+  path labelling its own branch, `session-pointer.sh`, and the drift report's
+  episode semantics, and `tests/checkpoint.bats` for the pointer refusals plus
+  the load-bearing negative — a drifted cwd gets nothing written into its
+  `.claude/`, mutation-checked against the old `$PWD` fallback.
   The compaction driver is covered in the two existing suites rather than a
   new file: `tests/hook-test.bats` for the `handoff_drive_read` shape matrix,
   `write-drive.sh` / `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on

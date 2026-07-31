@@ -64,6 +64,15 @@
     ],
     "SessionStart": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/session-pointer.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "startup|clear",
         "hooks": [
           {

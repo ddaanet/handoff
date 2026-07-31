@@ -1,6 +1,11 @@
 # Branch matrix for scripts/worktree_root.py. tmp_path scaffolds a fake
 # linked worktree: a directory whose .git is a *file* containing
 # `gitdir: <project>/.git/worktrees/<name>`, mirroring real git layout.
+#
+# Every case asserts the branch label alongside the root: the resolver knows
+# which of its four paths it took, and `inside`/`worktree` vs
+# `foreign`/`unrelated` is exactly the drift signal report-watcher-failure.sh
+# reports on. The root each case resolves to is unchanged.
 from pathlib import Path
 
 from worktree_root import worktree_root
@@ -24,7 +29,7 @@ def _make_worktree(project: Path, name: str = "wt") -> Path:
 def test_worktree_root_itself(tmp_path: Path) -> None:
     project = _make_project(tmp_path)
     wt = _make_worktree(project)
-    assert worktree_root(str(wt), str(project)) == str(wt)
+    assert worktree_root(str(wt), str(project)) == (str(wt), "worktree")
 
 
 def test_worktree_subdir_drifts_up_to_worktree_root(tmp_path: Path) -> None:
@@ -32,19 +37,19 @@ def test_worktree_subdir_drifts_up_to_worktree_root(tmp_path: Path) -> None:
     wt = _make_worktree(project)
     sub = wt / "src" / "deep"
     sub.mkdir(parents=True)
-    assert worktree_root(str(sub), str(project)) == str(wt)
+    assert worktree_root(str(sub), str(project)) == (str(wt), "worktree")
 
 
 def test_cwd_is_project_returns_project(tmp_path: Path) -> None:
     project = _make_project(tmp_path)
-    assert worktree_root(str(project), str(project)) == str(project)
+    assert worktree_root(str(project), str(project)) == (str(project), "inside")
 
 
 def test_main_tree_subdir_returns_project(tmp_path: Path) -> None:
     project = _make_project(tmp_path)
     sub = project / "scripts"
     sub.mkdir()
-    assert worktree_root(str(sub), str(project)) == str(project)
+    assert worktree_root(str(sub), str(project)) == (str(project), "inside")
 
 
 def test_dotgit_directory_ancestor_returns_project(tmp_path: Path) -> None:
@@ -53,7 +58,7 @@ def test_dotgit_directory_ancestor_returns_project(tmp_path: Path) -> None:
     (nested / ".git").mkdir(parents=True)  # a *directory*, not a worktree file
     sub = nested / "sub"
     sub.mkdir()
-    assert worktree_root(str(sub), str(project)) == str(project)
+    assert worktree_root(str(sub), str(project)) == (str(project), "foreign")
 
 
 def test_gitdir_outside_project_git_returns_project(tmp_path: Path) -> None:
@@ -61,7 +66,7 @@ def test_gitdir_outside_project_git_returns_project(tmp_path: Path) -> None:
     wt = project.parent / "rogue"
     wt.mkdir()
     (wt / ".git").write_text("gitdir: /somewhere/else/.git/worktrees/x\n")
-    assert worktree_root(str(wt), str(project)) == str(project)
+    assert worktree_root(str(wt), str(project)) == (str(project), "foreign")
 
 
 def test_relative_gitdir_treated_as_non_worktree(tmp_path: Path) -> None:
@@ -71,16 +76,41 @@ def test_relative_gitdir_treated_as_non_worktree(tmp_path: Path) -> None:
     wt = project.parent / "rel"
     wt.mkdir()
     (wt / ".git").write_text("gitdir: ../proj/.git/worktrees/rel\n")
-    assert worktree_root(str(wt), str(project)) == str(project)
+    assert worktree_root(str(wt), str(project)) == (str(project), "foreign")
 
 
 def test_empty_cwd_returns_project(tmp_path: Path) -> None:
     project = _make_project(tmp_path)
-    assert worktree_root("", str(project)) == str(project)
+    assert worktree_root("", str(project)) == (str(project), "inside")
 
 
 def test_unrelated_cwd_no_git_returns_project(tmp_path: Path) -> None:
     project = _make_project(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    assert worktree_root(str(elsewhere), str(project)) == str(project)
+    assert worktree_root(str(elsewhere), str(project)) == (str(project), "unrelated")
+
+
+# A repo nested *inside* project — a submodule, or a vendored checkout — is
+# reached by the same `.git`-is-a-file / `.git`-is-a-directory branches a
+# foreign repo is, and resolves to project either way. But cwd never left the
+# launch repo, so labelling it `foreign` would report drift on every `cd
+# memory/`. Containment wins over the branch the walk took.
+
+
+def test_nested_repo_inside_project_is_inside(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    nested = project / "vendored"
+    (nested / ".git").mkdir(parents=True)
+    assert worktree_root(str(nested), str(project)) == (str(project), "inside")
+
+
+def test_submodule_inside_project_is_inside(tmp_path: Path) -> None:
+    # A submodule's .git is a file whose gitdir is written *relative*, so it
+    # does not match project/.git by string — the `foreign` branch, on a
+    # directory that is plainly inside the project.
+    project = _make_project(tmp_path)
+    sub = project / "memory"
+    sub.mkdir()
+    (sub / ".git").write_text("gitdir: ../.git/modules/memory\n")
+    assert worktree_root(str(sub), str(project)) == (str(project), "inside")

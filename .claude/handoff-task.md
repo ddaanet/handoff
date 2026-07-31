@@ -1,14 +1,36 @@
 ## Current task
 
-The driven-transitions implementation is **complete**: `plans/2026-07-29-driven-transitions-design.md` built end to end. `just precommit` is green — 176 bats + 9 pytest. Three skills became five, nine hooks became eight, three watchers became one walker, and the armed transition moved from N filenames into one `.claude/autodrive` whose first line names the kind.
+The session-root drift work is implemented and green — `just precommit` passes
+(199 bats + 11 pytest) — and **uncommitted**. The whole diff sits in the working
+tree; `scripts/session-pointer.sh` and
+`docs/changelog/2026-07-31-session-root-drift.md` are untracked. What is left
+before it ships, in order:
 
-Every test that could pass vacuously was mutation-checked: twelve deliberate faults, each turning exactly the intended test red — among them the four load-bearing negatives, which are `handoff-continue` writes no sentinel, the FR-H re-idle gate, the ordering hazard in `load-handoff.sh` (a driven clear with an empty task file must still continue), and the retired pane-grep rename confirmation. The FR-H gate is asserted on the *delay* between two literal sends (1.63s against `TIMEOUT=2`), not on suppression — `wait_for_idle` falls through on timeout by design, so an assertion that the second line is never sent cannot pass. That correction was folded back into the approved design doc.
-
-Some of the new code has now run live, after a `/reload-plugins` re-bound the hook events: `checkpoint.sh` accepted `"skill": "handoff-continue"` and correctly wrote no sentinel, `bash-post.sh` staged from the manifest with no rename spawn, and `report-watcher-failure.sh` swept a stale `.claude/autodrive` on its single channel. Still unexercised against a real pane: the walker and both loaders.
-
-Two sessions wrote these `.claude/` frame files within minutes on 2026-07-30 and this text is a merge of both. If another session is still live on this repo it may overwrite again.
+- `write-guard.sh`'s rc 2 wording under drift. A legitimate agent edit to the
+  cwd repo's `handoff-todo.md` resolves outside `$root/.claude/` and is denied
+  as cross-project with no mention of the drift that caused it. Decide whether
+  the drift report rides there.
+- The lifecycle of `/tmp/claude/handoff-root-<session_id>` and
+  `/tmp/claude/handoff-drift-<session_id>`. Nothing removes either, and
+  `/tmp/claude` is not swept — it holds hand-made files weeks old.
+- Then `just release`, which owns the version bump (`version-guard.sh` denies
+  agent edits to `plugin.json`'s `.version`). Name both `handoff` and
+  `claude-plugins` up front so the marketplace push is authorised too.
 
 ## Open decisions
 
-- **Does this land as a release?** Two new skills, a renamed sentinel and a four-value payload enum. `just release` owns the version bump and the marketplace entry; both `handoff` and `claude-plugins` need naming up front so auto-mode auth covers the marketplace push. Not started.
-- **Is `memory/MEMORY.md` actually being truncated?** Unconfirmed, but narrowed. It could not be checked from the sessions that tried — both were rooted in `gitlore`, whose index is a *different* file that loads whole. Checked on 2026-07-30 from a session rooted in `handoff`, where the index in context is the one at issue: the file was ~24.2 KiB at session start and its **last line arrived intact**, so no truncation was observed at that size. What is established is only that gitlore's own hook asserts a 24.4 KiB read limit and a 17.1 KiB target, and that it fires when a write crosses the limit — nobody has yet seen Claude Code's loader actually drop a line. Two trims (benchmark values in the `--print` entry, a restated clause in the design-doc entry) took the file back to 24.2 KiB, so this is not urgent. Settle it by growing the index past 24.4 KiB deliberately and reading the tail back from a fresh handoff-rooted session; compact only if the loss is real.
+- `SessionStart` hooks are frozen at session start, so `session-pointer.sh` has
+  never actually run. `checkpoint.sh` is read from disk per call, so its refusal
+  *is* live: what keeps the wrap-up working here is a pointer written by hand at
+  `/tmp/claude/handoff-root-dd4de2fc-3e91-44e8-9577-2c48fdb31b48`. A compaction
+  keeps the session id so it survives; only a restart exercises the hook.
+- Two assumptions the design records as unverified. That a hook payload's
+  `session_id` carries the same id as `CLAUDE_CODE_SESSION_ID` — half-settled,
+  since the variable matches the id in this session's scratchpad path, but the
+  payload half needs the hook to have run. And that `systemMessage` honours
+  ANSI at all: if it does not, a literal `ESC[0m` heads the drift line and the
+  `--arg lead` in `report-watcher-failure.sh` comes back out.
+- `memory/MEMORY.md` is now at 98% of the 25600-byte loader budget — a
+  `${n:-default}` fact went into `ddaanet/reference_bats_shellcheck_gotchas`
+  this session. Merging is exhausted; retiring facts outright is the only lever
+  left, and which ones is the user's call.

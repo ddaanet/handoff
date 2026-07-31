@@ -31,6 +31,20 @@ HANDOFF_REL_DRIVE_PENDING=".claude/autodrive.pending"
 # shellcheck disable=SC2034
 HANDOFF_REL_DRIVE_FAILED=".claude/autodrive.failed"
 
+# Where this session's resolved root is published (session-pointer.sh) for the
+# agent's own Bash to read back (handoff-checkpoint), and where the drift
+# report records the last destination it announced. Not the project's .claude/:
+# the checkpoint cannot address a path under the root, since resolving that
+# root is the very thing it cannot do. A literal directory rather than $TMPDIR
+# for the same reason — the producer is a hook and the consumer is the agent's
+# sandboxed Bash, and the two share no environment but the session id.
+HANDOFF_POINTER_DIR="${HANDOFF_POINTER_DIR:-/tmp/claude}"
+
+# Path of the root pointer for session id $1.
+handoff_pointer_path() {
+    printf '%s/handoff-root-%s\n' "$HANDOFF_POINTER_DIR" "$1"
+}
+
 # Assemble the injectable frame from the task file ($1) and the optional todo
 # remainder ($2): a timestamp header plus each file inlined verbatim, in that
 # order. Either file alone is enough; prints nothing and returns 1 only when
@@ -203,25 +217,45 @@ handoff_hook_fields() {
     )
 }
 
-# Effective project root for the handoff files of THIS session. When the
-# session cwd ($1, from hook-input .cwd) is inside a linked git worktree of
-# CLAUDE_PROJECT_DIR, returns the worktree root so each worktree owns its own
-# .claude/; otherwise returns CLAUDE_PROJECT_DIR (fallback $PWD). The
-# branch-heavy resolution lives in worktree_root.py (unit-tested with pytest);
-# this is the thin shell wrapper. See
-# plans/2026-06-09-per-worktree-handoff-root-design.md.
-handoff_root() {
+# Effective project root for the handoff files of THIS session, into the
+# caller's HANDOFF_ROOT, plus the branch that produced it in
+# HANDOFF_ROOT_BRANCH: `inside` (cwd is the project or under it), `worktree`
+# (a linked worktree of it), `foreign` (another repo) or `unrelated` (no repo).
+# When the session cwd ($1, from hook-input .cwd) is inside a linked git
+# worktree of CLAUDE_PROJECT_DIR, the root is the worktree root so each
+# worktree owns its own .claude/; otherwise CLAUDE_PROJECT_DIR (fallback $PWD).
+# The branch-heavy resolution lives in worktree_root.py (unit-tested with
+# pytest); this is the thin shell wrapper. See
+# plans/2026-06-09-per-worktree-handoff-root-design.md and
+# plans/2026-07-31-session-root-drift-design.md.
+#
+# Caller-scope globals rather than stdout (the handoff_drive_read idiom):
+# every other caller wants the root printed, and a global set inside the
+# `$(...)` that captures it would die with the subshell.
+# shellcheck disable=SC2034  # assigned for the caller's scope
+handoff_root_read() {
     local project="${CLAUDE_PROJECT_DIR:-$PWD}"
     # Fast path: an empty cwd or one already at the project root is exactly
     # worktree_root.py's trivial branches (`if not cwd` / `if d == project`).
     # Skipping the interpreter matters because Stop and UserPromptSubmit call
-    # this on every turn, where python3 startup dominates the hook's cost.
+    # this on every turn, where python3 startup dominates the hook's cost. It
+    # labels the branch itself — leaving the previous resolution's label in
+    # place would report drift on a session that never drifted.
     if [[ -z "${1:-}" || "${1:-}" == "$project" ]]; then
-        printf '%s\n' "$project"
+        HANDOFF_ROOT="$project"
+        HANDOFF_ROOT_BRANCH="inside"
         return 0
     fi
-    python3 "$(dirname "${BASH_SOURCE[0]}")/worktree_root.py" \
-        "$1" "$project"
+    { read -r HANDOFF_ROOT; read -r HANDOFF_ROOT_BRANCH; } < <(
+        python3 "$(dirname "${BASH_SOURCE[0]}")/worktree_root.py" "$1" "$project"
+    )
+}
+
+# The root alone, on stdout — one line, unchanged. Callers that also want the
+# branch call handoff_root_read directly.
+handoff_root() {
+    handoff_root_read "${1:-}" || return 1
+    printf '%s\n' "$HANDOFF_ROOT"
 }
 
 # Match the hook-input JSON ($1) against one or more handoff-owned files, given

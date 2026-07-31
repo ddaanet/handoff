@@ -34,10 +34,25 @@ setup() {
     # the agent's sandboxed Bash), and bash-post.sh only stages, since a
     # checkpoint-written sentinel is armed at Stop like any other.
 
+    # The checkpoint runs in the agent's Bash, where CLAUDE_PROJECT_DIR is
+    # unset and $PWD is wherever the session cwd has drifted to. It reads the
+    # root from the session-keyed pointer SessionStart published instead — so
+    # these tests set the session id and redirect the pointer directory away
+    # from the runner's real /tmp/claude, and never set CLAUDE_PROJECT_DIR.
+    export HANDOFF_POINTER_DIR="$BATS_TEST_TMPDIR/pointer"
+    export CLAUDE_CODE_SESSION_ID="sess-checkpoint"
+
     # For asserting that what the checkpoint writes is what the arming hook
     # will accept.
     # shellcheck source-path=SCRIPTDIR source=../scripts/_lib.sh disable=SC1091
     source "$repo_root/scripts/_lib.sh"
+}
+
+# Publish $1 as this session's root, the way scripts/session-pointer.sh does at
+# SessionStart.
+write_pointer() {
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    printf '%s\n' "$1" > "$HANDOFF_POINTER_DIR/handoff-root-$CLAUDE_CODE_SESSION_ID"
 }
 
 # A plain git repo with .claude/ present — for the schema/write/manifest
@@ -49,24 +64,85 @@ make_repo() {
     printf '%s\n' "$repo"
 }
 
-# Run the checkpoint against $2 (a JSON payload string) with cwd = $1.
+# Run the checkpoint against $2 (a JSON payload string) with cwd = $1 and the
+# published root = $3 (default $1: cwd and root agree, the undrifted case).
 run_checkpoint() {
-    local repo="$1" payload="$2"
-    run bash -c 'cd "$1" && CLAUDE_PROJECT_DIR="$1" bash "$2" <<<"$3"' \
+    local repo="$1" payload="$2" root="${3:-$1}"
+    write_pointer "$root"
+    run bash -c 'cd "$1" && bash "$2" <<<"$3"' \
         _ "$repo" "$CHECKPOINT" "$payload"
 }
 
 # Same, asserting exit 2 with stderr captured separately — for schema and
 # write-time error paths.
 run_checkpoint_err() {
-    local repo="$1" payload="$2"
+    local repo="$1" payload="$2" root="${3:-$1}"
+    write_pointer "$root"
     # shellcheck disable=SC2016   # $1/$2/$3 are the inner bash -c's own positional params
-    run --separate-stderr -2 bash -c 'cd "$1" && CLAUDE_PROJECT_DIR="$1" bash "$2" <<<"$3"' \
+    run --separate-stderr -2 bash -c 'cd "$1" && bash "$2" <<<"$3"' \
         _ "$repo" "$CHECKPOINT" "$payload"
 }
 
 task_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; }
 todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; }
+
+# ==========================================================================
+# The session root — read from the pointer SessionStart published, not
+# resolved here.
+#
+# The agent's Bash has no CLAUDE_PROJECT_DIR, so the old `handoff_root "$PWD"`
+# fell back to cwd. When the session cwd leaves the launch repo that is
+# silently wrong in exactly the way it matters: the checkpoint wrote and staged
+# one repo's handoff files while the loaders kept reading the other's.
+# ==========================================================================
+
+@test "checkpoint: no root pointer -> refuses, naming the path it looked for" {
+    repo="$(make_repo)"
+    rm -rf "$HANDOFF_POINTER_DIR"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", task:null, todo:null}')
+    # shellcheck disable=SC2016   # $1/$2/$3 are the inner bash -c's own positional params
+    run --separate-stderr -2 bash -c 'cd "$1" && bash "$2" <<<"$3"' \
+        _ "$repo" "$CHECKPOINT" "$payload"
+    [[ "$stderr" == *"handoff-root-$CLAUDE_CODE_SESSION_ID"* ]]
+}
+
+@test "checkpoint: no session id -> refuses, naming the variable" {
+    repo="$(make_repo)"
+    write_pointer "$repo"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", task:null, todo:null}')
+    # shellcheck disable=SC2016   # $1/$2/$3 are the inner bash -c's own positional params
+    run --separate-stderr -2 bash -c 'cd "$1" && CLAUDE_CODE_SESSION_ID= bash "$2" <<<"$3"' \
+        _ "$repo" "$CHECKPOINT" "$payload"
+    [[ "$stderr" == *"CLAUDE_CODE_SESSION_ID"* ]]
+}
+
+# The load-bearing negative: cwd is a different repo from the published root,
+# and nothing of the wrap-up may land in it. Both halves matter — writing the
+# launch repo's file is only half the fix if cwd's is written too.
+@test "checkpoint: drifted cwd -> writes the published root, never cwd's .claude/" {
+    root="$(make_repo "$BATS_TEST_TMPDIR/launch")"
+    elsewhere="$(make_repo "$BATS_TEST_TMPDIR/elsewhere")"
+    payload=$(jq -nc --argjson task "$(task_write "$root/.claude/handoff-task.md" $'## Current task\n\nbody\n')" \
+        '{skill:"handoff", commit:"with-commit", rename:"T", task:$task, todo:null}')
+    run_checkpoint "$elsewhere" "$payload" "$root"
+    [ "$status" -eq 0 ]
+    [ -f "$root/.claude/handoff-task.md" ]
+    [ -f "$root/.claude/checkpoint-manifest" ]
+    [ ! -e "$elsewhere/.claude/handoff-task.md" ]
+    [ ! -e "$elsewhere/.claude/checkpoint-manifest" ]
+}
+
+# The incident's own symptom, now inverted: the path under the launch root is
+# the one that resolves, and the path under cwd is the schema violation.
+@test "checkpoint: drifted cwd -> a task path under cwd is rejected" {
+    root="$(make_repo "$BATS_TEST_TMPDIR/launch2")"
+    elsewhere="$(make_repo "$BATS_TEST_TMPDIR/elsewhere2")"
+    payload=$(jq -nc --argjson task "$(task_write "$elsewhere/.claude/handoff-task.md" "body")" \
+        '{skill:"handoff", commit:"with-commit", rename:"T", task:$task, todo:null}')
+    run_checkpoint_err "$elsewhere" "$payload" "$root"
+    [[ "$stderr" == *"task.file_path"* ]]
+    [ ! -e "$elsewhere/.claude/handoff-task.md" ]
+}
 
 # ==========================================================================
 # Schema validation (FR2) — each asserts exit 2 and that stderr names the
@@ -663,7 +739,8 @@ precompact_payload() {
 @test "shim: bin/handoff-checkpoint execs the checkpoint, forwards stdin" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
-    run bash -c 'cd "$1" && CLAUDE_PROJECT_DIR="$1" "$2" <<<"$3"' \
+    write_pointer "$repo"
+    run bash -c 'cd "$1" && "$2" <<<"$3"' \
         _ "$repo" "$SHIM" "$(handoff_payload without-commit)"
     [ "$status" -eq 0 ]
     echo "$output" | grep -qF "$repo/.claude/gitlore-commit-memory"
@@ -671,8 +748,9 @@ precompact_payload() {
 
 @test "shim: bin/handoff-checkpoint surfaces a schema violation" {
     repo="$(make_repo)"
+    write_pointer "$repo"
     # shellcheck disable=SC2016   # $1/$2/$3 are the inner bash -c's own positional params
-    run --separate-stderr -2 bash -c 'cd "$1" && CLAUDE_PROJECT_DIR="$1" "$2" <<<"$3"' \
+    run --separate-stderr -2 bash -c 'cd "$1" && "$2" <<<"$3"' \
         _ "$repo" "$SHIM" '{"commit":"with-commit"}'
     [[ "$stderr" == *"skill"* ]]
 }

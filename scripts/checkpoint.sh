@@ -34,7 +34,20 @@ field_get() { jq -r ".$1" <<<"$payload"; }
 field_is_null() { jq -e ".$1 == null" >/dev/null 2>&1 <<<"$payload"; }
 field_has_key() { jq -e ".$1 | has(\"$2\")" >/dev/null 2>&1 <<<"$payload"; }
 
-root="$(handoff_root "$PWD")"
+# The root cannot be resolved here: this is the agent's Bash, where
+# CLAUDE_PROJECT_DIR is unset and $PWD is wherever the session cwd has drifted
+# to — and a fallback to $PWD is silently wrong in exactly the drift case, the
+# writer landing in one repo while every reader stays in the other. SessionStart
+# published the root instead; read it back. A live session always has a pointer,
+# so its absence is abnormal and refusing is the point.
+session_id="${CLAUDE_CODE_SESSION_ID:-}"
+[ -n "$session_id" ] \
+    || err "root" "CLAUDE_CODE_SESSION_ID is unset, so this session's root pointer cannot be addressed"
+pointer="$(handoff_pointer_path "$session_id")"
+[ -f "$pointer" ] \
+    || err "root" "no session root pointer at $pointer; restart the session to publish one"
+root="$(head -n1 "$pointer")"
+[ -d "$root" ] || err "root" "the session root pointer at $pointer does not name a directory (got \"$root\")"
 
 # Four skills, two boundaries. The judgment the directive output encodes is
 # per-boundary — the same whether or not the agent types the command afterwards

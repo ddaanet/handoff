@@ -45,6 +45,13 @@ STUB
            HANDOFF_WATCHER_VERIFY_DELAY=0.01 \
            HANDOFF_WATCHER_CONSUME_TIMEOUT=1 HANDOFF_WATCHER_CONSUME_POLL=0.05
 
+    # The session-keyed pointer and drift marker live at a literal path
+    # (/tmp/claude) so a hook and the agent's Bash can address them without
+    # sharing an environment. Redirect it, or the suite writes into the
+    # runner's own real one.
+    export HANDOFF_POINTER_DIR="$BATS_TEST_TMPDIR/pointer"
+    export SESSION_ID="sess-hook-test"
+
     # shellcheck source-path=SCRIPTDIR source=../scripts/_lib.sh disable=SC1091
     source "$repo_root/scripts/_lib.sh"
 }
@@ -98,6 +105,69 @@ make_worktree() {
     [ "$status" -eq 0 ]
     [ "$output" = "$tmp
 $tmp" ]
+}
+
+# --- _lib.sh: handoff_root_read branch labels ---
+#
+# The root alone collapses four different situations into one answer. The
+# branch label is what separates "cwd is still in the launch repo" from "cwd
+# has left it", which is the whole drift signal. It reaches the caller as a
+# global rather than on stdout, in the handoff_drive_read idiom: every printing
+# caller runs handoff_root in a command substitution, where a global set inside
+# the subshell would not survive.
+
+@test "handoff_root_read: worktree cwd -> branch worktree" {
+    wt="$(make_worktree wtBR)"
+    handoff_root_read "$wt"
+    [ "$HANDOFF_ROOT" = "$wt" ]
+    [ "$HANDOFF_ROOT_BRANCH" = "worktree" ]
+}
+
+@test "handoff_root_read: cwd in another repo -> branch foreign" {
+    mkdir -p "$other/.git"
+    handoff_root_read "$other"
+    [ "$HANDOFF_ROOT" = "$tmp" ]
+    [ "$HANDOFF_ROOT_BRANCH" = "foreign" ]
+}
+
+@test "handoff_root_read: cwd in no repo at all -> branch unrelated" {
+    handoff_root_read "$other"
+    [ "$HANDOFF_ROOT" = "$tmp" ]
+    [ "$HANDOFF_ROOT_BRANCH" = "unrelated" ]
+}
+
+# The fast path returns without spawning python3, so it has to label the branch
+# itself or a caller reads whatever the previous resolution left behind.
+@test "handoff_root_read: project root and empty cwd -> branch inside, no python3" {
+    run bash -c '
+        stub="$1/nopy-branch"; mkdir -p "$stub"
+        printf "#!/usr/bin/env bash\nexit 97\n" > "$stub/python3"
+        chmod +x "$stub/python3"
+        PATH="$stub:$PATH"
+        source "$2/scripts/_lib.sh"
+        HANDOFF_ROOT_BRANCH=stale; handoff_root_read "$3"
+        printf "%s\n%s\n" "$HANDOFF_ROOT" "$HANDOFF_ROOT_BRANCH"
+        HANDOFF_ROOT_BRANCH=stale; handoff_root_read ""
+        printf "%s\n" "$HANDOFF_ROOT_BRANCH"
+    ' _ "$BATS_TEST_TMPDIR" "$repo_root" "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$tmp
+inside
+inside" ]
+}
+
+@test "handoff_root_read: subdirectory of the project -> branch inside" {
+    mkdir -p "$tmp/scripts"
+    handoff_root_read "$tmp/scripts"
+    [ "$HANDOFF_ROOT" = "$tmp" ]
+    [ "$HANDOFF_ROOT_BRANCH" = "inside" ]
+}
+
+# handoff_root itself keeps its contract: the root alone on stdout, one line.
+@test "handoff_root: prints the root alone, not the branch" {
+    run handoff_root "$other"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$tmp" ]
 }
 
 # --- _lib.sh: handoff_deny emitter ---
@@ -902,6 +972,63 @@ run_load_compact() {
     [ ! -e "$wt/.claude/autodrive.pending" ]
 }
 
+# --- session-pointer (SessionStart, every source: publish the resolved root) ---
+#
+# handoff-checkpoint runs in the agent's Bash, where CLAUDE_PROJECT_DIR is
+# unset and $PWD is wherever the session cwd has drifted to — so it cannot
+# resolve the root itself, and cannot read a file at the root either, since
+# addressing that path is the very thing it cannot do. This hook publishes the
+# root at a session-keyed path both sides can address blind.
+
+run_session_pointer() {
+    # ${2-…}, not ${2:-…}: the no-session-id case passes an empty argument
+    # deliberately, and the colon form would substitute the default for it.
+    local cwd="$1" sid="${2-$SESSION_ID}" src="${3:-startup}"
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg sid "$2" --arg src "$3" \
+          "{cwd:\$cwd, session_id:\$sid, source:\$src, hook_event_name:\"SessionStart\"}" \
+        | bash scripts/session-pointer.sh
+    ' _ "$cwd" "$sid" "$src"
+}
+
+@test "session-pointer (writes the resolved root, keyed by session id)" {
+    run_session_pointer "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID")" = "$tmp" ]
+}
+
+@test "session-pointer (worktree cwd: publishes the worktree root)" {
+    wt="$(make_worktree wtPTR)"
+    run_session_pointer "$wt"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID")" = "$wt" ]
+}
+
+# The drift case, and the reason the file exists: cwd is in another repo, and
+# the published root is still the launch repo — what every reader of the
+# handoff files resolves, and what the checkpoint must write to.
+@test "session-pointer (drifted cwd: publishes the launch root, not cwd)" {
+    mkdir -p "$other/.git"
+    run_session_pointer "$other"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID")" = "$tmp" ]
+}
+
+@test "session-pointer (creates the pointer directory)" {
+    [ ! -d "$HANDOFF_POINTER_DIR" ]
+    run_session_pointer "$tmp"
+    [ "$status" -eq 0 ]
+    [ -d "$HANDOFF_POINTER_DIR" ]
+}
+
+@test "session-pointer (no session id: silent no-op)" {
+    run_session_pointer "$tmp" ""
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-root-" ]
+    [ ! -d "$HANDOFF_POINTER_DIR" ]
+}
+
 # --- report-watcher-failure (UserPromptSubmit: surface a non-delivery) ---
 #
 # The walker is detached and has no channel back: a line that never lands is
@@ -911,9 +1038,10 @@ run_load_compact() {
 
 run_report_failure() {
     run bash -c '
-        jq -nc --arg cwd "$1" "{cwd:\$cwd, prompt:\"anything\"}" \
+        jq -nc --arg cwd "$1" --arg sid "$2" \
+          "{cwd:\$cwd, session_id:\$sid, prompt:\"anything\"}" \
         | bash scripts/report-watcher-failure.sh
-    ' _ "$1"
+    ' _ "$1" "${2-$SESSION_ID}"
 }
 
 @test "report-watcher-failure (no failure file: silent no-op)" {
@@ -1010,6 +1138,106 @@ run_report_failure() {
     [ "$(echo "$output" | jq -sr 'length')" = "1" ]
     echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
     echo "$output" | jq -e '.systemMessage | test("stale")' >/dev/null
+}
+
+# --- report-watcher-failure: session-root drift ---
+#
+# Nothing announces a cwd that leaves the launch repo: the environment block,
+# gitStatus and the project CLAUDE.md all follow cwd, while the transcript, the
+# scratchpad, CLAUDE_PROJECT_DIR and every handoff file stay behind. The check
+# rides UserPromptSubmit because drift can be transient — a gate that asks "is
+# cwd foreign now?" later sees nothing — and because this hook already resolves
+# the root every turn and already owns a reporting channel.
+
+@test "report-watcher-failure (drift: reports the destination and the root)" {
+    mkdir -p "$other/.git"
+    run_report_failure "$other"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e --arg c "$other" '.systemMessage | test($c)' >/dev/null
+    echo "$output" | jq -e --arg r "$tmp" '.systemMessage | test($r)' >/dev/null
+    echo "$output" | jq -e \
+        '.hookSpecificOutput.hookEventName == "UserPromptSubmit"' >/dev/null
+    echo "$output" | jq -e --arg c "$other" \
+        '.hookSpecificOutput.additionalContext | test($c)' >/dev/null
+}
+
+# Dimmed like the ordinary hook chatter around it, the one line that says the
+# agent is reasoning about the wrong repo reads as noise.
+@test "report-watcher-failure (drift: systemMessage leads with an ANSI reset)" {
+    mkdir -p "$other/.git"
+    run_report_failure "$other"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.systemMessage | startswith("\u001b[0m")' >/dev/null
+}
+
+@test "report-watcher-failure (drift: reports once per destination, not every prompt)" {
+    mkdir -p "$other/.git"
+    run_report_failure "$other"
+    [ -n "$output" ]
+
+    run_report_failure "$other"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+# A blip is announced once; a later move somewhere else is a new fact, not the
+# same one repeating.
+@test "report-watcher-failure (drift: a different destination reports again)" {
+    mkdir -p "$other/.git"
+    run_report_failure "$other"
+    [ -n "$output" ]
+
+    elsewhere="$BATS_TEST_TMPDIR/elsewhere"
+    mkdir -p "$elsewhere/.git"
+    run_report_failure "$elsewhere"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e --arg c "$elsewhere" '.systemMessage | test($c)' >/dev/null
+}
+
+# Back inside the launch repo, and back to silence — including from the marker
+# the earlier drift left behind.
+@test "report-watcher-failure (drift: cwd back in the project is silent)" {
+    mkdir -p "$other/.git"
+    run_report_failure "$other"
+    [ -n "$output" ]
+
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+# Returning ends the episode, so the same destination reached again is a new
+# fact — the transient blip is the shape this has to survive.
+@test "report-watcher-failure (drift: returning and drifting again reports again)" {
+    mkdir -p "$other/.git"
+    run_report_failure "$other"
+    [ -n "$output" ]
+
+    run_report_failure "$tmp"
+    [ "$output" = "" ]
+
+    run_report_failure "$other"
+    echo "$output" | jq -e --arg c "$other" '.systemMessage | test($c)' >/dev/null
+}
+
+@test "report-watcher-failure (drift: a worktree cwd is not drift)" {
+    wt="$(make_worktree wtDR)"
+    run_report_failure "$wt"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "report-watcher-failure (drift and a non-delivery: one report covering both)" {
+    mkdir -p "$other/.git"
+    printf '%s\n' "typed but never submitted" > "$other/.claude/autodrive.failed"
+    # The failure file the hook reads is the *root's*, not cwd's — that is the
+    # split being reported.
+    printf '%s\n' "typed but never submitted" > "$tmp/.claude/autodrive.failed"
+    run_report_failure "$other"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -sr 'length')" = "1" ]
+    echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
+    echo "$output" | jq -e --arg c "$other" '.systemMessage | test($c)' >/dev/null
 }
 
 @test "report-watcher-failure (worktree cwd: sweeps the worktree file)" {

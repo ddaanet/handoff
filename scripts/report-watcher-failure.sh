@@ -24,6 +24,13 @@
 #    still-running turn is the one exception, and it fails safe — the
 #    transition is cancelled and said so, not deferred.)
 #
+# 3. A session cwd that left the launch repo. Everything derived from cwd —
+#    the environment block's working directory, gitStatus, the project
+#    CLAUDE.md — follows it; the transcript, the scratchpad,
+#    CLAUDE_PROJECT_DIR and every handoff file do not. Nothing announces the
+#    split, and it is silent in both directions: the agent reasons about the
+#    repo under cwd while the plugin reads and writes the one under the root.
+#
 # UserPromptSubmit rather than Stop: the walker runs *after* the Stop that
 # spawned it, so the next Stop is a whole turn later. It also fires on every
 # prompt, so the no-file path must be silent and cheap.
@@ -32,16 +39,46 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
 source "$(dirname "$0")/_lib.sh"
 
-hook_cwd="$(jq -r '.cwd // ""')"
-cwd="$(handoff_root "$hook_cwd")"
+{ read -r hook_cwd; read -r session_id; } < <(
+    jq -r '.cwd // "", .session_id // ""'
+)
+handoff_root_read "$hook_cwd"
+cwd="$HANDOFF_ROOT"
 [[ -n "$cwd" ]] || exit 0
-
-failed="$cwd/$HANDOFF_REL_DRIVE_FAILED"
-armed="$cwd/$HANDOFF_REL_DRIVE"
-[[ -f "$failed" || -f "$armed" ]] || exit 0
 
 msgs=()
 notes=()
+
+# Drift is reported here rather than at some later gate because it can be
+# transient: a check that asks "is cwd foreign now?" after the fact sees
+# nothing, while the writer/reader split was live for the whole blip. This hook
+# already resolves the root every turn and already owns a reporting channel.
+#
+# Once per episode: the marker holds the destination last announced, so a
+# second turn in the same place is silent and a move somewhere else is not
+# swallowed. It is cleared on the way back in, so a re-drift is a new episode
+# rather than a repeat.
+marker="$HANDOFF_POINTER_DIR/handoff-drift-$session_id"
+case "$HANDOFF_ROOT_BRANCH" in
+    foreign | unrelated)
+        last=""
+        if [[ -f "$marker" ]]; then
+            last="$(head -n1 "$marker")"
+        fi
+        if [[ "$last" != "$hook_cwd" ]]; then
+            mkdir -p "$HANDOFF_POINTER_DIR"
+            printf '%s\n' "$hook_cwd" > "$marker"
+            msgs+=("session cwd left the launch repo — now $hook_cwd, handoff root stays $cwd")
+            notes+=("The session cwd is $hook_cwd, outside the launch repo $cwd. Everything derived from cwd describes $hook_cwd — the environment block's working directory, the gitStatus block, the project CLAUDE.md. The transcript, the scratchpad, CLAUDE_PROJECT_DIR and every handoff file are under $cwd.")
+        fi
+        ;;
+    *)
+        rm -f "$marker"
+        ;;
+esac
+
+failed="$cwd/$HANDOFF_REL_DRIVE_FAILED"
+armed="$cwd/$HANDOFF_REL_DRIVE"
 
 if [[ -f "$failed" ]]; then
     reason="$(head -n1 "$failed")"
@@ -63,11 +100,15 @@ if [[ -f "$armed" ]]; then
     notes+=("A .claude/autodrive file was still on disk when this turn began. It is armed at the Stop of the turn that writes it, so one surviving into a later turn never armed — that turn ended on an interrupt, a crash or a quit. It has been discarded, so the transition it described did not happen and cannot fire into unrelated work later.")
 fi
 
+(( ${#msgs[@]} > 0 )) || exit 0
+
 printf -v msg '%s; ' "${msgs[@]}"
 printf -v note '%s ' "${notes[@]}"
 
-jq -nc --arg m "${msg%; }" --arg n "${note% }" '{
-    systemMessage: ("handoff: " + $m + "."),
+# Lead with a style reset. This hook speaks only when something went wrong, and
+# the ordinary hook chatter it sits among is rendered dimmed.
+jq -nc --arg m "${msg%; }" --arg n "${note% }" --arg lead $'\033[0m' '{
+    systemMessage: ($lead + "handoff: " + $m + "."),
     hookSpecificOutput: {
         hookEventName: "UserPromptSubmit",
         additionalContext: $n
