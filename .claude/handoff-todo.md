@@ -1,7 +1,9 @@
 ## Remaining
 
-- Design pass on the context-size threshold trigger per
-  `brief-context-threshold-trigger.md`.
+- Implement the context-size threshold trigger per
+  `plans/2026-08-01-context-threshold-trigger-plan.md` — three tasks,
+  subagent-driven, red bats first, two mutation-checked negatives (the subagent
+  skip and the marker gate) whose runs must be reported verbatim.
 - Split bash/Python per `plans/2026-07-31-python-rewrite-brief.md`.
 - Retire memory facts for index headroom: the root index is at 104% of its
   loader budget, so the tail is already out of reach.
