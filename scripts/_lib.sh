@@ -45,6 +45,15 @@ handoff_pointer_path() {
     printf '%s/handoff-root-%s\n' "$HANDOFF_POINTER_DIR" "$1"
 }
 
+# Path of the context-threshold marker for session id $1. Written when the
+# nudge fires and removed by session-pointer.sh at the next SessionStart: the
+# nudge fires once per climb, and the boundary is what re-arms it. A helper
+# rather than an inline path (as the drift marker is) because two scripts
+# address it — the same reason handoff_pointer_path exists.
+handoff_context_path() {
+    printf '%s/handoff-context-%s\n' "$HANDOFF_POINTER_DIR" "$1"
+}
+
 # Assemble the injectable frame from the task file ($1) and the optional todo
 # remainder ($2): a timestamp header plus each file inlined verbatim, in that
 # order. Either file alone is enough; prints nothing and returns 1 only when

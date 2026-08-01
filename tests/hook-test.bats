@@ -1067,6 +1067,131 @@ run_session_pointer() {
     [ -e "$HANDOFF_POINTER_DIR/sub/handoff-root-nested" ]
 }
 
+# --- context-threshold (PostToolBatch: nudge once the prompt crosses a size) ---
+#
+# A turn that runs long has no boundary at which anything can notice: Stop and
+# UserPromptSubmit fire only at turn boundaries, which is what a runaway turn
+# escapes. PostToolBatch fires once per assistant message — one API call, one
+# usage sample — and its additionalContext reaches the model on the next call
+# of the same turn.
+
+# One assistant entry: $1 message id, $2 input, $3 cache_creation, $4 cache_read.
+usage_entry() {
+    jq -nc --arg id "$1" --argjson i "$2" --argjson cc "$3" --argjson cr "$4" \
+        '{type:"assistant", message:{id:$id, usage:{
+            input_tokens:$i, cache_creation_input_tokens:$cc,
+            cache_read_input_tokens:$cr}}}'
+}
+
+run_context_threshold() {
+    local tp="$1" sid="${2-$SESSION_ID}" aid="${3-}"
+    run bash -c '
+        jq -nc --arg tp "$1" --arg sid "$2" --arg aid "$3" \
+          "{transcript_path:\$tp, session_id:\$sid,
+            hook_event_name:\"PostToolBatch\"}
+           + (if \$aid == \"\" then {} else {agent_id:\$aid} end)" \
+        | bash scripts/context-threshold.sh
+    ' _ "$tp" "$sid" "$aid"
+}
+
+# The positive both load-bearing negatives are paired against. Mutate either
+# guard and this row must stay green while its negative goes red — otherwise
+# the negative was passing for the wrong reason.
+@test "context-threshold (over threshold: nudges and writes the marker)" {
+    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"compact-continue"* ]]
+    [[ "$output" == *"170000"* ]]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
+# Load-bearing negative 1. A subagent has no boundary to prepare and nothing
+# that survives one, and its own usage lives in another file entirely — so the
+# number here is the parent's, and stale.
+@test "context-threshold (subagent: silent, no marker)" {
+    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl" "$SESSION_ID" "agent-42"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
+# Load-bearing negative 2. Still over threshold, because the boundary has not
+# happened yet; re-injecting every batch would burn the context the nudge
+# exists to conserve.
+@test "context-threshold (marker present: silent, no second nudge)" {
+    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "context-threshold (under threshold: silent, no marker)" {
+    usage_entry m1 10000 2000 3000 > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
+# One API response emits several JSONL entries sharing a message id, each
+# repeating the same usage. Summing across them would read 180000 here and
+# nudge; taking the last reads 60000 and stays silent.
+@test "context-threshold (repeated message id: counted once, not summed)" {
+    { usage_entry m1 60000 0 0; usage_entry m1 60000 0 0
+      usage_entry m1 60000 0 0; } > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "context-threshold (no usage entry in the window: silent)" {
+    printf '%s\n' '{"type":"user","message":{"content":"hi"}}' > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+# tail -c lands mid-line. The partial head must be dropped, not fatal.
+@test "context-threshold (partial first line: dropped, still measures)" {
+    { printf '%s\n' '{"type":"assistant","message":{"id":"trunc","usa'
+      usage_entry m2 100000 30000 40000; } > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"compact-continue"* ]]
+}
+
+@test "context-threshold (threshold override honoured)" {
+    usage_entry m1 1000 500 500 > "$tmp/t.jsonl"
+    HANDOFF_CONTEXT_THRESHOLD=1500 run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"compact-continue"* ]]
+}
+
+@test "context-threshold (no transcript file: silent)" {
+    run_context_threshold "$tmp/absent.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "context-threshold (no session id: silent)" {
+    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl" ""
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+# The invocation path, not just the code: a script the manifest never names
+# runs at no point, and every row above would still pass.
+@test "context-threshold (hooks.json dispatches PostToolBatch to it)" {
+    cmd="$(jq -r '.hooks.PostToolBatch[0].hooks[0].command' hooks/hooks.json)"
+    [[ "$cmd" == *"scripts/context-threshold.sh"* ]]
+    [ -f "scripts/context-threshold.sh" ]
+}
+
 # --- report-watcher-failure (UserPromptSubmit: surface a non-delivery) ---
 #
 # The walker is detached and has no channel back: a line that never lands is
