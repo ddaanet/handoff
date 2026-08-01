@@ -1021,6 +1021,33 @@ run_session_pointer() {
     [ -d "$HANDOFF_POINTER_DIR" ]
 }
 
+# The context-threshold nudge fires once per climb and this is the re-arm. A
+# SessionStart means the context was rebuilt: compact (auto-compaction
+# included), clear, or a resume that restored it whole and may still be over.
+@test "session-pointer (clears this session's context marker)" {
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
+    run_session_pointer "$tmp" "$SESSION_ID" compact
+    [ "$status" -eq 0 ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
+@test "session-pointer (clears the context marker on resume too)" {
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
+    run_session_pointer "$tmp" "$SESSION_ID" resume
+    [ "$status" -eq 0 ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
+@test "session-pointer (leaves another session's context marker alone)" {
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    touch "$HANDOFF_POINTER_DIR/handoff-context-other"
+    run_session_pointer "$tmp"
+    [ "$status" -eq 0 ]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-context-other" ]
+}
+
 @test "session-pointer (no session id: silent no-op)" {
     run_session_pointer "$tmp" ""
     [ "$status" -eq 0 ]
@@ -1037,25 +1064,29 @@ run_session_pointer() {
 @test "session-pointer (sweeps its own long-stale files)" {
     mkdir -p "$HANDOFF_POINTER_DIR"
     touch -t 202001010000 "$HANDOFF_POINTER_DIR/handoff-root-ancient" \
-        "$HANDOFF_POINTER_DIR/handoff-drift-ancient"
+        "$HANDOFF_POINTER_DIR/handoff-drift-ancient" \
+        "$HANDOFF_POINTER_DIR/handoff-context-ancient"
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
     [ ! -e "$HANDOFF_POINTER_DIR/handoff-root-ancient" ]
     [ ! -e "$HANDOFF_POINTER_DIR/handoff-drift-ancient" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-ancient" ]
 }
 
 @test "session-pointer (keeps another live session's files)" {
     mkdir -p "$HANDOFF_POINTER_DIR"
     touch "$HANDOFF_POINTER_DIR/handoff-root-other" \
-        "$HANDOFF_POINTER_DIR/handoff-drift-other"
+        "$HANDOFF_POINTER_DIR/handoff-drift-other" \
+        "$HANDOFF_POINTER_DIR/handoff-context-live"
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
     [ -e "$HANDOFF_POINTER_DIR/handoff-root-other" ]
     [ -e "$HANDOFF_POINTER_DIR/handoff-drift-other" ]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-context-live" ]
 }
 
 # The load-bearing negative: the directory is shared and holds files this
-# plugin never wrote, some of them weeks old. The sweep is scoped to the two
+# plugin never wrote, some of them weeks old. The sweep is scoped to the three
 # names it publishes, at the one level it publishes them.
 @test "session-pointer (never sweeps a file it does not own)" {
     mkdir -p "$HANDOFF_POINTER_DIR/sub"

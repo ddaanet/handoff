@@ -32,10 +32,18 @@ root="$(handoff_root "$hook_cwd")"
 mkdir -p "$HANDOFF_POINTER_DIR"
 printf '%s\n' "$root" > "$(handoff_pointer_path "$session_id")"
 
-# Sweep what earlier sessions left behind. Neither file has an owner that
-# outlives the session: the pointer is published here and read by the agent's
-# Bash, the drift marker is written by the report hook and cleared only if the
-# cwd comes back — and a session ends without either being told. SessionEnd
+# Re-arm the context-size nudge. It fires once per climb, gated by a marker it
+# writes itself; a SessionStart is the harness-authoritative signal that the
+# context was rebuilt — compact (auto-compaction included), clear, or a resume
+# that restored it whole. Inferring the re-arm from a later measurement falling
+# back under the threshold is the form this design rules out.
+rm -f "$(handoff_context_path "$session_id")"
+
+# Sweep what earlier sessions left behind. None of these files has an owner
+# that outlives the session: the pointer is published here and read by the
+# agent's Bash, the drift marker is written by the report hook and cleared only
+# if the cwd comes back, the context marker is cleared above and only for this
+# session — and a session ends without any of them being told. SessionEnd
 # would not close it, since a crash or a kill fires nothing.
 #
 # So the producer sweeps, on the way in. This runs once per session start,
@@ -43,12 +51,13 @@ printf '%s\n' "$root" > "$(handoff_pointer_path "$session_id")"
 # and it happens after the write above so this session's own pointer is fresh
 # whatever the threshold.
 #
-# Scoped to the two names published here, at the one level they are published
+# Scoped to the three names published here, at the one level they are published
 # at: the directory is a shared literal path holding files this plugin never
 # wrote. A week is far past any session that would still read its pointer, and
 # every SessionStart of a live session — resume, clear, compact — refreshes it.
 # A session idle past that loses its pointer and the checkpoint refuses by
 # naming the restart that republishes one.
 find "$HANDOFF_POINTER_DIR" -maxdepth 1 \
-    \( -name 'handoff-root-*' -o -name 'handoff-drift-*' \) \
+    \( -name 'handoff-root-*' -o -name 'handoff-drift-*' \
+       -o -name 'handoff-context-*' \) \
     -mtime +7 -delete
