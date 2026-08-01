@@ -1,5 +1,5 @@
 {
-  "description": "Hooks for the handoff skill: SessionStart load, write guard (handoff-task.md, checkpoint-only), post-write staging (handoff-todo.md), the checkpoint channel's PostToolUse(Bash) manifest consumer, and the driven-transition machinery (write validate, Stop arm, SessionStart(compact|clear) resume, watcher-failure report), and the PostToolBatch context-size threshold nudge. See CLAUDE.md for details.",
+  "description": "Hooks for the handoff skill: SessionStart load, write guard (handoff-task.md, checkpoint-only), post-write staging (handoff-todo.md), the checkpoint channel's PostToolUse(Bash) manifest consumer, the driven-transition machinery (write validate, Stop arm, SessionStart(compact|clear) resume, watcher-failure report), and the PostToolBatch context-size threshold nudge (context-threshold.sh). See CLAUDE.md for details.",
   "hooks": {
     "UserPromptSubmit": [
       {

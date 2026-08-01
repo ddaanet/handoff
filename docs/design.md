@@ -117,7 +117,7 @@ git / memory.
 
 ## Architecture
 
-Five skills, one write path, eight hooks, and two files that cross a
+Five skills, one write path, ten hooks, and two files that cross a
 boundary.
 
 ### The seam
@@ -493,6 +493,19 @@ response, which ends the turn — and a driven skill therefore arms the
 sentinel only in the turn after the answer, or it would compact or clear
 away the conversation the answer applies to. Any rebalancing of the gitlore
 seam must preserve both halves.
+
+**The size threshold is a context-quality policy, not a race.** Non-Haiku
+windows are 1M and `autoCompactEnabled` is expected off, so a growing prompt
+hits no wall and no boundary the harness enters on its own. The nudge fires
+because attention and cost say 150k is enough, and because the plugin can
+cross that boundary carrying the task frame and a memory flush. It is a nudge
+and not a halt: a halt produces no final assistant text, discards in-flight
+work, and still leaves the boundary unprepared. It fires once per climb, and
+the re-arm is a `SessionStart` — the harness's own signal that the context was
+rebuilt — rather than a later measurement falling back under the threshold,
+which is the inference this design refuses everywhere else.
+[Nudge the boundary at a context-size
+threshold](changelog/2026-08-01-context-threshold-trigger.md)
 
 ## Rejected alternatives
 

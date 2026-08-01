@@ -1,9 +1,10 @@
 ## Remaining
 
-- Implement the context-size threshold trigger per
-  `plans/2026-08-01-context-threshold-trigger-plan.md` — three tasks,
-  subagent-driven, red bats first, two mutation-checked negatives (the subagent
-  skip and the marker gate) whose runs must be reported verbatim.
+- Release the context-size threshold trigger (`just release`, minor bump), then
+  dogfood it after a restart — hooks freeze at session start. Two things to
+  watch: whether the main transcript ever carries a subagent `usage` entry (the
+  fix is `select(.isSidechain != true)`), and whether a nudge is ever ignored,
+  which is the evidence that reopens the halt.
 - Split bash/Python per `plans/2026-07-31-python-rewrite-brief.md`.
 - Retire memory facts for index headroom: the root index is at 104% of its
   loader budget, so the tail is already out of reach.

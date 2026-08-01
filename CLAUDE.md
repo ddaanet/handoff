@@ -103,7 +103,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   "invoking it is the authorization to compact") live here now.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in `docs/design.md`
-- `hooks/hooks.json` — declares nine hooks.
+- `hooks/hooks.json` — declares ten hooks.
   `SessionStart` (every source, wildcard matcher): publish this session's
   resolved root at `/tmp/claude/handoff-root-<session_id>` via
   `session-pointer.sh`, so the agent's own Bash can reach it.
@@ -118,6 +118,8 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   agent writes it directly; validate an `autodrive` write.
   `PostToolUse(Bash)`: consume `.claude/checkpoint-manifest` after
   `handoff-checkpoint` runs — stage every listed path (deletions included).
+  `PostToolBatch` (no matcher): measure this session's prompt size and nudge
+  the boundary once it crosses a threshold, via `context-threshold.sh`.
   `Stop`: arm the transition when `.claude/autodrive` exists.
   `SessionStart(compact)`: re-inject the frame and fire the continuation
   prompt after a compaction completes.
@@ -324,13 +326,36 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   matcher (the only hook that reaches `resume`): writes the resolved root as
   one line at `/tmp/claude/handoff-root-<session_id>`. Its own script rather
   than a preamble on the two loaders because the write must be unconditional
-  and both of those are gated. Silent no-op without a session id. Then sweeps
-  the pointer directory — `-mtime +7`, scoped by name to `handoff-root-*` and
-  `handoff-drift-*` and by `-maxdepth 1`, since that directory is shared and
-  holds files this plugin never wrote. The producer sweeps because neither file
-  has an owner that outlives the session, and the ends that strand one are the
-  ends no `SessionEnd` fires for. After the write, so this session's own
-  pointer is fresh. See `docs/changelog/2026-07-31-pointer-lifecycle.md`.
+  and both of those are gated. Silent no-op without a session id. Then removes
+  this session's context marker, which is the context-size nudge's re-arm: that
+  nudge fires once per climb, and a `SessionStart` is the harness-authoritative
+  signal that the context was rebuilt — `compact` (auto-compaction included),
+  `clear`, or a `resume` that restored it whole and may still be over. Then
+  sweeps the pointer directory — `-mtime +7`, scoped by name to
+  `handoff-root-*`, `handoff-drift-*` and `handoff-context-*` and by
+  `-maxdepth 1`, since that directory is shared and holds files this plugin
+  never wrote. The producer sweeps because none of those files has an owner
+  that outlives the session, and the ends that strand one are the ends no
+  `SessionEnd` fires for. After the write, so this session's own pointer is
+  fresh. See `docs/changelog/2026-07-31-pointer-lifecycle.md`.
+- `scripts/context-threshold.sh` — `PostToolBatch` entry point: the only hook
+  that is **not** cwd-scoped. It touches no file under `.claude/`, so it
+  resolves no root and spawns no `python3`, and sources `_lib.sh` only for
+  `HANDOFF_POINTER_DIR` and `handoff_context_path()`. A long turn reaches no
+  boundary — `Stop` and `UserPromptSubmit` fire only at turn boundaries, which
+  is what a runaway turn escapes — and `PostToolBatch` is the only event that
+  fires *inside* one, at the session log's own granularity: one API call, one
+  `usage` sample, with `additionalContext` reaching the model on the next call
+  of the same turn. Takes the **last** `.message.usage` in a `tail -c` window
+  (never a sum: the several JSONL entries of one API response repeat the same
+  `usage`), and past `HANDOFF_CONTEXT_THRESHOLD` injects one directive naming
+  `/handoff:compact-continue`. A nudge, never a halt. Exits before reading
+  anything when `agent_id` is present (a subagent has no boundary to prepare,
+  and the transcript it is handed is the parent's) or when the marker already
+  exists (still over threshold means the boundary has not happened yet).
+  NFR2: this fires on every tool batch of every session with the plugin
+  installed, so the negative path is a `jq` over stdin and a `stat`. See
+  `docs/changelog/2026-08-01-context-threshold-trigger.md`.
 - `bin/handoff-checkpoint` — PATH-resident shim (Claude Code adds each
   plugin's `bin/` to PATH) that execs `scripts/checkpoint.sh`. Both skill
   bodies invoke it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
@@ -553,7 +578,21 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   sweep's two guard-rails are load-bearing and each mutation-checked twice: a
   file the plugin did not write, and one a directory deeper, both survive
   (widen the name filter, drop `-maxdepth 1`), and another session's fresh
-  files survive (drop `-mtime +7`).
+  files survive (drop `-mtime +7`). Those guard-rails reach as far as their
+  fixture: the foreign file is named `somebody-elses-file`, so widening the
+  filter to any `handoff-`-prefixed name is not caught.
+  The context-size threshold adds eleven rows to `tests/hook-test.bats` over a
+  synthetic transcript fixture (`usage_entry` builds one assistant entry;
+  `run_context_threshold` drives the hook), plus three on `session-pointer.sh`
+  for the re-arm and its scoping. Two negatives are load-bearing and
+  mutation-checked rather than observed passing, each paired with a positive
+  over the same fixture: the subagent skip and the marker gate. Disable either
+  guard and the negative must go red while *"over threshold: nudges and writes
+  the marker"* stays green. The eleventh row asserts the invocation path — a
+  script `hooks.json` never names runs at no point, and every other row would
+  still pass. The re-arm's own scoping row (*"leaves another session's context
+  marker alone"*) cannot go red before the `rm -f` it guards exists, so it is
+  verified by mutation afterwards rather than in the red phase.
   The compaction driver is covered in the two existing suites rather than a
   new file: `tests/hook-test.bats` for the `handoff_drive_read` shape matrix,
   `write-drive.sh` / `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on
