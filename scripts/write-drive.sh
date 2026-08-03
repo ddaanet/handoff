@@ -13,7 +13,11 @@
 #
 # The legal shapes are not restated here. handoff_drive_read names the
 # constraint that failed, and the skill body that wrote the file is the single
-# source of truth for the format.
+# source of truth for the format. One rule IS enforced here, because no skill
+# body owns it: this channel is arm-only. handoff_drive_read accepts both
+# `armed` and `pending` — which state a caller wants is the caller's business —
+# but a `pending` the agent wrote is inert on every gate downstream, so this is
+# the one place that has to reject it.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_lib.sh
@@ -22,11 +26,18 @@ source "$(dirname "$0")/_lib.sh"
 handoff_match_target "$(cat)" "autodrive" "$HANDOFF_REL_DRIVE" || exit 0
 [[ -f "$target" ]] || exit 0
 
-if handoff_drive_read "$target"; then
+if ! handoff_drive_read "$target"; then
+    err="$DRIVE_ERR"
+elif [[ "$DRIVE_STATE" != "armed" ]]; then
+    # Arm-only: every later state is a hook's to write. The parser accepts them
+    # all — which state a caller wants is the caller's business — and this
+    # caller is the agent-authored channel.
+    err="line 1 must be \`armed\` — every state after that is written by a hook, not by an agent"
+else
     exit 0
 fi
 
-jq -nc --arg e "$DRIVE_ERR" '{
+jq -nc --arg e "$err" '{
     systemMessage: ("handoff: autodrive malformed — " + $e + "; transition not armed."),
     hookSpecificOutput: {
         hookEventName: "PostToolUse",

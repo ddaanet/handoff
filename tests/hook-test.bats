@@ -845,6 +845,21 @@ run_write_drive() {
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("transition kind")' >/dev/null
 }
 
+# The agent's channel is arm-only. Every state after `armed` is a hook's to
+# write, and a `pending` file the agent authored is inert on every gate: Stop
+# ignores it, no loader owns its kind, and the sweep exempts pending. It would
+# sit there until something overwrote it.
+@test "write-drive (agent writes a non-armed state: reported, file survives)" {
+    seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_write_drive "$tmp"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.systemMessage | test("armed")' >/dev/null
+    echo "$output" | jq -e \
+        '.hookSpecificOutput.additionalContext | test("Rewrite it now")' >/dev/null
+    # Validate only — this hook never deletes, whatever it finds.
+    [ -f "$tmp/.claude/autodrive" ]
+}
+
 @test "write-drive (unrelated path: no-op)" {
     run bash -c '
         jq -nc --arg cwd "$1" --arg fp "$1/README.md" \
