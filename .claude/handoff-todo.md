@@ -1,13 +1,14 @@
 ## Remaining
 
-- Release the context-size threshold trigger (`just release`, minor bump), then
-  dogfood it after a restart — hooks freeze at session start. Two things to
-  watch: whether the main transcript ever carries a subagent `usage` entry (the
-  fix is `select(.isSidechain != true)`), and whether a nudge is ever ignored,
-  which is the evidence that reopens the halt.
+- Write the implementation plan for the transition state machine, then execute
+  it; transitions-become-modes follows it.
+- Release the context-size threshold trigger (minor bump), then keep watching
+  whether a nudge is ever ignored outright — that is the evidence that reopens
+  the halt — and whether the main transcript carries a subagent `usage` entry.
 - Split bash/Python per `plans/2026-07-31-python-rewrite-brief.md`.
-- Retire memory facts for index headroom: the root index is at 104% of its
-  loader budget, so the tail is already out of reach.
+- Retire memory facts for index headroom. No longer blocking — the root index
+  loads whole again — but it sits close enough to the cap that the next few
+  additions will crowd it.
 - Apply `brief-merge-dispatch-authorization.md` in gitlore: its merge directive
   should state that the dispatch is authorized, so an agent bound by a blanket
   no-unsolicited-dispatch rule can act on it without a round trip.
@@ -16,16 +17,17 @@
 - Add handoff's `restart` transition kind per `brief-driven-restart.md`,
   including the `SessionEnd` marker hook and a `SessionStart(resume)` matcher —
   the drift work's matcher-less `SessionStart` entry already covers `resume`.
+  It adds a fourth kind, so it lands after the state machine.
 - Probe what `reason` an interactive `/exit` writes to `SessionEnd`.
 - Patch `handoff-checkpoint`'s gitlore diagnosis into its three real cases, with
   the relaunch as the remedy.
 - Rewrite gitlore's bats negatives per `brief-test-suite-negatives-rewrite.md`,
   and report where the paired-structure rule does not hold.
-- Add guardrails against snake_case and `name:`/filename drift, then normalise
-  every memory `name:` and cross-link to kebab-case. The link parser must skip
-  fenced code, or it will rewrite bash `[[ "$output" == ... ]]` conditionals;
-  roughly two dozen links currently dangle, split between dropped type prefixes
-  and cross-store targets that may legitimately live in another repo.
+- Add guardrails against snake_case and `name:`/filename drift, then finish
+  normalising memory: upstream has done the `ddaanet` tier, leaving the project
+  store, the other tiers, and the wikilink targets a link audit reports as
+  dangling. The link parser must skip fenced code, or it will rewrite bash
+  `[[ "$output" == ... ]]` conditionals.
 - Explain the live pointer loss for gitlore's own memory store.
 - Place or apply the remaining root-level briefs — `brief-driven-restart.md` and
   `brief-stale-config-after-mid-session-upgrade.md` — in their target repos.

@@ -13,7 +13,6 @@
     ]
   },
   "enabledPlugins": {
-    "revdiff@revdiff": true,
     "superpowers@claude-plugins-official": true,
     "claude-md-management@claude-plugins-official": true,
     "gitlore@ddaanet": true,

@@ -1,47 +1,39 @@
 ## Current task
 
-The context-size threshold trigger is implemented, end to end. A
-`PostToolBatch` hook takes the newest `usage` sample from the transcript tail
-and, past 150k tokens, injects one directive naming `/handoff:compact-continue`
-— a nudge, never a halt, fired once per climb and re-armed by the next
-`SessionStart` rather than by a measurement falling back under. Subagent
-batches exit before reading anything. Design, plan, and all three
-implementation tasks are done, docs included.
+Two design specs await review, to land in this order: the transition state
+machine (pass 1, no behaviour change) then transitions-become-modes (pass 2).
+Pass 1 collapses the `autodrive` / `autodrive.pending` / proposed `.held`
+filename family into one file carrying its state on line 1. Pass 2 deletes
+`handoff-continue` and `compact-continue`, turning them into `clear`/`compact`
+and `continue` payload fields, and adds a `handoff-approved` command that arms
+a sentinel held back by gitlore's approval gate. Neither spec is approved; the
+next step after approval is the implementation plan for pass 1.
 
-What remains is the release (minor bump: new hook entry point, no change to
-either boundary file's shape) and then the dogfood, which this session cannot
-do — `hooks.json` freezes at session start, so the entry takes effect only
-after an exit and a fresh `claude`.
-
-Tasks 1 and 2 ran subagent-driven and both reports were verified at their
-source rather than accepted: the marker-gate mutation was re-run here and the
-restored script confirmed byte-identical to its commit.
+The context-size threshold trigger fired live for the first time this session,
+at 150k. The agent finished the step it was on and handed back rather than
+compacting, which the user confirmed is the intended reading of a nudge — one
+data point, not enough to reopen the halt question.
 
 ## Open decisions
 
-- Whether to cut the release now. Everything it would carry is committed and
-  the gate is green; `just release` pushes, cuts a GH release, and bumps the
-  marketplace, so it has been left for an explicit yes.
-- The root memory index is 25.7KB against a 24.4KB loader cap, so the tail is
-  already invisible and **any addition is rejected outright**. Merging is
-  exhausted and stripping triggers is ruled out by
-  `ddaanet/feedback_index_compaction_triggers`, so retiring facts is the only
-  lever left. Which ones is still not decided.
-- Two assumptions the drift design recorded as unverified are still unverified,
-  because `SessionStart` hooks freeze at session start and `session-pointer.sh`
-  has therefore never run: that a hook payload's `session_id` matches
-  `CLAUDE_CODE_SESSION_ID`, and that `systemMessage` honours ANSI at all. The
-  first session after a restart settles both — check that
-  `/tmp/claude/handoff-root-<session_id>` appears without being hand-written,
-  and whether the drift line's leading reset renders or shows as literal bytes.
-  The threshold trigger's own `systemMessage` inherits the same question.
+- Whether to route `autoname` through `handoff-checkpoint`, making the
+  checkpoint the sole writer of the sentinel and collapsing `write-drive.sh`
+  into a `write-guard.sh` deny. Recorded as a deliberate third pass in the
+  state-machine spec's rejected alternatives, not refused.
+- The version bump for pass 2, which removes two user-visible skill names.
+- Whether to cut the context-threshold release now — a minor bump: a new hook
+  entry point, no change to either boundary file's shape. `just release`
+  pushes, cuts a GH release and bumps the marketplace, so it has been left for
+  an explicit yes.
+- Whether `systemMessage` honours ANSI at all — the drift report's leading
+  reset either renders or shows as literal bytes. Its companion assumption,
+  that a hook payload's `session_id` matches `CLAUDE_CODE_SESSION_ID`, is
+  settled by any `handoff-checkpoint` run that does not refuse on the pointer.
 - Whether the main session transcript ever carries a subagent's `usage` entry.
   It should not — subagent usage lives in
   `<session-dir>/subagents/agent-<agent_id>.jsonl` — but if it does the
   measurement reads high, and the fix is a `select(.isSidechain != true)` in
-  the `jq` filter. Settled at the first dogfood.
+  the `jq` filter.
 - Whether the pointer sweep's guard-rail deserves a `handoff-`-prefixed foreign
   file. Its fixture uses `somebody-elses-file`, so it catches a filter widened
   to everything but not one widened to any name this plugin might publish.
-  Recorded in `CLAUDE.md` and deliberately left out of the threshold work's
-  scope.
