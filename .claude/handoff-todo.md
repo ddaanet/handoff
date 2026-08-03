@@ -1,7 +1,10 @@
 ## Remaining
 
-- Write the implementation plan for the transition state machine, then execute
-  it; transitions-become-modes follows it.
+- Execute `plans/2026-08-03-transition-state-machine-plan.md`, then review and
+  approve the transitions-become-modes spec and plan pass 2.
+- Explain how a session's root pointer comes to name a repo none of that
+  session's other hooks resolve to, and decide what the checkpoint should do
+  about it beyond refusing.
 - Release the context-size threshold trigger (minor bump), then keep watching
   whether a nudge is ever ignored outright — that is the evidence that reopens
   the halt — and whether the main transcript carries a subagent `usage` entry.
@@ -16,8 +19,8 @@
   `docs/plans/2026-07-31-14-stale-plugin-root-notice.md`, red bats first.
 - Add handoff's `restart` transition kind per `brief-driven-restart.md`,
   including the `SessionEnd` marker hook and a `SessionStart(resume)` matcher —
-  the drift work's matcher-less `SessionStart` entry already covers `resume`.
-  It adds a fourth kind, so it lands after the state machine.
+  the drift work's matcher-less `SessionStart` entry already covers `resume`. It
+  adds a fourth kind, so it lands after the state machine.
 - Probe what `reason` an interactive `/exit` writes to `SessionEnd`.
 - Patch `handoff-checkpoint`'s gitlore diagnosis into its three real cases, with
   the relaunch as the remedy.
@@ -33,5 +36,5 @@
   `brief-stale-config-after-mid-session-upgrade.md` — in their target repos.
 - Migrate the `micro` tier (~40 facts) once a real memory remote is settled; it
   and `general` still point at a local `./.git/gitlore-placeholder`. Then
-  `gitmoji` → `general` → `home` → `devddaanet` → `skills` → `candidature` →
-  `edify` → `Emploi` → `cwd-safety`.
+  `gitmoji` -> `general` -> `home` -> `devddaanet` -> `skills` -> `candidature`
+  -> `edify` -> `Emploi` -> `cwd-safety`.
