@@ -180,11 +180,12 @@ directly.
 - `handoff-todo.md` — agent-written remainder of an in-flight task list;
   staged for git automatically, same as the task file (track this).
 - `autodrive` — transient file describing the transition to carry out:
-  first line the kind (`rename`, `compact` or `clear`), then the lines to
-  type. Written by whichever skill is arming one, or by the checkpoint for a
-  rename. Renamed to `autodrive.pending` when the transition is armed at the
-  end of your turn, and consumed once it completes. At most one exists at a
-  time — one prompt, one transition.
+  first line its state, second the kind (`rename`, `compact` or `clear`),
+  then the lines to type. Written by whichever skill is arming one, or by
+  the checkpoint for a rename, always in state `armed`. When the transition
+  is armed at the end of your turn its state becomes `pending`, and it is
+  consumed once the transition completes. At most one exists at a time — one
+  prompt, one transition.
 - `autodrive.failed` — written only when a line could not be delivered, and
   consumed when you are told about it at your next prompt.
 

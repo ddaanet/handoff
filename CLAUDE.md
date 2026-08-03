@@ -109,8 +109,8 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `session-pointer.sh`, so the agent's own Bash can reach it.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
-  `additionalContext`; on `clear`, also consume an armed transition of kind
-  `clear` and spawn the walker for its after-line.
+  `additionalContext`; on `clear`, also consume a transition in state `pending`
+  of kind `clear` and spawn the walker for its after-line.
   `PreToolUse(Write|Edit)`: deny any direct agent Write/Edit to
   `handoff-task.md` — it is checkpoint-only (FR3) — and deny writes whose
   resolved path is not `$cwd/.claude/<file>` (cross-project guard).
@@ -172,11 +172,15 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   variadic over (basename, rel) pairs and sets `MATCHED_NAME` — the guards
   cover two files, and the jq parse is on the Write/Edit hot path, so N
   files must stay one parse.
-  `handoff_drive_read()` parses and validates the sentinel into `DRIVE_KIND`,
-  `DRIVE_BEFORE[]`, `DRIVE_AFTER[]` — or `DRIVE_ERR` naming the constraint that
-  failed. Line 1 is the kind and the kind fixes the shape, so the remaining
-  lines need no separator: `rename` takes 2 lines, `compact` 3 or the kind line
-  alone (FR-G), `clear` 4. Each command literal is pinned to its slot, so the
+  `handoff_drive_read()` parses and validates the sentinel into `DRIVE_STATE`,
+  `DRIVE_KIND`, `DRIVE_BEFORE[]`, `DRIVE_AFTER[]` — or `DRIVE_ERR` naming the
+  constraint that failed. Line 1 is the state (`armed` or `pending`) and line 2
+  the kind, and the kind still fixes the shape, so the remaining lines need no
+  separator; the counts are of the whole file, state line included: `rename`
+  takes 3 lines, `compact` 4 or the state and kind lines alone (FR-G), `clear`
+  5. The state is reported, never interpreted — which state a caller wants is
+  the caller's business, and one answer serves the `Stop` gate, both loaders
+  and the sweep. Each command literal is pinned to its slot, so the
   file cannot be made to type something else, and a prose line may not begin
   with `/` — the walker dispatches on the leading character, and a prose line
   that looked like a command would be confirmed by the wrong primitive. Read
@@ -184,7 +188,13 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   vintage callers must expand the arrays as `${DRIVE_BEFORE[@]+"${DRIVE_BEFORE[@]}"}`.
   `handoff_drive_has_source()` says whether a kind's transition is confirmed by
   a `SessionStart`; `rename` is not one, so `stop-drive.sh` deletes its sentinel
-  outright rather than arming a `.pending` nobody would clear.
+  outright rather than leaving a `pending` nobody would clear.
+  `handoff_drive_arm()` rewrites line 1 into a new state, preserving every line
+  below it — so it never has to know the kind's shape, which is what lets one
+  helper serve `stop-drive.sh` and, in the next pass, `handoff-approved`. The
+  replacement is atomic (sibling temp, then `mv`): both loaders and `Stop` parse
+  this file and the walker stats it, so a half-written one must never be
+  observable under the real name.
   `handoff_spawn_detached()` is the shared setsid-else-nohup detach used
   by every hook that spawns the walker (setsid is Linux-only; nohup is the
   macOS fallback) — `stop-drive.sh`, `load-compact.sh` and `load-handoff.sh`.
@@ -258,44 +268,55 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   an imperative `additionalContext` naming the constraint that failed, so the
   agent can fix it in the same turn instead of hitting a silent no-op at `Stop`;
   it deliberately does not restate the legal shapes, since the skill body that
-  wrote the file is their source of truth. Path matching is the consume-time
-  cross-project guard: no PreToolUse guard, no activation gate.
-- `scripts/stop-drive.sh` — `Stop` entry point: arms the transition. Consumes
-  the sentinel **before** spawning, so a later `Stop` in the same session
-  cannot re-arm — `mv` to `.pending` for a kind with a confirming source, `rm`
-  for `rename`, which no loader would ever clear. Then spawns the walker with
+  wrote the file is their source of truth. It does state the one rule no skill
+  body owns: this channel writes state `armed` only. Every state after that is
+  a hook's to write, and an agent-authored `pending` would be inert on every
+  gate — `Stop` ignores it, no loader owns its kind, the sweep exempts it — so
+  it would survive until something overwrote it. Path matching is the
+  consume-time cross-project guard: no PreToolUse guard, no activation gate.
+- `scripts/stop-drive.sh` — `Stop` entry point: arms the transition. Acts only
+  on state `armed`, so a transition already in flight cannot be re-armed — the
+  guarantee its consume-before-spawn ordering used to give implicitly, and that
+  window is real, since the walker submits each of its lines as an ordinary
+  prompt. Leaves `armed` **before** spawning: `handoff_drive_arm` to `pending`
+  for a kind with a confirming source, `rm` for `rename`, which no loader would
+  ever clear. Then spawns the walker with
   the before-lines, exporting `HANDOFF_FAIL_FILE`, `HANDOFF_PENDING_FILE` and
   `HANDOFF_TRANSCRIPT` (this session's, from `Stop`'s own payload — what a
   `/rename` line confirms against): the hook owns the paths, the walker stays
-  ignorant of the layout. An empty before-sequence (FR-G) arms the `.pending`
-  and spawns nothing. Outside tmux it emits every line, before then after, for
+  ignorant of the layout. An empty before-sequence (FR-G) leaves the file
+  `pending` and spawns nothing. Outside tmux it emits every line, before then after, for
   the user to paste in order — and it is the *single* producer of that
   pasteable form, which is why no skill body prints one. Silent no-op when the
   file is absent — `Stop` fires every turn. `Stop` does not fire on Esc, so an
   interrupted turn cannot arm a transition.
 - `scripts/load-compact.sh` — `SessionStart(compact)` entry point: consumes
-  `autodrive.pending` — which is itself the confirmation the walker was waiting
-  on for the `/compact` line it typed — injects the task-file frame via
+  `.claude/autodrive` — whose disappearance is itself the confirmation the
+  walker was waiting on for the `/compact` line it typed — injects the
+  task-file frame via
   `additionalContext` (`handoff_frame`; omitted when there is no task file),
   and spawns the walker for the after-line with the session `transcript_path`
-  exported as `$HANDOFF_TRANSCRIPT`. Gates on `DRIVE_KIND == compact`: each
-  loader consumes only its own kind, so a `clear` armed in this session and
-  overtaken by a threshold auto-compaction is not consumed here.
+  exported as `$HANDOFF_TRANSCRIPT`. Gates on `DRIVE_STATE == pending` and
+  `DRIVE_KIND == compact`: only a transition in flight is a loader's to
+  complete, and only its own kind, so an `armed` file is left for the sweep and
+  a `clear` armed in this session and overtaken by a threshold auto-compaction
+  is not consumed here.
   `source: "compact"` is the authoritative compaction-complete signal — no pane
-  scraping. Silent when there is no pending file (auto-compaction fires the same
+  scraping. Silent when nothing is pending (auto-compaction fires the same
   hook), which is also what keeps a hand-typed `/compact` from re-injecting a
   days-old frame. Reading the task file does not consume it.
 - `scripts/report-watcher-failure.sh` — `UserPromptSubmit` entry point:
   reconciles the armed-transition state at the start of a turn.
   It consumes `.claude/autodrive.failed` — one channel now, since the
   transition is a singleton — and reports the reason on both channels, also
-  clearing a stranded `autodrive.pending`. The detached walker's exit status is
+  clearing a transition stranded in `pending`. The detached walker's exit status
+  is
   read by nothing, so that file is its only path back to the agent — most of all
   on the recognition abort, which wipes the composer and leaves the pane looking
   untouched. `UserPromptSubmit` rather than `Stop` because the walker runs
   *after* the Stop that spawned it. Reports only what the walker observed
-  itself; a stale `.pending` alone is never treated as failure (it is legitimate
-  for the whole Stop → transition window).
+  itself; a file in state `pending` alone is never treated as failure (it is
+  legitimate for the whole Stop → transition window).
   It also reports **session-root drift** — a cwd whose branch is `foreign` or
   `unrelated`, meaning it has left the launch repo while the root and every
   handoff file under it have not. Here rather than at a later gate because
@@ -306,13 +327,17 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   re-drift is a new episode. Its `systemMessage` leads with an ANSI style
   reset — this hook speaks only when something went wrong, and the chatter
   around it renders dimmed.
-  It also sweeps a bare `.claude/autodrive`: the file is armed at the `Stop`
-  of the turn that writes it and renamed or removed, so one still present when a
+  It also sweeps a sentinel still in state `armed`: the file is armed at the
+  `Stop` of the turn that writes it, which leaves it `pending` or removes it, so
+  one still `armed` when a
   later turn begins never armed, and would otherwise be armed by the next
-  `Stop` — days later, possibly in another session. `UserPromptSubmit` is the
+  `Stop` — days later, possibly in another session. A file that will not parse
+  is swept too — it describes no transition anyone can complete, which is what
+  the bare-filename gate did before the states were content.
+  `UserPromptSubmit` is the
   exact discriminator; it cannot fire between the write and that turn's own
-  `Stop`. Only the failure branch touches `.pending` — sweeping it on a stale
-  sentinel would race a live `SessionStart(compact|clear)`. See
+  `Stop`. Only the failure branch touches a `pending` — sweeping on that
+  evidence would race a live `SessionStart(compact|clear)`. See
   `docs/changelog/2026-07-22-stale-autocompact.md`.
 - `scripts/worktree_root.py` — pure resolver `worktree_root(cwd, project)`:
   walks up from the session cwd via on-disk `.git` linkage to the enclosing
@@ -598,6 +623,14 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   `write-drive.sh` / `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on
   `source: "clear"` / `report-watcher-failure.sh`, and `tests/watcher-test.bats`
   for the walker, the pane predicates,
+  and — since the states became content — the four state gates, each paired
+  with the positive that already existed over the same fixture: `stop-drive.sh`
+  ignoring a `pending`, each loader ignoring an `armed`, and the sweep leaving
+  a `pending` alone. Three of the four are mutation-checked (`stop-drive.sh`,
+  `load-compact.sh`, `report-watcher-failure.sh`), and so are `load-handoff.sh`'s
+  conjunct and `handoff_drive_arm`'s no-temp-left-behind row — the last two
+  because both were green in the red phase, the arm rows having failed at 127
+  rather than on an assertion, which proves nothing.
   `transcript_title_count`, and the `watcher_fail` recording. Two rows there are
   load-bearing and mutation-checked: the FR-H re-idle gate, asserted on the
   *delay* between two literal sends rather than on suppression (`wait_for_idle`

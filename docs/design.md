@@ -213,18 +213,21 @@ A **driven transition** is a sequence of lines to type, plus the
 | `clear` | `/rename <title>`, `/clear` | continuation prose | `clear` |
 | `compact` (prepared) | — | — | `compact` |
 
-One sentinel, `.claude/autodrive`, whose first line is the kind. The
-remaining lines are the **literal keystrokes**, so the walker never needs to
-know which command belongs to which kind; validation anchors it instead —
-the *n*th line of kind *k* must begin with the expected command literal, so
-the file cannot be made to type something else.
+One sentinel, `.claude/autodrive`, whose first line is its **state** and
+second line the kind. The remaining lines are the **literal keystrokes**, so
+the walker never needs to know which command belongs to which kind;
+validation anchors it instead — the *n*th line of kind *k* must begin with
+the expected command literal, so the file cannot be made to type something
+else. One fact per line throughout.
 
 Mid-turn input has four distinct classes, and prose — not the slash command
 — is the dangerous one: it is injected into the running turn's next model
 call. So no line is ever typed from inside a live turn. `Stop`
-(`stop-drive.sh`) arms the before-lines, moving the sentinel to `.pending`
-*before* spawning so a later `Stop` cannot re-arm; the transition's own
-`SessionStart` consumes that file and spawns the after-line. One walker,
+(`stop-drive.sh`) arms the before-lines, rewriting the sentinel's state from
+`armed` to `pending` *before* spawning; a later `Stop` acts only on `armed`,
+so it cannot re-arm one in flight. The transition's own `SessionStart`
+consumes that file — only in state `pending`, and only of its own kind — and
+spawns the after-line. One walker,
 `drive-when-idle.sh`, serves every case: wait for idle, type, confirm,
 re-gate on idle, next line. A line that fails to confirm stops the sequence,
 which is what makes a `/rename` that never lands under kind `clear` cost a
@@ -234,8 +237,8 @@ Confirmation dispatches on the **command**, not the kind — which is what
 lets `/rename` appear in two kinds with two different fates, and carries the
 recognition check for free, since any line beginning `/` takes the
 type-read-back-Enter path. Three primitives: a `custom-title` transcript
-entry for `/rename`, the `.pending` file disappearing for `/compact` and
-`/clear`, a genuine user-prompt transcript entry for prose. The walker reads
+entry for `/rename`, the sentinel disappearing for `/compact` and `/clear`,
+a genuine user-prompt transcript entry for prose. The walker reads
 the pane only where the pane is the sole witness — gating *typing into* the
 composer (`is_typing`, `is_unknown_command`). Nothing that asks whether an
 action *took effect* looks at it.
@@ -243,10 +246,11 @@ action *took effect* looks at it.
 A detached walker's exit status is read by nothing, so non-delivery is
 written to `.claude/autodrive.failed` and reported by
 `report-watcher-failure.sh` at the next `UserPromptSubmit` — the first
-moment anything can act on the news. That hook also sweeps a bare
-`.claude/autodrive` left by a turn that ended on Esc or a crash:
+moment anything can act on the news. That hook also sweeps a sentinel still
+in state `armed`, left by a turn that ended on Esc or a crash:
 `UserPromptSubmit` is the exact discriminator, since it cannot fire between
-the write and that turn's own `Stop`.
+the write and that turn's own `Stop`. A file that will not parse is swept
+too — it describes no transition anyone can complete.
 
 The prepare-only compact path arms the kind line alone. Nothing is typed,
 but the transition is *expected*, and that expectation is what
@@ -459,13 +463,27 @@ they could not both be armed. Moving the kind into the body makes the
 invariant structural, and collapses three watchers into one walker.
 [Driven transitions](changelog/2026-07-29-driven-transitions.md)
 
+**The transition carries its own state.** There is exactly one transition in
+flight at a time, and two filenames were one object at two points in its
+life — so every gate read the point it cared about by choosing a name, and
+the machine between them existed only as `mv` calls scattered across four
+hooks. Line 1 of `.claude/autodrive` is the state and the gates are state
+checks, which is the same guarantee stated directly: `Stop` will not re-arm
+something already in flight, and the sweep will not take something
+legitimately mid-window. Adding a state is now a value, not a filename and
+four new gates. The state being content rather than a name also makes a
+wrong one writable, so the agent-authored channel is held to `armed` —
+every state after that is a hook's to write.
+[One transition, one file, explicit
+state](changelog/2026-08-03-one-transition-one-file.md)
+
 **Observability is not gated on the happy path.** A clean run says nothing
 about whether a dirty one would be noticed, and the failing run is exactly
 the one nobody is watching. Every non-delivery path a watcher can observe
 itself writes a reason to a file. Nothing is inferred from state that is
-legitimately present (a `.pending` during the whole Stop → compaction
-window): a false-positive-free signal is worth the tail of watchers killed
-outright.
+legitimately present (a file in state `pending` during the whole Stop →
+compaction window): a false-positive-free signal is worth the tail of
+watchers killed outright.
 [A detached watcher's failure has to become a
 file](changelog/2026-07-20-watcher-failure-becomes-a-file.md)
 

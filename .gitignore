@@ -6,9 +6,10 @@
 .claude/handoff-task.md
 .claude/handoff-todo.md
 
-# The armed transition and its siblings (.pending, .failed). One file, because
-# at most one transition can be in flight; each exists for part of one turn (or
-# one Stop -> transition window) and is consumed by a hook.
+# The transition, its non-delivery report (.failed), and the .arming.<pid> temp
+# the atomic state rewrite lands beside it. One transition file, because at most
+# one can be in flight; it carries its own state in line 1 and exists for part
+# of one turn (or one Stop -> transition window) before a hook consumes it.
 .claude/autodrive*
 
 # handoff-checkpoint's IPC to bash-post.sh: exists for one Bash-call turn,
