@@ -439,7 +439,8 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     [ "$status" -eq 0 ]
     [ -f "$repo/.claude/checkpoint-manifest" ]
     [ ! -s "$repo/.claude/checkpoint-manifest" ]
-    [ "$(cat "$repo/.claude/autodrive")" = "rename
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+rename
 /rename Two Words Title" ]
     # And what it wrote is what the arming hook will accept.
     run handoff_drive_read "$repo/.claude/autodrive"
@@ -454,7 +455,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"Two  Words\nAnd More", task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
-    [ "$(wc -l < "$repo/.claude/autodrive")" -eq 2 ]
+    [ "$(wc -l < "$repo/.claude/autodrive")" -eq 3 ]
     grep -qx '/rename Two Words And More' "$repo/.claude/autodrive"
 }
 

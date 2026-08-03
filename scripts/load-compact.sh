@@ -4,11 +4,12 @@
 # pane-marker scraping, and it also covers a compaction that finishes too fast
 # to observe as a busy->idle transition.
 #
-# Consuming .claude/autodrive.pending is itself the confirmation the walker was
-# waiting on for the `/compact` line it typed: the file disappearing is what
-# tells that watcher the compaction happened.
+# Consuming .claude/autodrive is itself the confirmation the walker was waiting
+# on for the `/compact` line it typed: the file disappearing is what tells that
+# watcher the compaction happened.
 #
-# The hook fires for auto-compaction too, so the no-pending path must be silent.
+# The hook fires for auto-compaction too, so the no-transition path must be
+# silent.
 #
 # The after-line is TYPED as an ordinary prompt at idle, not injected as
 # additionalContext: additionalContext is context, not a prompt, and cannot
@@ -26,23 +27,24 @@ hook_cwd="$(jq -r '.cwd // ""' <<<"$input")"
 cwd="$(handoff_root "$hook_cwd")"
 [[ -n "$cwd" ]] || exit 0
 
-pending="$cwd/$HANDOFF_REL_DRIVE_PENDING"
-[[ -f "$pending" ]] || exit 0
+drive="$cwd/$HANDOFF_REL_DRIVE"
+[[ -f "$drive" ]] || exit 0
 
-if ! handoff_drive_read "$pending"; then
-    rm -f "$pending"
+if ! handoff_drive_read "$drive"; then
+    rm -f "$drive"
     jq -nc --arg e "$DRIVE_ERR" \
-        '{systemMessage: ("handoff: autodrive.pending malformed — " + $e + "; not resuming.")}'
+        '{systemMessage: ("handoff: autodrive malformed — " + $e + "; not resuming.")}'
     exit 0
 fi
 
-# Each loader consumes only its own kind. A `clear` armed in this session and
-# overtaken by a threshold auto-compaction would otherwise be consumed here,
-# firing its continuation into the session the clear was meant to replace.
-[[ "$DRIVE_KIND" == "compact" ]] || exit 0
+# Only a transition in flight is ours to complete, and only our own kind. An
+# armed file belongs to a Stop that has not fired; a pending `clear` armed in
+# this session and overtaken by a threshold auto-compaction would otherwise fire
+# its continuation into the session the clear was meant to replace.
+[[ "$DRIVE_STATE" == "pending" && "$DRIVE_KIND" == "compact" ]] || exit 0
 
 # Consume unconditionally: the continuation fires at most once per compaction.
-rm -f "$pending"
+rm -f "$drive"
 
 after=( ${DRIVE_AFTER[@]+"${DRIVE_AFTER[@]}"} )
 

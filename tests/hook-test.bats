@@ -253,7 +253,8 @@ read_drive() {
 }
 
 @test "handoff_drive_read (rename): one before-line, no after-line" {
-    read_drive "rename" "/rename Driven Transitions"
+    read_drive "armed" "rename" "/rename Driven Transitions"
+    [ "$DRIVE_STATE" = armed ]
     [ "$DRIVE_KIND" = rename ]
     [ "${#DRIVE_BEFORE[@]}" -eq 1 ]
     [ "${DRIVE_BEFORE[0]}" = "/rename Driven Transitions" ]
@@ -261,28 +262,28 @@ read_drive() {
 }
 
 @test "handoff_drive_read (compact): command before, prose after" {
-    read_drive "compact" "/compact focus on the parser" "continue with task 3"
+    read_drive "armed" "compact" "/compact focus on the parser" "continue with task 3"
     [ "$DRIVE_KIND" = compact ]
     [ "${DRIVE_BEFORE[0]}" = "/compact focus on the parser" ]
     [ "${DRIVE_AFTER[0]}" = "continue with task 3" ]
 }
 
 @test "handoff_drive_read (compact, bare command): accepted, /compact takes no argument" {
-    read_drive "compact" "/compact" "continue with task 3"
+    read_drive "armed" "compact" "/compact" "continue with task 3"
     [ "${DRIVE_BEFORE[0]}" = "/compact" ]
 }
 
 # FR-G: the kind line alone. Nothing is typed, but the transition is expected,
 # and that expectation is what the frame's re-injection is gated on.
 @test "handoff_drive_read (compact, kind line alone): legal, both sequences empty" {
-    read_drive "compact"
+    read_drive "armed" "compact"
     [ "$DRIVE_KIND" = compact ]
     [ "${#DRIVE_BEFORE[@]}" -eq 0 ]
     [ "${#DRIVE_AFTER[@]}" -eq 0 ]
 }
 
 @test "handoff_drive_read (clear): two before-lines in order, prose after" {
-    read_drive "clear" "/rename A Title" "/clear" "pick up per the task file"
+    read_drive "armed" "clear" "/rename A Title" "/clear" "pick up per the task file"
     [ "$DRIVE_KIND" = clear ]
     [ "${#DRIVE_BEFORE[@]}" -eq 2 ]
     [ "${DRIVE_BEFORE[0]}" = "/rename A Title" ]
@@ -290,66 +291,96 @@ read_drive() {
     [ "${DRIVE_AFTER[0]}" = "pick up per the task file" ]
 }
 
+# The state a Stop has already consumed. The parser does not know which caller
+# wants which state — it reports the value and the gates decide.
+@test "handoff_drive_read (pending): parsed like any other state" {
+    read_drive "pending" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    [ "$DRIVE_STATE" = pending ]
+    [ "$DRIVE_KIND" = clear ]
+    [ "${DRIVE_AFTER[0]}" = "pick up per the task file" ]
+}
+
 @test "handoff_drive_read (unknown kind): rejected, naming the kinds" {
-    run read_drive "reboot" "/reboot"
+    run read_drive "armed" "reboot" "/reboot"
     [ "$status" -ne 0 ]
     [[ "$output" == *"transition kind"* ]]
 }
 
-# The old autorename shape. No back-compat branch: a bare title has no kind
-# line, so it is simply an unknown kind.
+@test "handoff_drive_read (unknown state): rejected, naming the states" {
+    run read_drive "held" "clear" "/rename A Title" "/clear" "resume"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"transition state"* ]]
+    [[ "$output" == *"held"* ]]
+}
+
+# The state line alone. It says which state, but there is no transition for it
+# to be the state of.
+@test "handoff_drive_read (state line alone): rejected, naming the missing kind" {
+    run read_drive "armed"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"transition kind"* ]]
+}
+
+# The old autorename shape, and the shape this pass replaces. Neither has a
+# state line, so both fail on line 1 rather than on anything below it.
 @test "handoff_drive_read (bare title, the old autorename shape): rejected" {
     run read_drive "Some Session Title"
     [ "$status" -ne 0 ]
 }
 
+@test "handoff_drive_read (a pre-state-line sentinel): rejected on line 1" {
+    run read_drive "clear" "/rename A Title" "/clear" "resume"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"transition state"* ]]
+}
+
 @test "handoff_drive_read (empty file): rejected" {
     run read_drive ""
     [ "$status" -ne 0 ]
-    [[ "$output" == *"transition kind"* ]]
+    [[ "$output" == *"transition state"* ]]
 }
 
 @test "handoff_drive_read (wrong line count for the kind): rejected, naming the count" {
-    run read_drive "rename" "/rename A Title" "extra line"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"exactly 2 lines"* ]]
-
-    run read_drive "clear" "/rename A Title" "/clear"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"exactly 4 lines"* ]]
-
-    run read_drive "compact" "/compact" "continue" "extra"
+    run read_drive "armed" "rename" "/rename A Title" "extra line"
     [ "$status" -ne 0 ]
     [[ "$output" == *"exactly 3 lines"* ]]
+
+    run read_drive "armed" "clear" "/rename A Title" "/clear"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly 5 lines"* ]]
+
+    run read_drive "armed" "compact" "/compact" "continue" "extra"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly 4 lines"* ]]
 }
 
 @test "handoff_drive_read (command literal not in the kind's slot): rejected" {
-    run read_drive "clear" "/clear" "/rename A Title" "resume"
+    run read_drive "armed" "clear" "/clear" "/rename A Title" "resume"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"line 2"* ]]
+    [[ "$output" == *"line 3"* ]]
 
-    run read_drive "compact" "compact now" "continue"
+    run read_drive "armed" "compact" "compact now" "continue"
     [ "$status" -ne 0 ]
     [[ "$output" == *"/compact"* ]]
 }
 
 @test "handoff_drive_read (/rename with no argument): rejected" {
-    run read_drive "rename" "/rename"
+    run read_drive "armed" "rename" "/rename"
     [ "$status" -ne 0 ]
     [[ "$output" == *"non-empty argument"* ]]
 
-    run read_drive "rename" "/rename    "
+    run read_drive "armed" "rename" "/rename    "
     [ "$status" -ne 0 ]
 }
 
 @test "handoff_drive_read (/clear with an argument): rejected" {
-    run read_drive "clear" "/rename A Title" "/clear now" "resume"
+    run read_drive "armed" "clear" "/rename A Title" "/clear now" "resume"
     [ "$status" -ne 0 ]
     [[ "$output" == *"exactly"* ]]
 }
 
 @test "handoff_drive_read (empty continuation prompt): rejected" {
-    run read_drive "compact" "/compact" ""
+    run read_drive "armed" "compact" "/compact" ""
     [ "$status" -ne 0 ]
     [[ "$output" == *"must not be empty"* ]]
 }
@@ -359,9 +390,42 @@ read_drive() {
 # direct path. A prose line that looks like a command would be confirmed by the
 # wrong one.
 @test "handoff_drive_read (continuation prompt beginning with /): rejected" {
-    run read_drive "clear" "/rename A Title" "/clear" "/resume the work"
+    run read_drive "armed" "clear" "/rename A Title" "/clear" "/resume the work"
     [ "$status" -ne 0 ]
     [[ "$output" == *"must not begin"* ]]
+}
+
+# --- _lib.sh: handoff_drive_arm ---
+
+# Everything below line 1 is copied through untouched: the arm never has to know
+# the kind's shape, which is what lets one helper serve Stop and, in the next
+# pass, handoff-approved.
+@test "handoff_drive_arm (rewrites line 1, preserves every line below)" {
+    printf '%s\n' "armed" "clear" "/rename A Title" "/clear" "pick up per the task file" \
+        > "$BATS_TEST_TMPDIR/sentinel"
+    handoff_drive_arm "$BATS_TEST_TMPDIR/sentinel" pending
+    [ "$(cat "$BATS_TEST_TMPDIR/sentinel")" = "pending
+clear
+/rename A Title
+/clear
+pick up per the task file" ]
+}
+
+# The FR-G marker is two lines, so the tail below line 1 is a single line.
+@test "handoff_drive_arm (two-line file: still just the state line)" {
+    printf '%s\n' "armed" "compact" > "$BATS_TEST_TMPDIR/sentinel"
+    handoff_drive_arm "$BATS_TEST_TMPDIR/sentinel" pending
+    [ "$(cat "$BATS_TEST_TMPDIR/sentinel")" = "pending
+compact" ]
+}
+
+# Readers exist concurrently — both loaders and Stop parse this file, and the
+# walker stats it — so a half-written file must never be observable under the
+# real name. The temp lands beside it and is renamed over it.
+@test "handoff_drive_arm (leaves no temp file behind)" {
+    printf '%s\n' "armed" "compact" "/compact" "continue" > "$BATS_TEST_TMPDIR/sentinel"
+    handoff_drive_arm "$BATS_TEST_TMPDIR/sentinel" pending
+    [ "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'sentinel*' | wc -l)" -eq 1 ]
 }
 
 # --- write-stage ---
@@ -624,10 +688,11 @@ WTTASK
 # both, so the after-line confirms against .transcript_path here exactly as it
 # does at the compact boundary.
 
-# Write a .claude/autodrive.pending under $1 with the remaining args as lines.
+# The same file in state `pending`: a transition Stop has already armed, waiting
+# on the SessionStart that confirms it.
 seed_pending() {
     local dir="$1"; shift
-    printf '%s\n' "$@" > "$dir/.claude/autodrive.pending"
+    printf '%s\n' "pending" "$@" > "$dir/.claude/autodrive"
 }
 
 run_load_handoff() {
@@ -642,7 +707,7 @@ run_load_handoff() {
     seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
     run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("pick up per the task file")' >/dev/null
     # The frame still goes out alongside it.
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("hook smoke test")' >/dev/null
@@ -657,7 +722,7 @@ run_load_handoff() {
     seed_pending "$tmp" "clear" "/rename A Title" "/clear" "resume anyway"
     run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("resume anyway")' >/dev/null
     echo "$output" | jq -e 'has("hookSpecificOutput") | not' >/dev/null
 }
@@ -675,14 +740,15 @@ run_load_handoff() {
     seed_pending "$tmp" "compact" "/compact" "continue with task 3"
     run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ -f "$tmp/.claude/autodrive.pending" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
+    [ "$(sed -n 2p "$tmp/.claude/autodrive")" = "compact" ]
 }
 
 @test "load-handoff (startup with a pending present: does not consume it)" {
     seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
     run_load_handoff "$tmp" startup 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ -f "$tmp/.claude/autodrive.pending" ]
+    [ -f "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("pick up") | not' >/dev/null
 }
 
@@ -690,7 +756,7 @@ run_load_handoff() {
     seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
     run_load_handoff "$tmp" clear 'env -u TMUX -u TMUX_PANE'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("pick up per the task file")' >/dev/null
 }
 
@@ -698,8 +764,19 @@ run_load_handoff() {
     seed_pending "$tmp" "clear" "/rename A Title" "not a clear" "resume"
     run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
+}
+
+# Each loader consumes only a transition in flight. An armed file belongs to a
+# Stop that has not fired — the agent wrote it and the turn ended on an Esc, so
+# the sweep is what deals with it, not this.
+@test "load-handoff (clear, armed file: not consumed, left for the sweep)" {
+    seed_drive "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "armed" ]
+    echo "$output" | jq -e '.systemMessage | test("pick up") | not' >/dev/null
 }
 
 # --- write-drive (PostToolUse validator) ---
@@ -707,10 +784,11 @@ run_load_handoff() {
 # Validate only: never spawns, never deletes. The file must survive to Stop,
 # which is the hook that actually arms the transition.
 
-# Write a .claude/autodrive under $1 with the remaining args as lines.
+# Seed .claude/autodrive under $1 in state `armed` — what an agent or the
+# checkpoint writes — with the remaining args as the lines below it.
 seed_drive() {
     local dir="$1"; shift
-    printf '%s\n' "$@" > "$dir/.claude/autodrive"
+    printf '%s\n' "armed" "$@" > "$dir/.claude/autodrive"
 }
 
 run_write_drive() {
@@ -757,7 +835,7 @@ run_write_drive() {
     [ -f "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("4 lines")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("5 lines")' >/dev/null
 }
 
 @test "write-drive (unknown kind: directive names the kinds)" {
@@ -807,22 +885,20 @@ run_stop_drive() {
     [ "$output" = "" ]
 }
 
-@test "stop-drive (kind with a confirming source: renames to .pending, reports armed)" {
+@test "stop-drive (kind with a confirming source: rewrites to pending, reports armed)" {
     seed_drive "$tmp" "compact" "/compact keep the parser work" "continue with task 3"
     run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive" ]
-    [ -f "$tmp/.claude/autodrive.pending" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
     echo "$output" | jq -e '.systemMessage | test("/compact keep the parser work")' >/dev/null
 }
 
-# `rename` has no loader, so nothing would ever clear a .pending armed for it.
-@test "stop-drive (kind rename: deletes the sentinel, arms no .pending)" {
+# `rename` has no loader, so nothing would ever clear a pending armed for it.
+@test "stop-drive (kind rename: deletes the sentinel outright)" {
     seed_drive "$tmp" "rename" "/rename Driven Transitions"
     run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
     [ ! -e "$tmp/.claude/autodrive" ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
     echo "$output" | jq -e '.systemMessage | test("/rename Driven Transitions")' >/dev/null
 }
 
@@ -836,13 +912,13 @@ run_stop_drive() {
 }
 
 # FR-G: the prepare-only marker. Nothing is typed and nothing is spawned; the
-# .pending file alone is the whole effect, and it is what SessionStart(compact)
+# pending file alone is the whole effect, and it is what SessionStart(compact)
 # gates the frame re-injection on.
-@test "stop-drive (empty before-sequence: arms .pending, spawns nothing)" {
+@test "stop-drive (empty before-sequence: leaves it pending, spawns nothing)" {
     seed_drive "$tmp" "compact"
     run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ -f "$tmp/.claude/autodrive.pending" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
     echo "$output" | jq -e '.systemMessage | test("nothing to type")' >/dev/null
 }
 
@@ -851,7 +927,6 @@ run_stop_drive() {
     run_stop_drive "$tmp" 'env -u TMUX -u TMUX_PANE'
     [ "$status" -eq 0 ]
     [ ! -e "$tmp/.claude/autodrive" ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
     ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
     echo "$ctx" | grep -q '^/rename A Title$'
     echo "$ctx" | grep -q '^/clear$'
@@ -868,7 +943,6 @@ run_stop_drive() {
     run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
     [ ! -e "$tmp/.claude/autodrive" ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
     echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
 }
 
@@ -877,7 +951,20 @@ run_stop_drive() {
     seed_drive "$wt" "compact" "/compact" "continue with task 3"
     run_stop_drive "$wt" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ -f "$wt/.claude/autodrive.pending" ]
+    [ "$(head -n1 "$wt/.claude/autodrive")" = "pending" ]
+}
+
+# The consume-before-spawn guarantee, stated directly. A pending file is a
+# transition already in flight — its confirming SessionStart has not fired yet —
+# and a Stop in the window between the two must not retype the sequence. That
+# window is real: the walker submits its lines as ordinary prompts, and each one
+# ends a turn.
+@test "stop-drive (pending file: ignored, left untouched)" {
+    seed_pending "$tmp" "compact" "/compact" "continue with task 3"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
 }
 
 # --- load-compact (SessionStart(compact): fire the continuation) ---
@@ -902,7 +989,7 @@ run_load_compact() {
     seed_pending "$tmp" "compact" "/compact" "continue with task 3"
     run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("continue with task 3")' >/dev/null
 }
 
@@ -910,14 +997,15 @@ run_load_compact() {
     seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
     run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ -f "$tmp/.claude/autodrive.pending" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
+    [ "$(sed -n 2p "$tmp/.claude/autodrive")" = "clear" ]
 }
 
 @test "load-compact (not in tmux: emits continuation to paste, clears pending)" {
     seed_pending "$tmp" "compact" "/compact" "continue with task 3"
     run_load_compact "$tmp" 'env -u TMUX -u TMUX_PANE'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("continue with task 3")' >/dev/null
 }
 
@@ -950,7 +1038,7 @@ run_load_compact() {
     seed_pending "$tmp" "compact"
     run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("hook smoke test")' >/dev/null
     echo "$output" | jq -e '.systemMessage | test("frame re-injected")' >/dev/null
 }
@@ -969,7 +1057,15 @@ run_load_compact() {
     seed_pending "$wt" "compact" "/compact" "continue with task 3"
     run_load_compact "$wt" 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
-    [ ! -e "$wt/.claude/autodrive.pending" ]
+    [ ! -e "$wt/.claude/autodrive" ]
+}
+
+@test "load-compact (armed file: not consumed, no frame)" {
+    seed_drive "$tmp" "compact" "/compact" "continue with task 3"
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "armed" ]
 }
 
 # --- session-pointer (SessionStart, every source: publish the resolved root) ---
@@ -1265,14 +1361,14 @@ run_report_failure() {
     [ "$output" = "" ]
 }
 
-# A failure part-way through a sequence leaves the armed file stranded as
-# .pending: no transition will consume it, and Stop cannot re-arm from it.
+# A failure part-way through a sequence leaves the transition stranded in
+# state `pending`: no transition will consume it, and Stop cannot re-arm from it.
 @test "report-watcher-failure (clears a stranded pending file)" {
     printf '%s\n' "typed but never submitted" > "$tmp/.claude/autodrive.failed"
     seed_pending "$tmp" "compact" "/compact" "continue"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive.pending" ]
+    [ ! -e "$tmp/.claude/autodrive" ]
 }
 
 @test "report-watcher-failure (worktree cwd: reads the worktree file)" {
@@ -1284,11 +1380,11 @@ run_report_failure() {
     echo "$output" | jq -e '.systemMessage | test("never submitted")' >/dev/null
 }
 
-# An autodrive is armed at the Stop of the turn that writes it, and Stop renames
-# or removes it. So one still present at a *later* turn's UserPromptSubmit never
-# armed — its turn ended abnormally (Esc, crash, quit). Left alone it is armed by
-# the next normal Stop, days later and possibly in another session, driving a
-# stale transition into unrelated work.
+# An autodrive is armed at the Stop of the turn that writes it, and that Stop
+# leaves it `pending` or removes it. So one still in state `armed` at a *later*
+# turn's UserPromptSubmit never armed — its turn ended abnormally (Esc, crash,
+# quit). Left alone it is armed by the next normal Stop, days later and
+# possibly in another session, driving a stale transition into unrelated work.
 @test "report-watcher-failure (stale autodrive: discards it and reports)" {
     seed_drive "$tmp" "compact" "/compact keep the parser work" "continue with task 3"
     run_report_failure "$tmp"
@@ -1311,17 +1407,17 @@ run_report_failure() {
     [ "$output" = "" ]
 }
 
-# .pending is legitimate for the whole Stop -> transition window, and that window
-# contains the walker's own submit — a UserPromptSubmit. Only a watcher-observed
-# failure may clear it; a stale autodrive must not, or the sweep would race
-# SessionStart(compact|clear) and kill a live continuation.
-@test "report-watcher-failure (stale autodrive leaves .pending alone)" {
-    seed_drive "$tmp" "compact" "/compact" "continue"
+# A pending file is legitimate for the whole Stop -> transition window, and that
+# window contains the walker's own submits — each of which is a
+# UserPromptSubmit. Sweeping one here would race SessionStart(compact|clear) and
+# kill a live continuation. Only the failure branch above, which acts on
+# something the walker observed itself, may clear one.
+@test "report-watcher-failure (pending file: left alone, no report)" {
     seed_pending "$tmp" "compact" "/compact" "continue"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
-    [ ! -e "$tmp/.claude/autodrive" ]
-    [ -f "$tmp/.claude/autodrive.pending" ]
+    [ "$output" = "" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
 }
 
 @test "report-watcher-failure (failure and stale file: one report covering both)" {

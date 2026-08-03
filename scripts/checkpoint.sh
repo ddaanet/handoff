@@ -242,16 +242,19 @@ if [ "$todo_action" != "none" ]; then
 fi
 
 if [ -n "$rename" ]; then
-    # The sentinel holds the literal keystrokes, so the title becomes the
-    # argument of a `/rename` line under a `rename` kind line. It has to be one
-    # line: the format is line-oriented and handoff_drive_read would reject a
-    # title carrying its own newline. bash-post.sh used to flatten whitespace at
-    # consume time; with the sentinel written in its final form there is no
-    # consumer left to do it, so it happens here.
+    # The sentinel opens with its state, then the kind, then the literal
+    # keystrokes — the title becomes the argument of a `/rename` line under a
+    # `rename` kind line. The checkpoint's own writes are always `armed`:
+    # nothing it produces is in flight yet, only the hooks after it move a
+    # transition into `pending`. The title has to be one line: the format is
+    # line-oriented and handoff_drive_read would reject a title carrying its
+    # own newline. bash-post.sh used to flatten whitespace at consume time;
+    # with the sentinel written in its final form there is no consumer left to
+    # do it, so it happens here.
     title="$(printf '%s' "$rename" | tr -s '[:space:]' ' ')"
     title="${title# }"; title="${title% }"
     [ -n "$title" ] || err "rename" "must be a non-empty title"
-    printf 'rename\n/rename %s\n' "$title" > "$root/$HANDOFF_REL_DRIVE"
+    printf 'armed\nrename\n/rename %s\n' "$title" > "$root/$HANDOFF_REL_DRIVE"
 fi
 
 # Always written, even with zero lines: bash-post.sh's fast-exit gate is the

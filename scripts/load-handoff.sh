@@ -9,8 +9,8 @@
 #     and age;
 #   - on `clear`, consumes an armed transition of kind `clear` and spawns the
 #     walker for the lines to type into this new session. Consuming
-#     .claude/autodrive.pending is itself the confirmation the walker was
-#     waiting on for the `/clear` line it typed.
+#     .claude/autodrive is itself the confirmation the walker was waiting on
+#     for the `/clear` line it typed.
 #
 # Those two are independent: a driven clear whose task file is empty must still
 # continue, so the consume and the spawn come BEFORE the no-frame exit. Silent
@@ -32,16 +32,16 @@ extra=""   # additionalContext appended after the frame
 # `/clear` mints a new session and a new transcript, and this payload reports
 # both — measured 2026-07-30, see the design doc. So the after-line confirms
 # against .transcript_path here exactly as it does at the compact boundary.
-pending="$cwd/$HANDOFF_REL_DRIVE_PENDING"
-if [[ "$hook_source" == "clear" && -f "$pending" ]]; then
-    if ! handoff_drive_read "$pending"; then
-        rm -f "$pending"
-        notes+=("autodrive.pending malformed — $DRIVE_ERR; not resuming")
-    elif [[ "$DRIVE_KIND" == "clear" ]]; then
-        # Each loader consumes only its own kind, so a compact armed in the
-        # outgoing session is left for SessionStart(compact) — or, failing
-        # that, for the walker's own timeout to report.
-        rm -f "$pending"
+drive="$cwd/$HANDOFF_REL_DRIVE"
+if [[ "$hook_source" == "clear" && -f "$drive" ]]; then
+    if ! handoff_drive_read "$drive"; then
+        rm -f "$drive"
+        notes+=("autodrive malformed — $DRIVE_ERR; not resuming")
+    elif [[ "$DRIVE_STATE" == "pending" && "$DRIVE_KIND" == "clear" ]]; then
+        # Only a transition in flight, and only our own kind: a compact armed in
+        # the outgoing session is left for SessionStart(compact), and an armed
+        # file — one whose Stop never fired — is left for the sweep.
+        rm -f "$drive"
         after=( ${DRIVE_AFTER[@]+"${DRIVE_AFTER[@]}"} )
         if (( ${#after[@]} > 0 )); then
             if [[ -n "${TMUX:-}" && -n "${TMUX_PANE:-}" ]]; then

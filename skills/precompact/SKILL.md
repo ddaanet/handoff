@@ -64,17 +64,19 @@ skill that adds those.
    verify it. A non-zero exit names the offending field on stderr — fix the
    payload and retry.
 
-4. Write `./.claude/autodrive`, containing exactly one line:
+4. Write `./.claude/autodrive`, containing exactly two lines:
 
    ```
+   armed
    compact
    ```
 
-   That word is the whole file. Nothing is armed to type; what it records
-   is that a compaction is *expected*, which is what the frame's
-   re-injection is gated on. Without it the compaction that follows
-   re-injects nothing, and the summariser's paraphrase is all that survives
-   of the files just written.
+   Those two words are the whole file: the state the hooks take it from, and
+   the transition it describes. Nothing is armed to type; what it records is
+   that a compaction is *expected*, which is what the frame's re-injection is
+   gated on. Without it the compaction that follows re-injects nothing, and
+   the summariser's paraphrase is all that survives of the files just
+   written.
 
 5. Once nothing is left awaiting an answer, end on one line naming what
    comes next. Under `with-commit` that is the commit, then the compaction

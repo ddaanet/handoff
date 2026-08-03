@@ -15,16 +15,12 @@ HANDOFF_REL_TASK=".claude/handoff-task.md"
 # docs/changelog/2026-07-23-overflow-deserves-persistence.md.
 # shellcheck disable=SC2034
 HANDOFF_REL_TODO=".claude/handoff-todo.md"
-# The armed transition. One composer, one session, at most one transition in
-# flight — so one file, whose *body* names the transition rather than its
-# filename. See docs/design.md, "The armed transition is a singleton".
+# The transition. One composer, one session, at most one transition in flight —
+# so one file, whose *body* names both the transition and where it has got to.
+# Line 1 is the state (armed -> pending -> gone), line 2 the kind. See
+# docs/design.md, "The armed transition is a singleton".
 # shellcheck disable=SC2034
 HANDOFF_REL_DRIVE=".claude/autodrive"
-# The armed target. Stop moves the sentinel here before spawning, so a later
-# Stop in the same session cannot re-arm; the confirming SessionStart consumes
-# it, which is also how the walker knows the transition landed.
-# shellcheck disable=SC2034
-HANDOFF_REL_DRIVE_PENDING=".claude/autodrive.pending"
 # Where the walker records a line it could not deliver. A watcher's exit status
 # goes nowhere, so this is the only path back to the agent; consumed and
 # reported by report-watcher-failure.sh at the next UserPromptSubmit.
@@ -124,18 +120,26 @@ _handoff_drive_prose() {
     return 0
 }
 
-# Parse and validate the sentinel ($1) into the caller's DRIVE_KIND, DRIVE_BEFORE
-# (lines typed before the transition) and DRIVE_AFTER (lines typed into the
-# session the transition opens). Returns 0 when well-formed; otherwise returns 1
-# with DRIVE_ERR set to a one-phrase reason naming the constraint that failed.
+# Parse and validate the sentinel ($1) into the caller's DRIVE_STATE, DRIVE_KIND,
+# DRIVE_BEFORE (lines typed before the transition) and DRIVE_AFTER (lines typed
+# into the session the transition opens). Returns 0 when well-formed; otherwise
+# returns 1 with DRIVE_ERR set to a one-phrase reason naming the constraint that
+# failed.
 #
-# Line 1 is the kind, and the kind fixes the shape — so the remaining lines need
-# no separator, and each kind keeps its own rules:
+# Line 1 is the state and line 2 is the kind, and the kind fixes the shape — so
+# the remaining lines need no separator, and each kind keeps its own rules:
+#
+#   armed    the transition this turn's Stop will arm
+#   pending  armed, in flight, waiting on its confirming SessionStart
 #
 #   rename   /rename <title>
 #   compact  /compact [directive]         + continuation prose
 #   compact  (kind line alone: a transition is expected, nothing is typed)
 #   clear    /rename <title>, /clear      + continuation prose
+#
+# The state is reported, never interpreted: which state a caller wants is the
+# caller's business, and the parser serves the Stop gate, both loaders and the
+# UserPromptSubmit sweep with one answer.
 #
 # The lines are literal keystrokes: the walker must not know which command any
 # kind uses. Every prose line is a single line because in the TUI one Enter is
@@ -148,7 +152,7 @@ _handoff_drive_prose() {
 handoff_drive_read() {
     local file="$1" line n
     local -a lines=()
-    DRIVE_KIND=""; DRIVE_BEFORE=(); DRIVE_AFTER=(); DRIVE_ERR=""
+    DRIVE_STATE=""; DRIVE_KIND=""; DRIVE_BEFORE=(); DRIVE_AFTER=(); DRIVE_ERR=""
 
     while IFS= read -r line || [ -n "$line" ]; do
         lines+=("$line")
@@ -156,37 +160,49 @@ handoff_drive_read() {
 
     n=${#lines[@]}
     if [ "$n" -eq 0 ]; then
-        DRIVE_ERR="the file is empty; line 1 must be the transition kind"
+        DRIVE_ERR="the file is empty; line 1 must be the transition state"
         return 1
     fi
-    DRIVE_KIND="${lines[0]}"
+    DRIVE_STATE="${lines[0]}"
+    case "$DRIVE_STATE" in
+        armed | pending) ;;
+        *)
+            DRIVE_ERR="line 1 must be the transition state — armed or pending — not \`$DRIVE_STATE\`"
+            return 1 ;;
+    esac
+
+    if [ "$n" -eq 1 ]; then
+        DRIVE_ERR="line 2 must be the transition kind — rename, compact or clear"
+        return 1
+    fi
+    DRIVE_KIND="${lines[1]}"
 
     case "$DRIVE_KIND" in
         rename)
-            _handoff_drive_expect "$n" 2 || return 1
-            _handoff_drive_command "${lines[1]}" 2 "/rename" arg || return 1
-            DRIVE_BEFORE=("${lines[1]}")
+            _handoff_drive_expect "$n" 3 || return 1
+            _handoff_drive_command "${lines[2]}" 3 "/rename" arg || return 1
+            DRIVE_BEFORE=("${lines[2]}")
             ;;
         compact)
             # The kind line alone is the prepare-only marker: nothing is typed,
             # but the transition is expected, so the loader still injects.
-            [ "$n" -eq 1 ] && return 0
-            _handoff_drive_expect "$n" 3 || return 1
-            _handoff_drive_command "${lines[1]}" 2 "/compact" optional || return 1
-            _handoff_drive_prose "${lines[2]}" 3 || return 1
-            DRIVE_BEFORE=("${lines[1]}")
-            DRIVE_AFTER=("${lines[2]}")
-            ;;
-        clear)
+            [ "$n" -eq 2 ] && return 0
             _handoff_drive_expect "$n" 4 || return 1
-            _handoff_drive_command "${lines[1]}" 2 "/rename" arg || return 1
-            _handoff_drive_command "${lines[2]}" 3 "/clear" none || return 1
+            _handoff_drive_command "${lines[2]}" 3 "/compact" optional || return 1
             _handoff_drive_prose "${lines[3]}" 4 || return 1
-            DRIVE_BEFORE=("${lines[1]}" "${lines[2]}")
+            DRIVE_BEFORE=("${lines[2]}")
             DRIVE_AFTER=("${lines[3]}")
             ;;
+        clear)
+            _handoff_drive_expect "$n" 5 || return 1
+            _handoff_drive_command "${lines[2]}" 3 "/rename" arg || return 1
+            _handoff_drive_command "${lines[3]}" 4 "/clear" none || return 1
+            _handoff_drive_prose "${lines[4]}" 5 || return 1
+            DRIVE_BEFORE=("${lines[2]}" "${lines[3]}")
+            DRIVE_AFTER=("${lines[4]}")
+            ;;
         *)
-            DRIVE_ERR="line 1 must be the transition kind — rename, compact or clear — not \`$DRIVE_KIND\`"
+            DRIVE_ERR="line 2 must be the transition kind — rename, compact or clear — not \`$DRIVE_KIND\`"
             return 1
             ;;
     esac
@@ -195,12 +211,31 @@ handoff_drive_read() {
 
 # Kinds whose transition is confirmed by a SessionStart. `rename` is not one:
 # no loader consumes it, so stop-drive.sh deletes its sentinel outright instead
-# of arming a .pending nobody would clear.
+# of leaving it pending for nobody to clear.
 handoff_drive_has_source() {
     case "$1" in
         compact|clear) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# Rewrite the sentinel ($1) into state $2, preserving every line below the
+# first. The state is the only field any transition changes, so one helper
+# serves them all and none of them has to know the kind's shape.
+#
+# Atomic: a sibling temp file renamed over the original. Concurrent readers
+# exist — both loaders and Stop parse this file, and the walker stats it — so a
+# partially written file must never be observable under the real name. The temp
+# lands in the same directory because rename(2) is only atomic within one
+# filesystem, and .claude/autodrive* is gitignored, so a temp orphaned by a kill
+# is never committed.
+handoff_drive_arm() {
+    local file="$1" state="$2" tmp="$1.arming.$$"
+    if ! printf '%s\n' "$state" > "$tmp" || ! tail -n +2 "$file" >> "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv -f "$tmp" "$file"
 }
 
 # Portable path canonicalization. `realpath -m` is GNU-only; BSD

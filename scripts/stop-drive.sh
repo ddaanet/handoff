@@ -24,33 +24,38 @@ source "$(dirname "$0")/_lib.sh"
 cwd="$(handoff_root "$hook_cwd")"
 [[ -n "$cwd" ]] || exit 0
 
-armed="$cwd/$HANDOFF_REL_DRIVE"
-pending="$cwd/$HANDOFF_REL_DRIVE_PENDING"
+drive="$cwd/$HANDOFF_REL_DRIVE"
 
-[[ -f "$armed" ]] || exit 0
+[[ -f "$drive" ]] || exit 0
 
-if ! handoff_drive_read "$armed"; then
+if ! handoff_drive_read "$drive"; then
     # write-drive.sh already told the agent in-turn; consuming the file here
     # stops the same complaint from repeating at every subsequent Stop.
-    rm -f "$armed"
+    rm -f "$drive"
     jq -nc --arg e "$DRIVE_ERR" \
         '{systemMessage: ("handoff: autodrive malformed — " + $e + "; discarded, transition not armed.")}'
     exit 0
 fi
 
-# Consume BEFORE spawning: a later Stop in this session must not re-arm. A kind
-# with a confirming SessionStart becomes the .pending file that loader consumes;
-# `rename` has no loader, so nothing would ever clear a .pending for it.
+# Only an armed transition is this turn's to arm. A pending one is already in
+# flight, waiting on its confirming SessionStart, and the window between the two
+# contains ordinary turns — the walker submits each of its lines as a prompt.
+# Re-arming from that state would retype the whole sequence.
+[[ "$DRIVE_STATE" == "armed" ]] || exit 0
+
+# Leave `armed` BEFORE spawning: a later Stop in this session must not re-arm. A
+# kind with a confirming SessionStart goes to `pending` for that loader to
+# consume; `rename` has no loader, so nothing would ever clear a pending for it.
 if handoff_drive_has_source "$DRIVE_KIND"; then
-    mv -f "$armed" "$pending"
+    handoff_drive_arm "$drive" pending
 else
-    rm -f "$armed"
+    rm -f "$drive"
 fi
 
 before=( ${DRIVE_BEFORE[@]+"${DRIVE_BEFORE[@]}"} )
 after=( ${DRIVE_AFTER[@]+"${DRIVE_AFTER[@]}"} )
 
-# FR-G: an empty sequence arms nothing and spawns nothing. The .pending file
+# FR-G: an empty sequence arms nothing and spawns nothing. The pending state
 # alone is the whole effect — it is the loader's signal that this compaction
 # was expected, and therefore that the frame belongs in it.
 if (( ${#before[@]} == 0 )); then
@@ -60,7 +65,7 @@ if (( ${#before[@]} == 0 )); then
 fi
 
 if [[ -z "${TMUX:-}" || -z "${TMUX_PANE:-}" ]]; then
-    rm -f "$pending"
+    rm -f "$drive"
     paste="$(printf '%s\n' "${before[@]}" ${after[@]+"${after[@]}"})"
     jq -nc --arg l "$paste" '{
         systemMessage: "handoff: not in tmux — transition not driven; lines emitted to paste.",
@@ -81,7 +86,7 @@ export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_DRIVE_FAILED"
 # primitive the walker may need: /compact and /clear confirm by this file
 # disappearing, which the transition's own SessionStart is what does, and
 # /rename confirms by a custom-title entry in this session's transcript.
-export HANDOFF_PENDING_FILE="$pending"
+export HANDOFF_PENDING_FILE="$drive"
 export HANDOFF_TRANSCRIPT="$hook_transcript"
 handoff_spawn_detached drive-when-idle.sh "$PANE" "${before[@]}"
 

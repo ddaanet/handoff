@@ -351,11 +351,11 @@ PROBE
 # is_busy matches within the confirm window — observed live 2026-07-22, where a
 # compaction ran for 103s and the watcher still reported "three Enters did not
 # submit it". The authoritative signal is the one the transition's own
-# SessionStart acts on: it consumes .claude/autodrive.pending.
+# SessionStart acts on: it consumes .claude/autodrive.
 @test "a /compact line confirms by the pending file being consumed" {
     make_stub
     printf '%s\n' '/compact  Compact the conversation' '❯ /compact' > "$STUBDIR/pane_after_l.txt"
-    pending="$BATS_TEST_TMPDIR/autodrive.pending"; : > "$pending"
+    pending="$BATS_TEST_TMPDIR/autodrive"; : > "$pending"
     fail_file="$BATS_TEST_TMPDIR/autodrive.failed"
     # Stand in for SessionStart(compact), which consumes the file when the
     # compaction completes — well after any pane-chrome window would close.
@@ -370,7 +370,7 @@ PROBE
 @test "a /compact line is reported when no transition ever consumes it" {
     make_stub
     printf '%s\n' '/compact  Compact the conversation' '❯ /compact' > "$STUBDIR/pane_after_l.txt"
-    pending="$BATS_TEST_TMPDIR/autodrive.pending"; : > "$pending"
+    pending="$BATS_TEST_TMPDIR/autodrive"; : > "$pending"
     fail_file="$BATS_TEST_TMPDIR/autodrive.failed"
     WALK_ENV=(HANDOFF_PENDING_FILE="$pending" HANDOFF_FAIL_FILE="$fail_file")
     walk '/compact keep the parser work'
@@ -449,7 +449,7 @@ PROBE
 @test "a multi-line sequence types every line, in order" {
     make_stub
     tr="$BATS_TEST_TMPDIR/t.jsonl"; : > "$tr"
-    pending="$BATS_TEST_TMPDIR/autodrive.pending"; : > "$pending"
+    pending="$BATS_TEST_TMPDIR/autodrive"; : > "$pending"
     on_enter "printf '{\"type\":\"custom-title\",\"customTitle\":\"$TITLE\"}\n' >> '$tr'; rm -f '$pending'"
     fail_file="$BATS_TEST_TMPDIR/autodrive.failed"
     WALK_ENV=(HANDOFF_TRANSCRIPT="$tr" HANDOFF_PENDING_FILE="$pending" HANDOFF_FAIL_FILE="$fail_file")

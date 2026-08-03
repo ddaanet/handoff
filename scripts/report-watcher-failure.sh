@@ -10,19 +10,19 @@
 #    promise standing forever. The walker writes its reason to
 #    .claude/autodrive.failed; this reads it at the first moment anything can
 #    act on it. It is written only on paths the walker observed itself — never
-#    inferred from a stale .pending, whose presence is legitimate for the whole
-#    Stop -> transition window.
+#    inferred from a file still in state `pending`, which is legitimate for the
+#    whole Stop -> transition window.
 #
 # 2. An autodrive that outlived its turn. The file is armed at the Stop of the
-#    turn that writes it, and Stop renames or removes it. So one still present
-#    when a *later* turn begins never armed: that turn ended abnormally (Esc —
-#    Stop does not fire on an interrupt — or a crash, or a quit). Left on disk
-#    it is armed by the next Stop that does fire, days later and possibly in an
-#    unrelated session, driving a stale transition into work it was never
-#    written for. UserPromptSubmit is the exact discriminator: it cannot fire
-#    between the write and that turn's own Stop. (Prose injected into a
-#    still-running turn is the one exception, and it fails safe — the
-#    transition is cancelled and said so, not deferred.)
+#    turn that writes it, and Stop leaves it `pending` or removes it, so one
+#    still in state `armed` when a later turn begins never armed: that turn
+#    ended abnormally (Esc — Stop does not fire on an interrupt — or a crash,
+#    or a quit). Left on disk it is armed by the next Stop that does fire, days
+#    later and possibly in an unrelated session, driving a stale transition
+#    into work it was never written for. UserPromptSubmit is the exact
+#    discriminator: it cannot fire between the write and that turn's own Stop.
+#    (Prose injected into a still-running turn is the one exception, and it
+#    fails safe — the transition is cancelled and said so, not deferred.)
 #
 # 3. A session cwd that left the launch repo. Everything derived from cwd —
 #    the environment block's working directory, gitStatus, the project
@@ -78,26 +78,42 @@ case "$HANDOFF_ROOT_BRANCH" in
 esac
 
 failed="$cwd/$HANDOFF_REL_DRIVE_FAILED"
-armed="$cwd/$HANDOFF_REL_DRIVE"
+drive="$cwd/$HANDOFF_REL_DRIVE"
+
+# Parse once: the failure branch and the sweep want different states of the same
+# file. A file that will not parse is recorded as its own value — it describes
+# no transition anyone can complete, so the sweep takes it.
+drive_state=""
+if [[ -f "$drive" ]]; then
+    if handoff_drive_read "$drive"; then
+        drive_state="$DRIVE_STATE"
+    else
+        drive_state="malformed"
+    fi
+fi
 
 if [[ -f "$failed" ]]; then
     reason="$(head -n1 "$failed")"
     rm -f "$failed"
-    # A failure part-way through a sequence strands the armed file as .pending:
-    # nothing will consume it (the transition's SessionStart never fires) and
-    # Stop cannot re-arm from it, since it gates on .claude/autodrive. Clear it
-    # with the report. Only here — a stale autodrive says nothing about a
-    # .pending, and sweeping one on that evidence would race a live
-    # SessionStart(compact|clear).
-    rm -f "$cwd/$HANDOFF_REL_DRIVE_PENDING"
+    # A failure part-way through a sequence strands the transition in `pending`:
+    # nothing will consume it (its SessionStart never fires) and Stop will not
+    # re-arm from that state. Clear it with the report. Only here — a stale
+    # armed file says nothing about one in flight, and sweeping on that evidence
+    # would race a live SessionStart(compact|clear).
+    if [[ "$drive_state" == "pending" ]]; then
+        rm -f "$drive"
+    fi
     msgs+=("transition watcher did not deliver — $reason")
     notes+=("The handoff transition watcher failed to deliver its line: $reason. The transition or continuation it was driving did not happen, and any lines after it in the sequence were never typed.")
 fi
 
-if [[ -f "$armed" ]]; then
-    rm -f "$armed"
+# An autodrive is armed at the Stop of the turn that writes it, and that Stop
+# leaves it `pending` or removes it. So one still in state `armed` when a later
+# turn begins never armed.
+if [[ -n "$drive_state" && "$drive_state" != "pending" ]]; then
+    rm -f "$drive"
     msgs+=("stale autodrive discarded — its turn ended without arming")
-    notes+=("A .claude/autodrive file was still on disk when this turn began. It is armed at the Stop of the turn that writes it, so one surviving into a later turn never armed — that turn ended on an interrupt, a crash or a quit. It has been discarded, so the transition it described did not happen and cannot fire into unrelated work later.")
+    notes+=("A .claude/autodrive file was still on disk when this turn began, and this session cannot act on it: either its Stop never fired to arm it — that turn ended on an interrupt, a crash or a quit — or it does not parse in this version's format. Either way it has been discarded, so the transition it described did not happen and cannot fire into unrelated work later.")
 fi
 
 (( ${#msgs[@]} > 0 )) || exit 0

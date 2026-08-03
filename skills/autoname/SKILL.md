@@ -17,13 +17,18 @@ calls** to decide it. Title rules: ≤ ~50 characters, Title Case, no
 surrounding quotes, no trailing punctuation. The title is always
 derived from the conversation — autoname takes no argument.
 
-Then issue a single `Write` to `./.claude/autodrive`, of exactly two lines
-— the literal word `rename`, then the rename as it will be typed:
+Then issue a single `Write` to `./.claude/autodrive`, of exactly three lines —
+the literal word `armed`, the literal word `rename`, then the rename as it
+will be typed:
 
 ```
+armed
 rename
 /rename <title>
 ```
+
+Line 1 is the transition's state. What the agent writes is always `armed`; the
+hooks own every state after that.
 
 That is the only tool call. The hooks do the rest at the end of the turn:
 the session is renamed once the prompt goes idle, and outside tmux the

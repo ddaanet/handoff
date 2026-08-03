@@ -10,8 +10,8 @@
 #
 # Its own script rather than a preamble on the two loaders, because the write
 # must be unconditional and both of those are gated (load-handoff.sh on the
-# task file, load-compact.sh on .pending). The wildcard matcher also reaches
-# `resume`, which neither loader is wired for.
+# task file, load-compact.sh on a pending transition). The wildcard matcher
+# also reaches `resume`, which neither loader is wired for.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=_lib.sh

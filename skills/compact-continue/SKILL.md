@@ -39,25 +39,28 @@ When the commit is part of this request, it lands **before** this file is
 written, for the same reason: arm the compaction first and it runs at the
 turn boundary instead of the commit.
 
-Exactly three lines:
+Exactly four lines:
 
 ```
+armed
 compact
 /compact <focus directive, or nothing>
 <continuation prompt>
 ```
 
-- **Line 1** — the literal word `compact`, and nothing else. It says which
+- **Line 1** — the literal word `armed`, and nothing else. It is the
+  transition's state; the hooks own every state after this one.
+- **Line 2** — the literal word `compact`, and nothing else. It says which
   transition this is.
-- **Line 2** — the command as it will be typed: `/compact`, or
+- **Line 3** — the command as it will be typed: `/compact`, or
   `/compact <directive>` when a focus instruction would help the summariser
   keep the right material.
-- **Line 3** — the continuation prompt: one line of prose that resumes the
+- **Line 4** — the continuation prompt: one line of prose that resumes the
   work, following the seam rules in `../handoff/SKILL.md`. It must be a
   **single line** — one Enter is one submit, so an embedded newline would
   submit it early.
 
-Author line 3 **silently**. It gets typed visibly into the composer and
+Author line 4 **silently**. It gets typed visibly into the composer and
 lands in scrollback, so reprinting it in the reply shows the same text
 twice with no veto value.
 

@@ -49,26 +49,29 @@ thing at the boundary and dirty memory raises an approval question. After a
 `handoff` has already settled that gate, the checkpoint prints no directive
 and there is a turn for everything.
 
-Exactly four lines:
+Exactly five lines:
 
 ```
+armed
 clear
 /rename <session title>
 /clear
 <continuation prompt>
 ```
 
-- **Line 1** — the literal word `clear`, and nothing else. It says which
+- **Line 1** — the literal word `armed`, and nothing else. It is the
+  transition's state; the hooks own every state after this one.
+- **Line 2** — the literal word `clear`, and nothing else. It says which
   transition this is.
-- **Line 2** — the rename as it will be typed, carrying the title decided
+- **Line 3** — the rename as it will be typed, carrying the title decided
   in step 3.
-- **Line 3** — the literal `/clear`, with no argument.
-- **Line 4** — the continuation prompt: one line of prose that resumes the
+- **Line 4** — the literal `/clear`, with no argument.
+- **Line 5** — the continuation prompt: one line of prose that resumes the
   work, following the seam rules in `../handoff/SKILL.md`. It must be a
   **single line** — one Enter is one submit, so an embedded newline would
   submit it early.
 
-Author line 4 **silently**. It gets typed visibly into the composer and
+Author line 5 **silently**. It gets typed visibly into the composer and
 lands in scrollback, so reprinting it in the reply shows the same text
 twice with no veto value.
 
@@ -92,7 +95,7 @@ in order, from the file just written. Nothing in this skill changes.
 - Reprinting the continuation prompt, or printing the `/clear` line, as
   something for the user to run. One producer of the pasteable form, and it
   is the hook.
-- A `rename` field in the checkpoint payload. The title is line 2 of the
+- A `rename` field in the checkpoint payload. The title is line 3 of the
   file, and the checkpoint rejects the field here.
 - A prompt that carries content the task file should hold. A clear does not
   summarise, so a fact left out of the files is simply gone.
