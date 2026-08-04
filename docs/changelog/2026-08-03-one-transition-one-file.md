@@ -132,12 +132,14 @@ stops there. That rule is not encoded. Each loader gates on state `pending` plus
 its own kind, and a `SessionStart` cannot say whether the transition came from
 the walker's keystroke or the user's fingers — deliberately, since
 `source: "compact"` is authoritative and nothing scrapes the pane. In the happy
-path the two coincide, because the window is seconds. They come apart whenever a
-`pending` carrying an after-line outlives its own transition: a walker killed
-outright writes no `.claude/autodrive.failed`, so the reconcile that would clear
-the stranded file never runs, and a `.failed` that *is* written is only drained
-at the next `UserPromptSubmit` **in that session**. Either way the next
-hand-typed transition of that kind collects a continuation written days ago.
+path the two coincide, because the window is seconds. They come apart when a
+`pending` carrying an after-line outlives its own transition, and one path does
+that: a walker **killed outright** writes no `.claude/autodrive.failed`, so the
+reconcile that would clear the stranded file never runs. The next hand-typed
+transition of that kind then collects a continuation written days ago. A walker
+that fails and *does* record a reason is covered — the drain keys on the
+resolved root rather than the session, so the next `UserPromptSubmit` anywhere
+in that repo reports it and clears the stranded `pending` with it.
 
 The discriminator is already in the file — whether the pending carries an
 after-line. Without one it is `precompact`'s FR-G marker, which is *supposed* to
