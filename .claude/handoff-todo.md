@@ -1,7 +1,11 @@
 ## Remaining
 
-- Execute `plans/2026-08-03-transition-state-machine-plan.md`, then review and
-  approve the transitions-become-modes spec and plan pass 2.
+- Confirm in a fresh session that `@memory/ddaanet/shared-claude.md` appears in
+  the `claudeMd` block — the only proof the import resolved.
+- Fix `shared-claude.md`'s own contradiction in the `ddaanet` tier: it forbids
+  naming the user in anything the agent authors, then says "get David's call".
+  Six repos load that file, so the fix belongs at the tier and needs a push.
+- Review and approve the transitions-become-modes spec, then plan pass 2.
 - Explain how a session's root pointer comes to name a repo none of that
   session's other hooks resolve to, and decide what the checkpoint should do
   about it beyond refusing.
@@ -19,8 +23,7 @@
   `docs/plans/2026-07-31-14-stale-plugin-root-notice.md`, red bats first.
 - Add handoff's `restart` transition kind per `brief-driven-restart.md`,
   including the `SessionEnd` marker hook and a `SessionStart(resume)` matcher —
-  the drift work's matcher-less `SessionStart` entry already covers `resume`. It
-  adds a fourth kind, so it lands after the state machine.
+  the drift work's matcher-less `SessionStart` entry already covers `resume`.
 - Probe what `reason` an interactive `/exit` writes to `SessionEnd`.
 - Patch `handoff-checkpoint`'s gitlore diagnosis into its three real cases, with
   the relaunch as the remedy.
