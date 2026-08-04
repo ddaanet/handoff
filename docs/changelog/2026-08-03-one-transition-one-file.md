@@ -105,12 +105,53 @@ unreachable in practice — `stop-drive.sh` discards a malformed file before it
 can reach `pending` — but the "never sweep a file in flight" invariant now has
 this exception, and the sweep's agent-facing note says both things it can mean.
 
+**A write now destroys a transition in flight, where two files coexisted.**
+`stop-drive.sh` deleted the sentinel outright for kind `rename`, so an
+`autodrive.pending` and a freshly written `autodrive` could both exist and both
+effects landed. There is one slot now. The reachable case is `precompact`'s
+FR-G marker, which sits `pending`/`compact` with an unbounded lifetime waiting
+for the user to type `/compact`: an `/handoff:autoname` or `/handoff:handoff` in
+that window overwrites it, the user then compacts, and the frame is silently not
+re-injected. That is the singleton invariant finally being enforced rather than
+a defect — at most one transition really can be in flight — but it is a
+behaviour change, and it fails the way the design doc names as the expensive
+one: by the successor knowing less, with nothing going red.
+
 **No migration.** A session mid-transition across the upgrade sees a file it
 cannot parse and reports it malformed, which is the correct outcome for a user
 base of one. A `.claude/autodrive.pending` left on disk from before is
 referenced by nothing and swept by nothing; a pre-upgrade walker still waiting
 on that path times out into a spurious non-delivery report. Neither is worth a
 back-compat branch.
+
+## What this makes fixable, and does not fix
+
+A continuation prompt should follow a **driven** transition and nothing else: a
+`/compact` or `/clear` the user types by hand is the prepare-only path, and it
+stops there. That rule is not encoded. Each loader gates on state `pending` plus
+its own kind, and a `SessionStart` cannot say whether the transition came from
+the walker's keystroke or the user's fingers — deliberately, since
+`source: "compact"` is authoritative and nothing scrapes the pane. In the happy
+path the two coincide, because the window is seconds. They come apart whenever a
+`pending` carrying an after-line outlives its own transition: a walker killed
+outright writes no `.claude/autodrive.failed`, so the reconcile that would clear
+the stranded file never runs, and a `.failed` that *is* written is only drained
+at the next `UserPromptSubmit` **in that session**. Either way the next
+hand-typed transition of that kind collects a continuation written days ago.
+
+The discriminator is already in the file — whether the pending carries an
+after-line. Without one it is `precompact`'s FR-G marker, which is *supposed* to
+wait for a manual `/compact`, inject the frame and type nothing. With one it
+belongs to a transition being typed right now. No cheap gate separates them
+here: the sweep cannot tell "in flight this second" from "stranded", which is
+the race it already refuses to run. The fix is a signal from the one process
+that knows — the walker rewrites the state once it has sent the command, and a
+loader delivers the after-line only for that value, so a killed walker degrades
+to FR-G behaviour. That is one more value in this field.
+
+None of this is new: a `.pending` stranded by a killed walker did the same under
+the filenames. Naming the states is what makes it a value rather than a fourth
+name and four more gates.
 
 ## Rejected alternatives
 
@@ -120,6 +161,16 @@ back-compat branch.
   arm-only rule above would have nowhere it needed to live. It is a real
   simplification, and a third change: it alters `autoname`'s contract, today a
   single `Write` and no Bash. Deferred to its own pass, not refused.
+- **Have `write-drive.sh` delete a file whose state is not `armed`, rather than
+  only reporting it.** Proposed on the grounds that such a file is owned by no
+  gate: `Stop` skips it, no loader consumes a kind it does not own, the sweep
+  exempts `pending`. Rejected — the sweep exempts `pending` because of what that
+  state can *do*. An `armed` file left over is picked up by a later `Stop`, which
+  **initiates** a transition nobody asked for; a `pending` one only ever
+  **responds** to a transition the user performed, and cannot cause one. Deleting
+  it would also forbid the prepare-only clear, which is the exact shape of
+  `precompact`'s FR-G marker at the other boundary. The real question underneath
+  it is the continuation binding above, and it is not answered here.
 - **Fold `.failed` in as a fourth state.** Puts a detached writer on a file a
   live session may have rewritten. See above.
 - **Leave the filenames and add `.held`.** The state machine stays implicit and
