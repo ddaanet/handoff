@@ -487,8 +487,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   - `version-guard.sh` — PreToolUse(Write|Edit) hook wired in
     `.claude/settings.json` that refuses agent edits that change
     `plugin.json`'s `.version` (release recipe is the only path).
-  - `install.sh` — first-run wiring (idempotent). To update the
-    vendored copy: `just update-plugin-dev vX.Y.Z`.
+  - `install.sh` — first-run wiring (idempotent).
 - `.envrc` — exports `MARKETPLACE_DIR` (sibling `claude-plugins`
   repo). Required by `just release`; if the marketplace isn't bumped
   alongside the plugin tag, end-users won't see the new version.
@@ -522,8 +521,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
 - All hooks are mechanical and cwd-scoped. They anchor on `handoff_root`
   (the enclosing git-worktree root, else `CLAUDE_PROJECT_DIR`) — never on the
   raw hook-input `.cwd` (drift-prone) nor on `CLAUDE_PROJECT_DIR` directly
-  (pinned to the main tree in a worktree session). Anything that requires
-  judgement belongs in the skill, not a hook.
+  (pinned to the main tree in a worktree session).
 - Keep the skill body lean (≤2000 words); move detailed rationale to
   references or `docs/design.md`.
 - Output paths: `.claude/handoff-task.md` (checkpoint-only, FR3) and
@@ -669,3 +667,5 @@ continuity. See
   the templates in `SKILL.md` are trusted, not schema-checked.
 - Cross-session thread management. This plugin handles one `/clear`
   transition; auto-memory handles durable state.
+
+@memory/ddaanet/shared-claude.md
