@@ -18,7 +18,8 @@ HANDOFF_REL_TODO=".claude/handoff-todo.md"
 # The transition. One composer, one session, at most one transition in flight —
 # so one file, whose *body* names both the transition and where it has got to.
 # Line 1 is the state (armed -> pending -> gone), line 2 the kind. See
-# docs/design.md, "The armed transition is a singleton".
+# docs/design.md, "The armed transition is one file whose body names the
+# transition."
 # shellcheck disable=SC2034
 HANDOFF_REL_DRIVE=".claude/autodrive"
 # Where the walker records a line it could not deliver. A watcher's exit status

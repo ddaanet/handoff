@@ -802,7 +802,7 @@ precompact_payload() {
     repo="$BATS_TEST_TMPDIR/bp-rename"; mkdir -p "$repo/.claude"
     git -C "$repo" init -q
     : > "$repo/.claude/checkpoint-manifest"
-    printf 'rename\n/rename New Title\n' > "$repo/.claude/autodrive"
+    printf 'armed\nrename\n/rename New Title\n' > "$repo/.claude/autodrive"
     run bash -c '
         jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
         | CLAUDE_PROJECT_DIR="$1" TMUX=fake TMUX_PANE="%0" bash "$2"

@@ -1422,6 +1422,19 @@ run_report_failure() {
     [ "$output" = "" ]
 }
 
+# A sentinel that does not parse — here, a `clear` with only one of its four
+# command/prose lines — describes no transition this session can complete.
+# handoff_drive_read returns 1, drive_state is recorded as "malformed", and
+# the sweep (any state other than "pending") discards it exactly as it would
+# a stale armed file.
+@test "report-watcher-failure (malformed sentinel: discarded and reported)" {
+    seed_drive "$tmp" "clear" "/rename A Title"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    echo "$output" | jq -e '.systemMessage | test("discarded")' >/dev/null
+}
+
 # A pending file is legitimate for the whole Stop -> transition window, and that
 # window contains the walker's own submits — each of which is a
 # UserPromptSubmit. Sweeping one here would race SessionStart(compact|clear) and

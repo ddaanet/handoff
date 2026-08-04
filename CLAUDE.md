@@ -120,7 +120,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `handoff-checkpoint` runs — stage every listed path (deletions included).
   `PostToolBatch` (no matcher): measure this session's prompt size and nudge
   the boundary once it crosses a threshold, via `context-threshold.sh`.
-  `Stop`: arm the transition when `.claude/autodrive` exists.
+  `Stop`: arm the transition when `.claude/autodrive` is in state `armed`.
   `SessionStart(compact)`: re-inject the frame and fire the continuation
   prompt after a compaction completes.
   `UserPromptSubmit`: report a non-delivery, sweep a stale sentinel, and
