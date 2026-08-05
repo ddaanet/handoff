@@ -70,24 +70,43 @@ for the first two. It has to: it writes the sentinel directly, so
 
 ### Commit-awareness narrows
 
-`with-commit` becomes: **a commit lands in this session, before the
-transition.**
+`with-commit` becomes: **the ask this checkpoint serves implies a commit.**
 
 The rule it replaces counted a commit landing in a later session, because the
-question was framed as where the memory belongs rather than when it lands. Under
-a driven clear that framing breaks. Withholding gitlore's trigger file defers
-the memory commit to a parent commit's pre-commit hook; if the parent commit is
-on the far side of a `/clear`, no live session owes it, the approved summary
-goes unread, and any memory write in the new session stales the summary and
-aborts the commit that would have collected it.
+question was framed as where the memory belongs rather than whether anything
+present decides it. That is unanswerable in the prepare-only modes. Asked
+whether some commit will eventually carry the change, the agent has no evidence
+in front of it and guesses — a coin flip on a field the schema requires an
+answer to. Asked whether the request in front of it implies a commit, it has the
+request.
 
-So a continuation prompt asking for a commit is evidence of `without-commit`,
-not of `with-commit`. This also unifies with the ordering rule the driven skills
-already carried — the commit lands before the sentinel is written — which is the
-same constraint stated from the other side.
+Under a driven transition the two readings coincide: anything the ask implies
+happens before the command is typed. The prepare-only modes are where the old
+rule sends the agent looking past the end of the request, and the new one does
+not.
 
-Compaction is unaffected: it stays in-session, so a commit after it is still
-this session's.
+The test is interpretation, not a keyword. "handoff and amend" and "handoff and
+ci" both imply a commit and contain neither the word nor a substring of it, so
+this stays a judgement the skill body asks for rather than a match the
+checkpoint could make. It is the same shape as every other field the payload
+carries: the agent supplies one fact, everything downstream is deterministic.
+
+The hazard the old rule walked into is what makes the "even in a later session"
+clause the part that has to go. Withholding gitlore's trigger file defers the
+memory commit to a parent commit's pre-commit hook; if that commit is on the far
+side of a `/clear`, no live session owes it, the approved summary goes unread,
+and any memory write in the new session stales the summary and aborts the commit
+that would have collected it. A commit named in the continuation prompt is on
+that far side, so it is not evidence of `with-commit`. This also unifies with the
+ordering rule the driven skills already carried — the commit lands before the
+sentinel is written — which is the same constraint stated from the other side.
+
+The ask stops at the transition under both kinds. A compaction keeps the
+session, so a commit named in its continuation prompt would in fact have a live
+pre-commit hook to collect the memory — but the rule does not split on that. One
+sentence that holds for every mode is worth more than one correctly deferred
+memory commit, and if the compact case turns out to be a practical limitation it
+can be carved out then, against evidence.
 
 This supersedes the corresponding paragraph of
 `docs/changelog/2026-07-25-commit-awareness.md`.
@@ -138,8 +157,19 @@ only thing that ever holds a sentinel back.
 
 ### `handoff-approved`
 
-A `bin/` shim on the same shape as `handoff-checkpoint`: self-locates, execs
-`scripts/approved.sh`. No stdin, no arguments.
+A single executable at `bin/handoff-approved` — the whole script, not a shim.
+No stdin, no arguments.
+
+`handoff-checkpoint` is a shim over `scripts/checkpoint.sh` because that script
+is 200 lines that source two helpers and are driven directly by bats; `bin/`
+holds the PATH-visible name and nothing else. Neither reason reaches here. This
+script is short enough to read whole, its only caller would be its own shim, and
+`bin/*` is already inside the `shellcheck -x` line, so sourcing
+`../scripts/_lib.sh` from here lints exactly as it does from `scripts/`. It
+self-locates from `$0` the same way the shim does — PATH resolution hands a
+bare-name invocation its own absolute path — so the plugin root costs nothing
+either way. What it still needs from outside is the *project* root, and that
+arrives through the same channel the checkpoint uses, not through the shim.
 
 - Reads the session root pointer, refusing on its absence with the same message
   the checkpoint uses.
@@ -218,7 +248,8 @@ tool, which is why `write-drive.sh` keeps its validation path.
 - `handoff-approved`: no file (exit 2, message names the absence), a file in
   `armed` (exit 2, message names the state), a file in `held` (becomes `armed`,
   every other line preserved), no root pointer (refused), and the invocation
-  path — a `100644` shim never runs, and every other row would pass without it.
+  path — driven by bare name so a `100644` entry point is caught, since every
+  other row would pass without it.
 - `skill` accepting exactly two values, `rename` still forbidden under
   `precompact`.
 
