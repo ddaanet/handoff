@@ -1255,13 +1255,22 @@ run_session_pointer() {
 # The load-bearing negative: the directory is shared and holds files this
 # plugin never wrote, some of them weeks old. The sweep is scoped to the three
 # names it publishes, at the one level it publishes them.
+#
+# The handoff-prefixed file pins the narrower claim — the three names, not the
+# prefix. Collapsing the three -name clauses into one `handoff-*` is the
+# plausible refactor, and every other row here is blind to it: it would claim
+# any later handoff- file in this shared directory whose lifetime is not seven
+# days. A new published name must be added here as deliberately as to the
+# filter.
 @test "session-pointer (never sweeps a file it does not own)" {
     mkdir -p "$HANDOFF_POINTER_DIR/sub"
     touch -t 202001010000 "$HANDOFF_POINTER_DIR/somebody-elses-file" \
+        "$HANDOFF_POINTER_DIR/handoff-unpublished-ancient" \
         "$HANDOFF_POINTER_DIR/sub/handoff-root-nested"
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
     [ -e "$HANDOFF_POINTER_DIR/somebody-elses-file" ]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-unpublished-ancient" ]
     [ -e "$HANDOFF_POINTER_DIR/sub/handoff-root-nested" ]
 }
 

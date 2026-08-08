@@ -1,10 +1,9 @@
 ## Remaining
 
-
 - Implement `plans/2026-08-05-checkpoint-root-via-updatedinput.md` — red bats
   first, including the batched-command row that a bare `VAR=` prefix would only
   pass by accident.
-- Retire memory facts for index headroom. `MEMORY.md` is 23.9KB against the
+- Retire memory facts for index headroom. `MEMORY.md` is 23.1KB against the
   24.4KB cutoff past which the loader silently drops the tail. Classify
   WHEN / HOW / acted-inline first and relocate the acted-inline class, rather
   than shortening hooks to hit a byte target.

@@ -347,16 +347,13 @@ esac
 # decides the file rather than advice the agent is asked to follow — and so the
 # line shapes live in one place instead of being restated as prose in two.
 #
-# `held` versus `armed` names the hazard rather than its trigger. The hazard is
-# keystrokes reaching a pane whose turn is about to end on an approval question:
-# a transition armed alongside that question clears or compacts away the very
-# conversation the answer applies to. So a sentinel that types a transition
-# waits while a memory gate is outstanding, and handoff-approved is what
-# releases it. One that types nothing has no such hazard — the two non-typing
-# kinds keep their old behaviour exactly, and a prepare-only precompact cannot
-# lose its FR-G marker to a gate it has no reason to wait on. Only the memory
-# gate defers: the ledger nudge and the todo boundary are acts, not
-# questions, and Stop comes after them either way.
+# The hazard `held` exists for: keystrokes reaching a pane whose turn is about
+# to end on an approval question. A transition armed alongside that question
+# clears or compacts away the very conversation the answer applies to. So a
+# sentinel that types waits while a memory gate is outstanding, and
+# handoff-approved is what releases it; one that types nothing has no such
+# hazard. Only the memory gate defers — the ledger nudge and the todo boundary
+# are acts, not questions.
 state=armed
 if $typed && [ -n "$memory" ]; then
     state=held
