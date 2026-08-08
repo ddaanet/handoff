@@ -77,9 +77,23 @@ handoff_frame() {
 }
 
 # Shape helpers for handoff_drive_read. Each sets DRIVE_ERR and returns 1.
-_handoff_drive_expect() {  # <found> <want>
-    [ "$1" -eq "$2" ] && return 0
-    DRIVE_ERR="kind \`$DRIVE_KIND\` takes exactly $2 lines (found $1)"
+
+# <found> <accepted...>. More than one count is legal on the driven kinds: the
+# continuation line is optional on both, and the command line is optional on
+# `compact` (its kind line alone is the prepare-only marker).
+_handoff_drive_expect() {
+    local found="$1" want list; shift
+    for want in "$@"; do
+        [ "$found" -eq "$want" ] && return 0
+    done
+    if [ "$#" -eq 1 ]; then
+        list="exactly $1 lines"
+    else
+        list="$1"; shift
+        while [ "$#" -gt 1 ]; do list="$list, $1"; shift; done
+        list="$list or $1 lines"
+    fi
+    DRIVE_ERR="kind \`$DRIVE_KIND\` takes $list (found $found)"
     return 1
 }
 
@@ -130,13 +144,19 @@ _handoff_drive_prose() {
 # Line 1 is the state and line 2 is the kind, and the kind fixes the shape — so
 # the remaining lines need no separator, and each kind keeps its own rules:
 #
+#   held     written, but not yet the turn's to arm: a memory approval is
+#            outstanding, and handoff-approved is what releases it
 #   armed    the transition this turn's Stop will arm
 #   pending  armed, in flight, waiting on its confirming SessionStart
 #
 #   rename   /rename <title>
-#   compact  /compact [directive]         + continuation prose
+#   compact  /compact [directive]         [+ continuation prose]
 #   compact  (kind line alone: a transition is expected, nothing is typed)
-#   clear    /rename <title>, /clear      + continuation prose
+#   clear    /rename <title>, /clear      [+ continuation prose]
+#
+# The continuation is optional on both driven kinds: typing the transition and
+# submitting a prompt into what it opens are separate decisions, and the payload
+# the checkpoint composes this file from carries them as separate fields.
 #
 # The state is reported, never interpreted: which state a caller wants is the
 # caller's business, and the parser serves the Stop gate, both loaders and the
@@ -166,9 +186,9 @@ handoff_drive_read() {
     fi
     DRIVE_STATE="${lines[0]}"
     case "$DRIVE_STATE" in
-        armed | pending) ;;
+        held | armed | pending) ;;
         *)
-            DRIVE_ERR="line 1 must be the transition state — armed or pending — not \`$DRIVE_STATE\`"
+            DRIVE_ERR="line 1 must be the transition state — held, armed or pending — not \`$DRIVE_STATE\`"
             return 1 ;;
     esac
 
@@ -188,19 +208,23 @@ handoff_drive_read() {
             # The kind line alone is the prepare-only marker: nothing is typed,
             # but the transition is expected, so the loader still injects.
             [ "$n" -eq 2 ] && return 0
-            _handoff_drive_expect "$n" 4 || return 1
+            _handoff_drive_expect "$n" 2 3 4 || return 1
             _handoff_drive_command "${lines[2]}" 3 "/compact" optional || return 1
-            _handoff_drive_prose "${lines[3]}" 4 || return 1
             DRIVE_BEFORE=("${lines[2]}")
-            DRIVE_AFTER=("${lines[3]}")
+            if [ "$n" -eq 4 ]; then
+                _handoff_drive_prose "${lines[3]}" 4 || return 1
+                DRIVE_AFTER=("${lines[3]}")
+            fi
             ;;
         clear)
-            _handoff_drive_expect "$n" 5 || return 1
+            _handoff_drive_expect "$n" 4 5 || return 1
             _handoff_drive_command "${lines[2]}" 3 "/rename" arg || return 1
             _handoff_drive_command "${lines[3]}" 4 "/clear" none || return 1
-            _handoff_drive_prose "${lines[4]}" 5 || return 1
             DRIVE_BEFORE=("${lines[2]}" "${lines[3]}")
-            DRIVE_AFTER=("${lines[4]}")
+            if [ "$n" -eq 5 ]; then
+                _handoff_drive_prose "${lines[4]}" 5 || return 1
+                DRIVE_AFTER=("${lines[4]}")
+            fi
             ;;
         *)
             DRIVE_ERR="line 2 must be the transition kind — rename, compact or clear — not \`$DRIVE_KIND\`"

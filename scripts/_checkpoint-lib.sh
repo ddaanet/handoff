@@ -143,35 +143,40 @@ checkpoint_memory_directive() {
     fi
 }
 
+# Emit the instruction that releases a held transition. Composed onto the end of
+# the memory directive rather than standing alone, because the memory gate is
+# the only thing that ever holds a sentinel back — a second block would read as
+# a second, unrelated errand.
+#
+# One act and nothing else. There is no absent result to reassure about — the
+# call exited 0 and this line is its answer — so anything past the act would
+# only hand the reader the sentinel's state vocabulary to verify and narrate.
+checkpoint_arming_directive() {
+    printf '%s\n' \
+"Once that is done, run \`handoff-approved\` (Bash, no arguments)."
+}
+
 # Registry of known workflow-owned progress ledgers, as project-relative paths.
 # Prints the live one and returns 0; returns 1 when there is none. One row per
-# workflow — the single place that knows a foreign ledger's layout, so the nudge
-# and the suppression below can never disagree about what exists. Callers
+# workflow — the single place that knows a foreign ledger's layout. Callers
 # interpolate what this prints; nothing downstream hardcodes a ledger path.
 #
-# What has to be detected is **liveness**, not presence. superpowers SDD (6.2.0)
-# gives each plan its own git-ignored workspace at
-# `.superpowers/sdd/<plan-basename>/progress.md`, and deletes that directory when
-# the plan's final whole-branch review comes back clean. So two things do not
-# count as a ledger:
+# Liveness, not presence. superpowers SDD (6.2.0) gives each plan its own
+# git-ignored workspace at `.superpowers/sdd/<plan-basename>/progress.md` and
+# deletes that directory once the plan's final whole-branch review is clean. Two
+# things therefore do not count as a ledger:
 #
 #   - The pre-6.2.0 flat path `.superpowers/sdd/progress.md`. Nothing in SDD's
-#     lifecycle removes it — it sits in no workspace — and the skill names it
-#     explicitly as another plan's progress, to be left in place. Treating it as
-#     authoritative suppressed handoff-todo.md in a session that ran no SDD at
-#     all, which is the whole defect this shape exists to avoid, inverted.
+#     lifecycle removes it, and the skill names it as another plan's progress,
+#     to be left in place.
 #   - A file at a workspace path whose first line is not SDD's identity line,
-#     `# SDD ledger — plan: <plan file>`. That line is what separates a live
-#     ledger from a hand-rolled file that happens to sit in the right place, and
-#     it costs one read. A near-miss fails open: no ledger found means
-#     handoff-todo.md gets written, which is the safe direction.
+#     `# SDD ledger — plan: <plan file>`.
 #
-# Several workspaces can coexist — an abandoned run leaves one behind — so the
-# most recently modified wins. That is the honest signal for the one in play;
-# glob order is not. Equal mtimes fall back to glob order, which is lexical.
+# Several workspaces can coexist, so the most recently modified wins; equal
+# mtimes fall back to glob order, which is lexical. A near-miss fails open.
 #
 # Read-only by contract: a stale workspace is another workflow's file, never
-# ours to delete or rewrite however abandoned it looks.
+# ours to delete or rewrite.
 checkpoint_ledger_path() {
     local root="$1" f best='' first
 
@@ -213,26 +218,24 @@ checkpoint_sdd_directive() {
 "" \
 "A task that completed but is missing from the ledger can be re-dispatched after compaction — the most expensive SDD failure." \
 "" \
-"That ledger is this session's task list. Do not also write .claude/handoff-todo.md — two ledgers drift, and the stale one gets believed."
+"That ledger holds this plan's tasks. Keep them out of .claude/handoff-todo.md, which holds only work outstanding outside the plan."
 }
 
-# Emit the todo-file suppression when a workflow-owned ledger already tracks the
-# session's task list. Silent otherwise — the common case, where handoff-todo.md
-# is the only ledger and the checkpoint writes it normally.
+# Emit the ledger/todo-file boundary when a workflow-owned ledger is live.
+# Silent otherwise — the common case, where handoff-todo.md is the only list.
 #
-# The handoff path's counterpart to the stand-down that checkpoint_sdd_directive
-# folds into its nudge: the ledger outlives a /clear exactly as it outlives a
+# The handoff path's counterpart to the boundary checkpoint_sdd_directive folds
+# into its nudge: the ledger outlives a /clear exactly as it outlives a
 # compaction. The wording differs on one point, because the orderings differ.
-# precompact's checkpoint call runs BEFORE the writes it drives, so "do not
-# write it" lands in time. handoff's checkpoint call carries the writes in the
-# SAME payload, so this always arrives after the file may already exist — a
-# bare prohibition is a no-op there, and the directive has to name the cleanup
-# instead.
-checkpoint_todo_suppression() {
+# precompact's checkpoint call runs BEFORE the writes it drives, so "keep them
+# out" lands in time. handoff's carries the writes in the SAME payload, so this
+# always arrives after the file may already hold them, and has to name the
+# removal too.
+checkpoint_todo_boundary() {
     local root="$1" ledger
 
     ledger=$(checkpoint_ledger_path "$root") || return 0
 
     printf '%s\n' \
-"This session's task list lives in a workflow-owned progress ledger at $ledger, which survives the /clear. That file is the ledger: .claude/handoff-todo.md must not exist alongside it — delete it if you have already written it, and do not write it. Bring the ledger current instead if it has drifted."
+"A workflow-owned progress ledger at $ledger holds this plan's tasks, and it survives the /clear. Keep those tasks out of .claude/handoff-todo.md, removing them if they are already there; that file holds only work outstanding outside the plan. Bring the ledger current if it has drifted."
 }

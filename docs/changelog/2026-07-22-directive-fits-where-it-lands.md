@@ -1,5 +1,12 @@
 # A directive must fit where in the turn it lands (2026-07-22)
 
+> **Superseded 2026-08-08** (see [The ledger and the todo file are different
+> scopes](2026-08-08-ledger-and-todo-are-different-scopes.md)) — what the two
+> directives ask for. Neither stands `handoff-todo.md` down any more; they
+> exclude the plan's own tasks from it. The ordering argument below is why
+> they still differ, and it is unchanged: precompact's lands before the
+> writes, handoff's alongside them, so only handoff names a removal.
+
 The todo-file suppression shipped as one sentence composed by both probes:
 *"do not write `.claude/handoff-todo.md`."* Correct for precompact, which runs
 its probe at step 2 and writes at step 3. A no-op for handoff, which runs the

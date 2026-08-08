@@ -1,27 +1,42 @@
 ---
 name: precompact
-description: Commit durable memory and snapshot the in-progress task before a manual `/compact`, so the compaction has nothing left to lose. Prepares only — it types nothing and runs no command. Use when the user asks to "precompact", "prepare compaction", "prepare compact", "before compact", "before I compact", "about to compact", "flush memory before compact", or otherwise signals an imminent manual `/compact`. When the user wants the compaction carried out rather than prepared — "compact and continue" — use the compact-continue skill instead; for an imminent `/clear` or end of task, use the handoff skill.
+description: Commit durable memory and snapshot the in-progress task before a `/compact`, so the compaction has nothing left to lose — and, when asked, carry the compaction out: run `/compact` and submit a continuation prompt into the compacted context. Use when the user asks to "precompact", "prepare compaction", "prepare compact", "before compact", "before I compact", "about to compact", "flush memory before compact", "compact and continue", "compact then continue", "do this after compact", "compact and pick up", or otherwise signals an imminent `/compact`. For an imminent `/clear` or end of task, use the handoff skill.
 ---
 
-# precompact — Prepare for Compaction
+# precompact — Task Snapshot at the Compact Boundary
 
 Compaction paraphrases the conversation; disk survives it untouched. So:
-put what matters on disk before it runs.
-
-This skill prepares and stops. It flushes memory, writes the task and todo
-files, and marks the compaction as expected. It types nothing, runs no
-command, and authors no continuation prompt — `compact-continue` is the
-skill that adds those.
+put what matters on disk before it runs. When the user wants the compaction
+carried out rather than prepared, this skill drives it too — the `/compact`
+itself, and the prompt that resumes the work on the far side.
 
 ## Steps
 
 1. Decide, from the request and the state of the work and without making
-   any tool calls, whether a commit is going to carry this session's
-   memory. Two answers, of equal weight: **`with-commit`** — a commit is
-   going to land the change that memory documents, whether this request is
-   what commits it or a later one is — and **`without-commit`** — no such
-   commit is coming. There is no default, and the answer is about where the
-   memory belongs rather than which command the user typed.
+   any tool calls, three things. None of them has a default: a default is
+   the answer given by an agent that never considered the question, and
+   considering it is the whole contribution.
+
+   **Is the transition typed?** `compact: true` when the user asked for the
+   compaction to be carried out — "compact and continue", "compact then
+   continue" — or the focus directive itself (`compact: "keep the parser
+   work"`) when one would help the summariser keep the right material.
+   `compact: false` when they are preparing one they will run themselves —
+   "precompact", "before I compact". A request that asks for the compaction
+   **is** the authorization to compact; do not ask whether to proceed.
+
+   **Is there a continuation prompt?** `continue` is one line of prose,
+   submitted into the compacted context, or `null` when nothing follows it.
+   It is only meaningful alongside a typed transition — nothing would type
+   it otherwise, and the checkpoint rejects the combination. The `handoff`
+   skill beside this one holds the seam rules that decide its content.
+
+   **Does the ask imply a commit?** Two answers of equal weight:
+   **`with-commit`** — the request this call serves implies a commit, a
+   test of interpretation rather than of keywords — and **`without-commit`**
+   — it does not. The ask stops at the transition: a commit named in a
+   continuation prompt is on the far side of it, so it is not evidence of
+   `with-commit`.
 
    Under `with-commit`, memory bodies state present-tense truth — the
    change described as made rather than proposed. Memory phrased as pending
@@ -45,55 +60,67 @@ skill that adds those.
    skill's own directory. Read that file when the rules matter.
 
    Then run `handoff-checkpoint` (Bash) with `"skill": "precompact"` (no
-   `rename` field — precompact never renames), the `commit` answer from
-   step 1, and `task`/`todo` each either the drafted content or `null`:
+   `rename` field — precompact never renames), the three answers from step
+   1, and `task`/`todo` each either the drafted content or `null`:
 
    ```
    handoff-checkpoint <<'JSON'
    {
      "skill": "precompact",
      "commit": "<with-commit|without-commit>",
+     "compact": <true|false|"focus directive">,
+     "continue": <"one line of prose"|null>,
      "task": {"file_path": "<abs path to>/.claude/handoff-task.md", "content": "<task content, or null>"},
      "todo": {"file_path": "<abs path to>/.claude/handoff-todo.md", "content": "<todo content, or null>"}
    }
    JSON
    ```
 
-   Follow any directive it prints **exactly**. Nothing printed → nothing
+   Author the continuation prompt **silently**. It gets typed visibly into
+   the composer and lands in scrollback, so reprinting it in the reply
+   shows the same text twice with no veto value.
+
+   Even under `compact: false` the checkpoint writes the transition file.
+   Nothing is typed; what it records is that a compaction is *expected*,
+   which is what the frame's re-injection is gated on. Without it the
+   compaction re-injects nothing and the summariser's paraphrase is all
+   that survives of the files just written.
+
+   When the ask includes a commit, it lands **before** the transition is
+   armed: before this call when nothing holds the sentinel back, and before
+   `handoff-approved` when the directive in step 4 does.
+
+4. Follow any directive it prints **exactly**. Nothing printed → nothing
    further to do. The checkpoint owns the decision; do not re-derive or
    verify it. A non-zero exit names the offending field on stderr — fix the
    payload and retry.
 
-4. Write `./.claude/autodrive`, containing exactly two lines:
+   A driven compaction whose directive needs an answer is written but not
+   armed, and the directive says how to release it. That is what keeps the
+   compaction from running at the end of the turn that asked the question.
 
-   ```
-   armed
-   compact
-   ```
-
-   Those two words are the whole file: the state the hooks take it from, and
-   the transition it describes. Nothing is armed to type; what it records is
-   that a compaction is *expected*, which is what the frame's re-injection is
-   gated on. Without it the compaction that follows re-injects nothing, and
-   the summariser's paraphrase is all that survives of the files just
-   written.
-
-5. Once nothing is left awaiting an answer, end on one line naming what
-   comes next. Under `with-commit` that is the commit, then the compaction
-   — "Ready to commit, then /compact". Under `without-commit` it is the
-   compaction alone. One line: the frame is on disk and this is a handover,
-   not a report.
+5. Once nothing is left awaiting an answer, end on one line. Where the
+   compaction is prepared, name what comes next: under `with-commit` the
+   commit then the compaction — "Ready to commit, then /compact" — and
+   under `without-commit` the compaction alone. Where it is driven, one
+   line saying the compaction is armed, and the turn ends. One line: the
+   frame is on disk and this is a handover, not a report.
 
 The normal case — nothing durable, clean memory, no directive — is one
-silent checkpoint call, one file write, and one line of reply.
+silent checkpoint call and one line of reply.
 
 ## Anti-patterns
 
-- Running `/compact`, or arming anything that types it. This skill's
-  contract is that it touches no composer; a user who wants the compaction
-  driven invokes `compact-continue`.
-- Authoring a continuation prompt. There is nothing here to type it, and an
-  unprinted line is one the user cannot run.
+- Running `/compact` yourself, or telling the user to run it under a driven
+  transition. Both are settled by the request and the armed file.
+- Reprinting the continuation prompt, or printing the `/compact` line, as
+  something for the user to run. There is one producer of that pasteable
+  form and it is the hook — which is also what covers a session outside
+  tmux, where there is no composer to type into.
+- Authoring a continuation prompt for a prepared compaction. Nothing types
+  it, and the checkpoint rejects it.
+- Writing `.claude/autodrive` directly. The checkpoint composes it from the
+  payload; a hand-written one is a second writer of the same channel.
 - A `rename` field in the checkpoint payload. A rename is
   `/handoff:autoname`'s job when wanted, and the checkpoint rejects it here.
 - Forcing a memory write to have something to show. An empty flush is the

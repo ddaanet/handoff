@@ -110,7 +110,14 @@ fi
 # An autodrive is armed at the Stop of the turn that writes it, and that Stop
 # leaves it `pending` or removes it. So one still in state `armed` when a later
 # turn begins never armed.
-if [[ -n "$drive_state" && "$drive_state" != "pending" ]]; then
+#
+# `held` is the exception, and the reason this is a list rather than "anything
+# but pending": a held transition is *waiting* on an approval whose answer
+# arrives at this very hook, so surviving the turn boundary is what it is for.
+# Nothing else acts on that state — no gate fires on it, only handoff-approved
+# leaves it, and the next checkpoint call overwrites the file outright — so a
+# stale one is inert rather than dangerous.
+if [[ -n "$drive_state" && "$drive_state" != "pending" && "$drive_state" != "held" ]]; then
     rm -f "$drive"
     msgs+=("stale autodrive discarded — its turn ended without arming")
     notes+=("A .claude/autodrive file was still on disk when this turn began, and this session cannot act on it: either its Stop never fired to arm it — that turn ended on an interrupt, a crash or a quit — or it does not parse in this version's format. Either way it has been discarded, so the transition it described did not happen and cannot fire into unrelated work later.")

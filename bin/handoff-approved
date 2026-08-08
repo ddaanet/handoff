@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# handoff-approved: arm the transition the checkpoint left held.
+#
+# The checkpoint writes a transition-typing sentinel in state `held` when a
+# memory approval is outstanding, so the keystrokes cannot reach a pane whose
+# turn is about to end on that question. This is the one command that leaves
+# that state, and the directive the checkpoint printed is what names it.
+#
+# The whole script, not a shim over scripts/: it is short enough to read at
+# once, its only caller would be its own shim, and bin/* is already inside the
+# `shellcheck -x` line, so sourcing ../scripts/_lib.sh from here lints exactly
+# as it does from scripts/. It self-locates from $0 the way the checkpoint shim
+# does — PATH resolution hands a bare-name invocation its own absolute path.
+#
+# NFR1: no git and no tmux. It rewrites one file in the agent's own worktree;
+# the transition itself is armed at Stop like any other.
+set -euo pipefail
+
+# shellcheck source-path=SCRIPTDIR source=../scripts/_lib.sh
+source "$(dirname "$0")/../scripts/_lib.sh"
+
+err() {
+    printf 'handoff-approved: %s\n' "$1" >&2
+    exit 2
+}
+
+# The same channel the checkpoint reads its root from, and the same refusal:
+# this runs in the agent's Bash, where CLAUDE_PROJECT_DIR is unset and $PWD is
+# wherever the session cwd has drifted to.
+session_id="${CLAUDE_CODE_SESSION_ID:-}"
+[ -n "$session_id" ] \
+    || err "CLAUDE_CODE_SESSION_ID is unset, so this session's root pointer cannot be addressed"
+pointer="$(handoff_pointer_path "$session_id")"
+[ -f "$pointer" ] \
+    || err "no session root pointer at $pointer; restart the session to publish one"
+root="$(head -n1 "$pointer")"
+[ -d "$root" ] || err "the session root pointer at $pointer does not name a directory (got \"$root\")"
+
+drive="$root/$HANDOFF_REL_DRIVE"
+[ -f "$drive" ] || err "no transition to arm: $HANDOFF_REL_DRIVE does not exist"
+
+handoff_drive_read "$drive" || err "$HANDOFF_REL_DRIVE is malformed — $DRIVE_ERR"
+
+# Only `held` is this command's to move. An `armed` one is already this turn's
+# to fire and a `pending` one is in flight, so rewriting either would say the
+# approval released something it did not.
+[ "$DRIVE_STATE" = "held" ] \
+    || err "the transition is in state \`$DRIVE_STATE\`, not \`held\`; nothing to arm"
+
+handoff_drive_arm "$drive" armed \
+    || err "could not rewrite $HANDOFF_REL_DRIVE"
+
+printf 'handoff: %s armed; it runs at the end of this turn.\n' "$DRIVE_KIND"

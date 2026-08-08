@@ -291,6 +291,24 @@ read_drive() {
     [ "${DRIVE_AFTER[0]}" = "pick up per the task file" ]
 }
 
+# The continuation is optional on both driven kinds: driving a transition and
+# submitting a prompt into what it opens are separate decisions, and the cross
+# product is what the two payload fields express.
+@test "handoff_drive_read (clear, no continuation): typed, nothing submitted after" {
+    read_drive "armed" "clear" "/rename A Title" "/clear"
+    [ "$DRIVE_KIND" = clear ]
+    [ "${#DRIVE_BEFORE[@]}" -eq 2 ]
+    [ "${DRIVE_BEFORE[1]}" = "/clear" ]
+    [ "${#DRIVE_AFTER[@]}" -eq 0 ]
+}
+
+@test "handoff_drive_read (compact, no continuation): typed, nothing submitted after" {
+    read_drive "armed" "compact" "/compact focus on the parser"
+    [ "$DRIVE_KIND" = compact ]
+    [ "${DRIVE_BEFORE[0]}" = "/compact focus on the parser" ]
+    [ "${#DRIVE_AFTER[@]}" -eq 0 ]
+}
+
 # The state a Stop has already consumed. The parser does not know which caller
 # wants which state — it reports the value and the gates decide.
 @test "handoff_drive_read (pending): parsed like any other state" {
@@ -306,11 +324,20 @@ read_drive() {
     [[ "$output" == *"transition kind"* ]]
 }
 
+# The state a memory approval holds a typing transition in, so the keystrokes
+# do not reach a pane whose turn is about to end on the approval question.
+@test "handoff_drive_read (held): parsed like any other state" {
+    read_drive "held" "clear" "/rename A Title" "/clear" "pick up per the task file"
+    [ "$DRIVE_STATE" = held ]
+    [ "$DRIVE_KIND" = clear ]
+    [ "${DRIVE_AFTER[0]}" = "pick up per the task file" ]
+}
+
 @test "handoff_drive_read (unknown state): rejected, naming the states" {
-    run read_drive "held" "clear" "/rename A Title" "/clear" "resume"
+    run read_drive "queued" "clear" "/rename A Title" "/clear" "resume"
     [ "$status" -ne 0 ]
     [[ "$output" == *"transition state"* ]]
-    [[ "$output" == *"held"* ]]
+    [[ "$output" == *"queued"* ]]
 }
 
 # The state line alone. It says which state, but there is no transition for it
@@ -345,13 +372,13 @@ read_drive() {
     [ "$status" -ne 0 ]
     [[ "$output" == *"exactly 3 lines"* ]]
 
-    run read_drive "armed" "clear" "/rename A Title" "/clear"
+    run read_drive "armed" "clear" "/rename A Title"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"exactly 5 lines"* ]]
+    [[ "$output" == *"4 or 5 lines"* ]]
 
     run read_drive "armed" "compact" "/compact" "continue" "extra"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"exactly 4 lines"* ]]
+    [[ "$output" == *"2, 3 or 4 lines"* ]]
 }
 
 @test "handoff_drive_read (command literal not in the kind's slot): rejected" {
@@ -727,6 +754,23 @@ run_load_handoff() {
     echo "$output" | jq -e 'has("hookSpecificOutput") | not' >/dev/null
 }
 
+# A driven clear with no continuation: the `/clear` was typed by the walker at
+# Stop, and there is nothing to submit into the session it opened. The pending
+# file is still this loader's to consume — it is what confirms the `/clear`
+# landed — and the frame still goes out.
+@test "load-handoff (clear, pending with no continuation: consumed, frame only)" {
+    seed_pending "$tmp" "clear" "/rename A Title" "/clear"
+    run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("hook smoke test")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("resume") | not' >/dev/null
+    # Without the widened shape this row passes for the wrong reason: the
+    # sentinel fails to parse, and the malformed branch also consumes the file
+    # and says nothing about resuming.
+    echo "$output" | jq -e '.systemMessage | test("malformed") | not' >/dev/null
+}
+
 @test "load-handoff (clear, no pending: frame only, silent about any transition)" {
     run_load_handoff "$tmp" clear 'TMUX=fake TMUX_PANE="%0"'
     [ "$status" -eq 0 ]
@@ -829,13 +873,13 @@ run_write_drive() {
 }
 
 @test "write-drive (malformed: directive on both channels, file survives)" {
-    seed_drive "$tmp" "clear" "/rename A Title" "/clear"
+    seed_drive "$tmp" "clear" "/rename A Title"
     run_write_drive "$tmp"
     [ "$status" -eq 0 ]
     [ -f "$tmp/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("5 lines")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("4 or 5 lines")' >/dev/null
 }
 
 @test "write-drive (unknown kind: directive names the kinds)" {
@@ -1047,6 +1091,18 @@ run_load_compact() {
     echo "$output" | jq -e 'has("hookSpecificOutput") | not' >/dev/null
 }
 
+# A driven compaction with no continuation — the /compact line was typed, and
+# nothing follows it. Same effect here as the prepare-only marker, from a
+# different sentinel: consume, inject, type nothing.
+@test "load-compact (pending with no continuation: consumed, frame only)" {
+    seed_pending "$tmp" "compact" "/compact keep the parser work"
+    run_load_compact "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("hook smoke test")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("frame re-injected")' >/dev/null
+}
+
 # FR-G's other half: the prepare-only marker arrives here as a pending file with
 # no after-line. Inject the frame, type nothing.
 @test "load-compact (empty after-sequence: frame injected, nothing typed)" {
@@ -1243,7 +1299,11 @@ run_context_threshold() {
     usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
     run_context_threshold "$tmp/t.jsonl"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"compact-continue"* ]]
+    [[ "$output" == *"/handoff:precompact"* ]]
+    # Naming the skill is not enough: it prepares by default, and what the
+    # crossing calls for is the compaction actually happening. The ask is what
+    # the skill reads the transition decision off.
+    [[ "$output" == *"carry the compaction out"* ]]
     [[ "$output" == *"170000"* ]]
     [ -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
 }
@@ -1303,14 +1363,14 @@ run_context_threshold() {
       usage_entry m2 100000 30000 40000; } > "$tmp/t.jsonl"
     run_context_threshold "$tmp/t.jsonl"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"compact-continue"* ]]
+    [[ "$output" == *"/handoff:precompact"* ]]
 }
 
 @test "context-threshold (threshold override honoured)" {
     usage_entry m1 1000 500 500 > "$tmp/t.jsonl"
     HANDOFF_CONTEXT_THRESHOLD=1500 run_context_threshold "$tmp/t.jsonl"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"compact-continue"* ]]
+    [[ "$output" == *"/handoff:precompact"* ]]
 }
 
 @test "context-threshold (no transcript file: silent)" {
@@ -1446,6 +1506,21 @@ run_report_failure() {
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
     [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
+}
+
+# `held` is the one state that legitimately survives a turn boundary: the
+# approval round trip it waits on costs at least one turn, and the answer arrives
+# at a UserPromptSubmit — this hook. Nothing else acts on a held file (no gate
+# fires on that state, only handoff-approved leaves it, and the next checkpoint
+# call overwrites it outright), so sweeping it here would silently cancel the
+# transition the user is in the middle of approving.
+@test "report-watcher-failure (held file: left alone, no report)" {
+    printf '%s\n' "held" "clear" "/rename A Title" "/clear" "resume" \
+        > "$tmp/.claude/autodrive"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "held" ]
 }
 
 @test "report-watcher-failure (failure and stale file: one report covering both)" {

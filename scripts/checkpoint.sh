@@ -31,8 +31,23 @@ payload="$(cat)"
 jq -e . >/dev/null 2>&1 <<<"$payload" || err "payload" "malformed JSON on stdin"
 
 field_get() { jq -r ".$1" <<<"$payload"; }
+field_type() { jq -r ".$1 | type" <<<"$payload"; }
 field_is_null() { jq -e ".$1 == null" >/dev/null 2>&1 <<<"$payload"; }
 field_has_key() { jq -e ".$1 | has(\"$2\")" >/dev/null 2>&1 <<<"$payload"; }
+payload_has_key() { jq -e "has(\"$1\")" >/dev/null 2>&1 <<<"$payload"; }
+
+# One line, with something on it: the shape of every string that becomes a line
+# of the sentinel. The format is line-oriented, so an embedded newline would
+# make the file unreadable — and in the TUI one Enter is one submit, so it would
+# also submit the line early.
+require_one_line() {
+    local field="$1" value="$2"
+    [ -n "$(printf '%s' "$value" | tr -d '[:space:]')" ] \
+        || err "$field" "must not be empty or whitespace only"
+    case "$value" in
+        *$'\n'*) err "$field" "must be a single line" ;;
+    esac
+}
 
 # The root cannot be resolved here: this is the agent's Bash, where
 # CLAUDE_PROJECT_DIR is unset and $PWD is wherever the session cwd has drifted
@@ -49,17 +64,15 @@ pointer="$(handoff_pointer_path "$session_id")"
 root="$(head -n1 "$pointer")"
 [ -d "$root" ] || err "root" "the session root pointer at $pointer does not name a directory (got \"$root\")"
 
-# Four skills, two boundaries. The judgment the directive output encodes is
-# per-boundary — the same whether or not the agent types the command afterwards
-# — so the composition below keys on the boundary and the two skills at each
-# one cannot drift in what they tell the agent.
-skills='"handoff", "handoff-continue", "precompact" or "compact-continue"'
+# Two skills, one per boundary. Whether the transition is typed is a field of
+# the payload, not a skill of its own — the judgment the directive output
+# encodes was always per-boundary, and the driven skills only ever added the
+# keystrokes.
 skill="$(field_get skill)"
 case "$skill" in
-    handoff | handoff-continue) boundary=clear ;;
-    precompact | compact-continue) boundary=compact ;;
-    "" | null) err "skill" "required, one of $skills" ;;
-    *) err "skill" "must be one of $skills, got \"$skill\"" ;;
+    handoff | precompact) ;;
+    "" | null) err "skill" 'required, one of "handoff" or "precompact"' ;;
+    *) err "skill" "must be \"handoff\" or \"precompact\", got \"$skill\"" ;;
 esac
 
 commit_mode="$(field_get commit)"
@@ -70,19 +83,88 @@ case "$commit_mode" in
 esac
 
 # rename: required under skill:"handoff", forbidden (a schema error, not a
-# silent ignore) under all three others. The two driven skills carry their
-# title in the sentinel they write, as one of its lines; precompact renames
-# nothing at all. Keeping it required in the one place it belongs is what makes
-# a `handoff` call that forgot its title an error rather than a silent
-# non-rename.
+# silent ignore) under "precompact", which renames nothing at all. Keeping it
+# required in the one place it belongs is what makes a `handoff` call that
+# forgot its title an error rather than a silent non-rename.
 rename=""
 if ! field_is_null rename; then
     rename="$(field_get rename)"
 fi
 if [ "$skill" = "handoff" ]; then
     [ -n "$rename" ] || err "rename" 'required when skill is "handoff"'
+    title="$(printf '%s' "$rename" | tr -s '[:space:]' ' ')"
+    title="${title# }"; title="${title% }"
+    [ -n "$title" ] || err "rename" "must be a non-empty title"
 else
     [ -z "$rename" ] || err "rename" "forbidden when skill is \"$skill\""
+fi
+
+# The transition, and the continuation prompt submitted into what it opens.
+# Both required, with no default: a default is the answer given by an agent that
+# never considered the question, and considering it is the whole contribution.
+#
+# The transition field is named after the command it types, and its value is
+# that command's argument — /clear takes none, so it is a bool; /compact takes
+# an optional focus directive, so it is a bool or the directive itself. The
+# other boundary's field is a schema error rather than a silent ignore, for the
+# same reason `rename` is.
+#
+# `false` does not mean "no sentinel". It means the command is not typed: the
+# file still records which transition is expected, which is what both loaders
+# gate the frame's re-injection on.
+drive_kind=""
+drive_cmds=()
+typed=false
+if [ "$skill" = "handoff" ]; then
+    ! payload_has_key compact || err "compact" 'forbidden when skill is "handoff"'
+    payload_has_key clear || err "clear" 'required when skill is "handoff"'
+    [ "$(field_type clear)" = "boolean" ] || err "clear" "must be true or false"
+    if [ "$(field_get clear)" = "true" ]; then
+        typed=true
+        drive_kind=clear
+        drive_cmds=("/rename $title" "/clear")
+    else
+        # No transition, but the session is still renamed — the same one-line
+        # sentinel /handoff:autoname writes.
+        drive_kind=rename
+        drive_cmds=("/rename $title")
+    fi
+else
+    ! payload_has_key clear || err "clear" 'forbidden when skill is "precompact"'
+    payload_has_key compact || err "compact" 'required when skill is "precompact"'
+    drive_kind=compact
+    case "$(field_type compact)" in
+        boolean)
+            if [ "$(field_get compact)" = "true" ]; then
+                typed=true
+                drive_cmds=("/compact")
+            fi
+            ;;
+        string)
+            directive="$(field_get compact)"
+            require_one_line "compact" "$directive"
+            typed=true
+            drive_cmds=("/compact $directive")
+            ;;
+        *) err "compact" "must be true, false, or a focus directive string" ;;
+    esac
+fi
+
+payload_has_key continue || err "continue" "required, either null or one line of prose"
+continuation=""
+if ! field_is_null continue; then
+    [ "$(field_type continue)" = "string" ] \
+        || err "continue" "must be null or one line of prose"
+    continuation="$(field_get continue)"
+    require_one_line "continue" "$continuation"
+    # The walker dispatches on the leading character: a prose line that looked
+    # like a command would be confirmed by the wrong primitive.
+    case "$continuation" in
+        /*) err "continue" "must not begin with \`/\`" ;;
+    esac
+    # Nothing would type it. A silent drop loses a prompt the agent authored and
+    # reports nothing about it.
+    $typed || err "continue" "must be null when the transition is not typed"
 fi
 
 # Validate one Write-form-or-null field ($1 = "task", never Edit) or one
@@ -241,25 +323,9 @@ if [ "$todo_action" != "none" ]; then
     fi
 fi
 
-if [ -n "$rename" ]; then
-    # The sentinel opens with its state, then the kind, then the literal
-    # keystrokes — the title becomes the argument of a `/rename` line under a
-    # `rename` kind line. The checkpoint's own writes are always `armed`:
-    # nothing it produces is in flight yet, only the hooks after it move a
-    # transition into `pending`. The title has to be one line: the format is
-    # line-oriented and handoff_drive_read would reject a title carrying its
-    # own newline. bash-post.sh used to flatten whitespace at consume time;
-    # with the sentinel written in its final form there is no consumer left to
-    # do it, so it happens here.
-    title="$(printf '%s' "$rename" | tr -s '[:space:]' ' ')"
-    title="${title# }"; title="${title% }"
-    [ -n "$title" ] || err "rename" "must be a non-empty title"
-    printf 'armed\nrename\n/rename %s\n' "$title" > "$root/$HANDOFF_REL_DRIVE"
-fi
-
 # Always written, even with zero lines: bash-post.sh's fast-exit gate is the
 # manifest's mere presence, so an empty manifest is what still lets it notice
-# and consume a rename-only checkpoint call.
+# and consume a checkpoint call that touched neither file.
 manifest_path="$root/.claude/checkpoint-manifest"
 if [ "${#manifest[@]}" -gt 0 ]; then
     printf '%s\n' "${manifest[@]}" > "$manifest_path"
@@ -268,14 +334,50 @@ else
 fi
 
 # FR9: directive output (memory gate, SDD ledger nudge) unchanged in content
-# and composition order from the probes this replaces. Keyed on the boundary,
-# not the skill: preparation is identical on both sides of the drive/no-drive
-# split, so the pair at each boundary composes the same thing.
+# and composition order from the probes this replaces. One per boundary, and
+# the skill names the boundary.
 memory="$(checkpoint_memory_directive "$root" "$commit_mode")"
-case "$boundary" in
-    clear)   second="$(checkpoint_todo_suppression "$root")" ;;
-    compact) second="$(checkpoint_sdd_directive "$root")" ;;
+case "$skill" in
+    handoff)    second="$(checkpoint_todo_boundary "$root")" ;;
+    precompact) second="$(checkpoint_sdd_directive "$root")" ;;
 esac
+
+# The sentinel: its state, its kind, then the literal keystrokes. Composed here
+# rather than by the skill body, so the payload's transition fields are what
+# decides the file rather than advice the agent is asked to follow — and so the
+# line shapes live in one place instead of being restated as prose in two.
+#
+# `held` versus `armed` names the hazard rather than its trigger. The hazard is
+# keystrokes reaching a pane whose turn is about to end on an approval question:
+# a transition armed alongside that question clears or compacts away the very
+# conversation the answer applies to. So a sentinel that types a transition
+# waits while a memory gate is outstanding, and handoff-approved is what
+# releases it. One that types nothing has no such hazard — the two non-typing
+# kinds keep their old behaviour exactly, and a prepare-only precompact cannot
+# lose its FR-G marker to a gate it has no reason to wait on. Only the memory
+# gate defers: the ledger nudge and the todo boundary are acts, not
+# questions, and Stop comes after them either way.
+state=armed
+if $typed && [ -n "$memory" ]; then
+    state=held
+    memory="$memory"$'\n\n'"$(checkpoint_arming_directive)"
+fi
+
+drive_path="$root/$HANDOFF_REL_DRIVE"
+printf '%s\n' "$state" "$drive_kind" \
+    ${drive_cmds[@]+"${drive_cmds[@]}"} \
+    ${continuation:+"$continuation"} \
+    > "$drive_path"
+
+# Read back what was just composed. The composer and the parser are the two
+# halves of one format, and this is the only thing that would notice them
+# drifting apart — every other reader of this file runs in a later turn, in a
+# hook, where a rejection is a silent no-op.
+if ! handoff_drive_read "$drive_path"; then
+    rm -f "$drive_path"
+    err "transition" "composed a sentinel this version cannot read back — $DRIVE_ERR"
+fi
+
 if [ -n "$memory" ] && [ -n "$second" ]; then
     printf '%s\n\n%s\n' "$memory" "$second"
 elif [ -n "$memory" ]; then

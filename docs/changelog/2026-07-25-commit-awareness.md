@@ -97,6 +97,15 @@ values are peers, validated by a shared `probe_require_mode` that sets a global
 rather than printing — `exit 2` inside a command substitution ends only the
 subshell, and the caller would sail on with an empty mode.
 
+> **Superseded 2026-08-05** (see [Transitions become
+> modes](2026-08-05-transitions-become-modes.md)) — the paragraph below,
+> which settles the question as *is a commit going to carry this session's
+> memory, even in a later session?* rather than *does this request imply a
+> commit?*. The routing framing is unanswerable in a prepare-only mode,
+> where nothing in front of the agent decides it; and a commit on the far
+> side of a `/clear` is owed by no live session, so counting it strands the
+> memory it was meant to route. The rest of this entry stands.
+
 The question was first phrased as *does this request imply a commit?*, and
 dogfooding broke that phrasing on the first divergent case: a precompact run
 with no commit anywhere in the request, whose memory documented the very

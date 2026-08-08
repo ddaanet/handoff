@@ -26,6 +26,7 @@ setup() {
     repo_root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
     CHECKPOINT="$repo_root/scripts/checkpoint.sh"
     SHIM="$repo_root/bin/handoff-checkpoint"
+    APPROVED="$repo_root/bin/handoff-approved"
     BASHPOST="$repo_root/scripts/bash-post.sh"
     load probe-helpers
 
@@ -99,7 +100,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: no root pointer -> refuses, naming the path it looked for" {
     repo="$(make_repo)"
     rm -rf "$HANDOFF_POINTER_DIR"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null, todo:null}')
     # shellcheck disable=SC2016   # $1/$2/$3 are the inner bash -c's own positional params
     run --separate-stderr -2 bash -c 'cd "$1" && bash "$2" <<<"$3"' \
         _ "$repo" "$CHECKPOINT" "$payload"
@@ -109,7 +110,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: no session id -> refuses, naming the variable" {
     repo="$(make_repo)"
     write_pointer "$repo"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null, todo:null}')
     # shellcheck disable=SC2016   # $1/$2/$3 are the inner bash -c's own positional params
     run --separate-stderr -2 bash -c 'cd "$1" && CLAUDE_CODE_SESSION_ID= bash "$2" <<<"$3"' \
         _ "$repo" "$CHECKPOINT" "$payload"
@@ -123,7 +124,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     root="$(make_repo "$BATS_TEST_TMPDIR/launch")"
     elsewhere="$(make_repo "$BATS_TEST_TMPDIR/elsewhere")"
     payload=$(jq -nc --argjson task "$(task_write "$root/.claude/handoff-task.md" $'## Current task\n\nbody\n')" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:$task, todo:null}')
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:$task, todo:null}')
     run_checkpoint "$elsewhere" "$payload" "$root"
     [ "$status" -eq 0 ]
     [ -f "$root/.claude/handoff-task.md" ]
@@ -138,7 +139,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     root="$(make_repo "$BATS_TEST_TMPDIR/launch2")"
     elsewhere="$(make_repo "$BATS_TEST_TMPDIR/elsewhere2")"
     payload=$(jq -nc --argjson task "$(task_write "$elsewhere/.claude/handoff-task.md" "body")" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:$task, todo:null}')
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:$task, todo:null}')
     run_checkpoint_err "$elsewhere" "$payload" "$root"
     [[ "$stderr" == *"task.file_path"* ]]
     [ ! -e "$elsewhere/.claude/handoff-task.md" ]
@@ -165,53 +166,62 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 
 @test "checkpoint: commit missing -> error naming commit" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", rename:"T", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", rename:"T", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"commit"* ]]
 }
 
 @test "checkpoint: commit unknown value -> error naming commit" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", commit:"maybe", rename:"T", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"maybe", rename:"T", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"commit"* ]]
 }
 
 @test "checkpoint: rename missing under skill:handoff -> error naming rename" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"rename"* ]]
 }
 
-# Four values, two boundaries. The enum names the skill again, honestly: what
-# it buys over two values is the check that a `handoff` invocation which forgot
-# its title is an error rather than a silent non-rename.
-@test "checkpoint: each of the four skill values is accepted" {
+# Two values, one per boundary. Whether the transition is typed is a payload
+# field now rather than a skill of its own, so the enum names the boundary and
+# nothing else. What it still buys is the check that a `handoff` invocation
+# which forgot its title is an error rather than a silent non-rename.
+@test "checkpoint: each of the two skill values is accepted" {
     repo="$(make_repo)"
-    for s in handoff-continue precompact compact-continue; do
-        payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", task:null, todo:null}')
-        run_checkpoint "$repo" "$payload"
-        [ "$status" -eq 0 ]
-    done
-    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"T", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"T", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
 }
 
-@test "checkpoint: rename present under any non-handoff skill -> error naming rename and the skill" {
+# The names the two deleted skills used. A payload still carrying one is a stale
+# skill body, and saying so beats composing a boundary nobody asked for.
+@test "checkpoint: the retired driven-skill names are rejected" {
     repo="$(make_repo)"
-    for s in handoff-continue precompact compact-continue; do
-        payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"with-commit", rename:"Not Allowed", task:null, todo:null}')
+    for s in handoff-continue compact-continue; do
+        payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", clear:false, continue:null, task:null, todo:null}')
         run_checkpoint_err "$repo" "$payload"
-        [[ "$stderr" == *"rename"* ]]
+        [[ "$stderr" == *"skill"* ]]
         [[ "$stderr" == *"$s"* ]]
     done
 }
 
+@test "checkpoint: rename present under precompact -> error naming rename and the skill" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", rename:"Not Allowed", compact:false, continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"rename"* ]]
+    [[ "$stderr" == *"precompact"* ]]
+}
+
 @test "checkpoint: precompact with rename omitted entirely -> accepted" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
 }
@@ -219,7 +229,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: task with old_string/new_string -> error naming task (Write form only)" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-task.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T",
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
           task:{file_path:$fp, old_string:"a", new_string:"b"}, todo:null}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"task"* ]]
@@ -228,7 +238,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo with content and old_string together -> error naming todo" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, content:"## Remaining\n", old_string:"a"}}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"todo"* ]]
@@ -237,7 +247,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo with only old_string (no new_string) -> error naming todo" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, old_string:"a"}}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"todo"* ]]
@@ -246,7 +256,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo with only new_string (no old_string) -> error naming todo" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, new_string:"b"}}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"todo"* ]]
@@ -255,7 +265,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: task.file_path outside project .claude/ -> error naming task.file_path" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/elsewhere.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T",
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
           task:{file_path:$fp, content:"## Current task\n\nx\n"}, todo:null}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"task.file_path"* ]]
@@ -264,7 +274,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo.file_path outside project .claude/ -> error naming todo.file_path" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "/tmp/not-the-project/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, content:"## Remaining\n\n- x\n"}}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"todo.file_path"* ]]
@@ -283,7 +293,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 
 @test "checkpoint: task {content:null}, no file_path -> no-op, no file, no manifest line" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T",
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
         task:{content:null}, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -294,7 +304,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: task {file_path, content:null} -> no-op, no file, no manifest line" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-task.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T",
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
           task:{file_path:$fp, content:null}, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -304,7 +314,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 
 @test "checkpoint: todo {content:null}, no file_path -> no-op, no file, no manifest line" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T",
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
         task:null, todo:{content:null}}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -315,7 +325,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo {file_path, content:null} -> no-op, no file, no manifest line" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, content:null}}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -330,7 +340,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: task write -> file created with exact content, manifest records W" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-task.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T",
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
           task:{file_path:$fp, content:"## Current task\n\nreal content\n"}, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -342,7 +352,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: task write with only headings -> file removed, manifest records D" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-task.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T",
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
           task:{file_path:$fp, content:"## Current task\n\n## Open decisions\n"}, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -353,7 +363,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo write -> file created, manifest records W" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, content:"## Remaining\n\n- an item\n"}}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -364,7 +374,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo write with no items -> file removed, manifest records D" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, content:"## Remaining\n"}}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -376,7 +386,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     repo="$(make_repo)"
     printf '## Remaining\n\n- finish A\n- finish B\n' > "$repo/.claude/handoff-todo.md"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, old_string:"- finish A\n", new_string:""}}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
@@ -389,7 +399,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     repo="$(make_repo)"
     printf '## Remaining\n\n- keep this\n' > "$repo/.claude/handoff-todo.md"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, old_string:"- not present", new_string:"- x"}}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"old_string"* ]]
@@ -401,7 +411,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     repo="$(make_repo)"
     printf '## Remaining\n\n- dup\n- dup\n' > "$repo/.claude/handoff-todo.md"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, old_string:"- dup", new_string:"- single"}}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"old_string"* ]]
@@ -411,7 +421,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo edit requested but file does not exist -> error" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg fp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T", task:null,
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null,
           todo:{file_path:$fp, old_string:"a", new_string:"b"}}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"does not exist"* ]]
@@ -420,7 +430,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 @test "checkpoint: todo null on a session that never touched it -> list left alone" {
     repo="$(make_repo)"
     printf '## Remaining\n\n- untouched\n' > "$repo/.claude/handoff-todo.md"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
     grep -q "untouched" "$repo/.claude/handoff-todo.md"
@@ -434,7 +444,7 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
 # /rename line under a kind line — the same file every other transition uses.
 @test "checkpoint: rename only, no task/todo -> manifest present but empty, sentinel written" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"Two Words Title", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"Two Words Title", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
     [ -f "$repo/.claude/checkpoint-manifest" ]
@@ -452,7 +462,7 @@ rename
 # it. Whitespace-only is a schema error, not an empty rename.
 @test "checkpoint: a multi-line title is flattened to one line" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"Two  Words\nAnd More", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"Two  Words\nAnd More", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
     [ "$(wc -l < "$repo/.claude/autodrive")" -eq 3 ]
@@ -461,37 +471,24 @@ rename
 
 @test "checkpoint: a whitespace-only title -> error naming rename" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"   ", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"   ", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint_err "$repo" "$payload"
     [[ "$stderr" == *"rename"* ]]
 }
 
-# The load-bearing negative. handoff-continue carries its title in the sentinel
-# it writes for itself, as one of that file's lines. A checkpoint that wrote a
-# `rename` sentinel here would arm a bare rename at the very Stop the clear was
-# meant to use, and the clear would never happen.
-@test "checkpoint: handoff-continue writes no sentinel" {
-    repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"handoff-continue", commit:"without-commit", task:null, todo:null}')
-    run_checkpoint "$repo" "$payload"
-    [ "$status" -eq 0 ]
-    [ ! -e "$repo/.claude/autodrive" ]
-}
-
 @test "checkpoint: precompact, nothing touched -> manifest still written (empty)" {
     repo="$(make_repo)"
-    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", task:null, todo:null}')
+    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
     [ -f "$repo/.claude/checkpoint-manifest" ]
     [ ! -s "$repo/.claude/checkpoint-manifest" ]
-    [ ! -e "$repo/.claude/autodrive" ]
 }
 
 @test "checkpoint: task and todo both written -> manifest lists both" {
     repo="$(make_repo)"
     payload=$(jq -nc --arg tfp "$repo/.claude/handoff-task.md" --arg dfp "$repo/.claude/handoff-todo.md" \
-        '{skill:"handoff", commit:"with-commit", rename:"T",
+        '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:null,
           task:{file_path:$tfp, content:"## Current task\n\nbody\n"},
           todo:{file_path:$dfp, content:"## Remaining\n\n- x\n"}}')
     run_checkpoint "$repo" "$payload"
@@ -501,15 +498,321 @@ rename
 }
 
 # ==========================================================================
+# The transition (clear/compact) and the continuation
+#
+# Both fields are required, with no default: a default is the answer given by an
+# agent that never considered the question, and considering it is the whole
+# contribution. `false` does not mean "no sentinel" — it means the command is
+# not typed.
+# ==========================================================================
+
+@test "checkpoint: clear missing under handoff -> error naming clear" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"clear"* ]]
+}
+
+@test "checkpoint: clear not a boolean -> error naming clear" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:"yes", continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"clear"* ]]
+}
+
+# Each boundary takes its own transition field, named after the command it
+# types. The other one is a schema error rather than a silent ignore, for the
+# same reason `rename` is: a field nobody reads is a decision nobody made.
+@test "checkpoint: clear present under precompact -> error naming clear" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", clear:true, compact:false, continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"clear"* ]]
+}
+
+@test "checkpoint: compact missing under precompact -> error naming compact" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"compact"* ]]
+}
+
+@test "checkpoint: compact present under handoff -> error naming compact" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, compact:true, continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"compact"* ]]
+}
+
+# /compact takes an optional focus directive, so the field is a bool or that
+# directive. Anything else is neither.
+@test "checkpoint: compact neither boolean nor string -> error naming compact" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", compact:["focus"], continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"compact"* ]]
+}
+
+@test "checkpoint: an empty compact directive -> error naming compact" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", compact:"", continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"compact"* ]]
+}
+
+@test "checkpoint: a multi-line compact directive -> error naming compact" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", compact:"keep the parser\nand the tests", continue:null, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"compact"* ]]
+}
+
+@test "checkpoint: continue missing -> error naming continue, at either boundary" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:true, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", compact:true, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+}
+
+# Nothing would type it. A silent drop would lose a prompt the agent authored
+# and reported nothing about.
+@test "checkpoint: a continuation against an untyped transition -> error naming continue" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:false, continue:"pick up per the task file", task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+
+    payload=$(jq -nc '{skill:"precompact", commit:"with-commit", compact:false, continue:"pick up per the task file", task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+}
+
+# One Enter is one submit, so an embedded newline would submit the prompt early.
+@test "checkpoint: a multi-line continuation -> error naming continue" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:true, continue:"first line\nsecond line", task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+}
+
+# The walker dispatches on the leading character: a prose line that looked like
+# a command would be confirmed by the wrong primitive.
+@test "checkpoint: a continuation beginning with / -> error naming continue" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:true, continue:"/resume the work", task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+}
+
+@test "checkpoint: a whitespace-only continuation -> error naming continue" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:true, continue:"   ", task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+}
+
+@test "checkpoint: continue neither null nor a string -> error naming continue" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"with-commit", rename:"T", clear:true, continue:true, task:null, todo:null}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"continue"* ]]
+}
+
+# --- the six legal combinations, each pinned to its exact sentinel ---
+#
+# The checkpoint composes the whole file, so these rows are the contract. Each
+# also reads its own output back through handoff_drive_read: the composer and
+# the parser are the two halves of one format, and nothing else would notice
+# them drifting apart.
+
+@test "checkpoint: handoff, clear:true, no continuation -> the clear kind, no prose line" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:true, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+clear
+/rename A Title
+/clear" ]
+    run handoff_drive_read "$repo/.claude/autodrive"
+    [ "$status" -eq 0 ]
+}
+
+@test "checkpoint: handoff, clear:true with a continuation -> prose last" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:true, continue:"pick up per the task file", task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+clear
+/rename A Title
+/clear
+pick up per the task file" ]
+    run handoff_drive_read "$repo/.claude/autodrive"
+    [ "$status" -eq 0 ]
+}
+
+# FR-G: the kind line alone. Nothing is typed, and the file's whole effect is
+# that the compaction is *expected* — which is what the frame's re-injection is
+# gated on.
+@test "checkpoint: precompact, compact:false -> the two-line expectation marker" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+compact" ]
+}
+
+@test "checkpoint: precompact, compact:true, no continuation -> a bare /compact" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:true, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+compact
+/compact" ]
+    run handoff_drive_read "$repo/.claude/autodrive"
+    [ "$status" -eq 0 ]
+}
+
+@test "checkpoint: precompact, a focus directive and a continuation -> both carried" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:"keep the parser work", continue:"continue with task 3", task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+compact
+/compact keep the parser work
+continue with task 3" ]
+    run handoff_drive_read "$repo/.claude/autodrive"
+    [ "$status" -eq 0 ]
+}
+
+# --- held versus armed ---
+#
+# The hazard is keystrokes reaching a pane whose turn is about to end on an
+# approval question: a transition armed alongside that question clears or
+# compacts away the very conversation the answer applies to. So a sentinel that
+# types a transition waits in `held` while a memory gate is outstanding.
+#
+# The pair below is one fixture, one line apart: the same payload against dirty
+# and clean memory. The composition rows above pin every other line.
+
+@test "checkpoint: a typed transition with a memory gate pending -> held" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:true, continue:"pick up per the task file", task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "held" ]
+    echo "$output" | grep -qF 'handoff-approved'
+}
+
+@test "checkpoint: a typed transition with no memory gate -> armed, no arming instruction" {
+    repo="$(make_gitlore_repo)"
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:true, continue:"pick up per the task file", task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
+    [[ "$output" != *"handoff-approved"* ]]
+}
+
+# A sentinel that types nothing carries no such hazard, so both non-typing kinds
+# keep today's behaviour exactly — and a prepare-only precompact cannot lose its
+# FR-G marker to a memory gate it has no reason to wait on.
+@test "checkpoint: the non-typing kinds arm even with a memory gate pending" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:false, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
+
+    payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
+}
+
+# ==========================================================================
+# bin/handoff-approved — the one command that leaves `held`
+# ==========================================================================
+
+# Run it with cwd = $1 and the published root = $2 (default $1). Invoked through
+# its own path here; the bare-name row below is what covers the invocation path.
+run_approved() {
+    local repo="$1" root="${2:-$1}"
+    write_pointer "$root"
+    # shellcheck disable=SC2016   # $1/$2 are the inner bash -c's own positional params
+    run --separate-stderr bash -c 'cd "$1" && bash "$2"' _ "$repo" "$APPROVED"
+}
+
+@test "handoff-approved: a held sentinel becomes armed, every line below preserved" {
+    repo="$(make_repo)"
+    printf '%s\n' held clear "/rename A Title" /clear "pick up per the task file" \
+        > "$repo/.claude/autodrive"
+    run_approved "$repo"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+clear
+/rename A Title
+/clear
+pick up per the task file" ]
+}
+
+@test "handoff-approved: no sentinel -> exit 2 naming the absence" {
+    repo="$(make_repo)"
+    run_approved "$repo"
+    [ "$status" -eq 2 ]
+    [[ "$stderr" == *"autodrive"* ]]
+}
+
+# Already armed: this turn's Stop will fire it, and rewriting the state would
+# say the approval released something it did not.
+@test "handoff-approved: an armed sentinel -> exit 2 naming the state it found" {
+    repo="$(make_repo)"
+    printf '%s\n' armed clear "/rename A Title" /clear > "$repo/.claude/autodrive"
+    run_approved "$repo"
+    [ "$status" -eq 2 ]
+    [[ "$stderr" == *"armed"* ]]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
+}
+
+@test "handoff-approved: no root pointer -> refuses, naming the path it looked for" {
+    repo="$(make_repo)"
+    rm -rf "$HANDOFF_POINTER_DIR"
+    # shellcheck disable=SC2016   # $1/$2 are the inner bash -c's own positional params
+    run --separate-stderr bash -c 'cd "$1" && bash "$2"' _ "$repo" "$APPROVED"
+    [ "$status" -eq 2 ]
+    [[ "$stderr" == *"handoff-root-$CLAUDE_CODE_SESSION_ID"* ]]
+}
+
+# The invocation path: the agent runs this by bare name off PATH, so a
+# non-executable entry point is a failure every other row here would miss.
+@test "handoff-approved: runs by bare name off PATH" {
+    repo="$(make_repo)"
+    printf '%s\n' held compact "/compact" > "$repo/.claude/autodrive"
+    write_pointer "$repo"
+    run bash -c 'cd "$1" && PATH="$2:$PATH" handoff-approved' _ "$repo" "$repo_root/bin"
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
+}
+
+# ==========================================================================
 # Memory directive (carried from tests/memory-probe.bats + precompact-probe.bats)
 # ==========================================================================
 
 handoff_payload() {
-    jq -nc --arg commit "$1" '{skill:"handoff", commit:$commit, rename:"Session Title", task:null, todo:null}'
+    jq -nc --arg commit "$1" '{skill:"handoff", commit:$commit, rename:"Session Title", clear:false, continue:null, task:null, todo:null}'
 }
 
 precompact_payload() {
-    jq -nc --arg commit "$1" '{skill:"precompact", commit:$commit, task:null, todo:null}'
+    jq -nc --arg commit "$1" '{skill:"precompact", commit:$commit, compact:false, continue:null, task:null, todo:null}'
 }
 
 @test "checkpoint: not gitlore-managed -> silent" {
@@ -619,11 +922,11 @@ precompact_payload() {
 }
 
 # ==========================================================================
-# Composition: handoff (memory + todo suppression) vs precompact (memory +
+# Composition: handoff (memory + todo boundary) vs precompact (memory +
 # SDD nudge), and ledger liveness. Carried from both deleted probe suites.
 # ==========================================================================
 
-@test "checkpoint: handoff composition carries the todo suppression, not the SDD nudge" {
+@test "checkpoint: handoff composition carries the todo boundary, not the SDD nudge" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
     add_sdd_ledger "$repo"
@@ -652,23 +955,23 @@ precompact_payload() {
 # boundary cannot drift in what they tell the agent. Each row asserts both
 # halves: the directive its boundary composes, and the absence of the other
 # boundary's — a positive-only check passes on a hook that emits both.
-@test "checkpoint: the boundary decides the composition, not the skill" {
-    for s in handoff handoff-continue precompact compact-continue; do
+@test "checkpoint: each boundary composes its own directive, not the other's" {
+    for s in handoff precompact; do
         repo="$(make_gitlore_repo "$BATS_TEST_TMPDIR/bnd")"
         dirty_memory "$repo"
         add_sdd_ledger "$repo"
         if [ "$s" = handoff ]; then
-            payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", rename:"T", task:null, todo:null}')
+            payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", rename:"T", clear:false, continue:null, task:null, todo:null}')
         else
-            payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", task:null, todo:null}')
+            payload=$(jq -nc --arg s "$s" '{skill:$s, commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
         fi
         run_checkpoint "$repo" "$payload"
         [ "$status" -eq 0 ]
         case "$s" in
-            handoff | handoff-continue)
+            handoff)
                 echo "$output" | grep -qF 'survives the /clear'
                 [[ "$output" != *"re-dispatched"* ]] ;;
-            precompact | compact-continue)
+            precompact)
                 echo "$output" | grep -qF 're-dispatched'
                 [[ "$output" != *"survives the /clear"* ]] ;;
         esac
@@ -677,6 +980,32 @@ precompact_payload() {
         mem=$(echo "$output" | grep -nF 'gitlore-memory-message' | head -1 | cut -d: -f1)
         led=$(echo "$output" | grep -nF '.superpowers/sdd/feature-plan/progress.md' | head -1 | cut -d: -f1)
         [ "$mem" -lt "$led" ]
+    done
+}
+
+# The ledger and the todo file are different scopes, not two copies of one list.
+# The ledger holds the tasks of the plan being executed; handoff-todo.md holds
+# work that outlives the session and belongs to no plan. Only the overlap — the
+# plan's own tasks, copied across — can drift, so only the overlap is excluded.
+# Standing the whole file down instead discards every item the ledger will never
+# carry, which is most of them.
+#
+# The retired claim is the load-bearing negative: neither boundary may tell the
+# agent that handoff-todo.md must not exist alongside a ledger.
+@test "checkpoint: a live ledger scopes the todo file rather than standing it down" {
+    for s in handoff precompact; do
+        repo="$(make_gitlore_repo "$BATS_TEST_TMPDIR/scope")"
+        add_sdd_ledger "$repo"
+        if [ "$s" = handoff ]; then
+            payload="$(handoff_payload without-commit)"
+        else
+            payload="$(precompact_payload without-commit)"
+        fi
+        run_checkpoint "$repo" "$payload"
+        [ "$status" -eq 0 ]
+        echo "$output" | grep -qF '.claude/handoff-todo.md'
+        echo "$output" | grep -qF 'outside the plan'
+        [[ "$output" != *"must not exist"* ]]
     done
 }
 

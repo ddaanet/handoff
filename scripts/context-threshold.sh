@@ -73,8 +73,8 @@ mkdir -p "$HANDOFF_POINTER_DIR"
 # rendered dimmed.
 jq -nc --arg lead $'\033[0m' \
     --arg brief "context ${size}, past ${threshold}" \
-    --arg note "This session's prompt reached ${size} tokens, past the ${threshold} handoff threshold. Finish the step you are on, then run /handoff:compact-continue." '{
-    systemMessage: ($lead + "handoff: " + $brief + " — asked the agent to run compact-continue."),
+    --arg note "This session's prompt reached ${size} tokens, past the ${threshold} handoff threshold. Finish the step you are on, then run /handoff:precompact and carry the compaction out." '{
+    systemMessage: ($lead + "handoff: " + $brief + " — asked the agent to compact and continue."),
     hookSpecificOutput: {
         hookEventName: "PostToolBatch",
         additionalContext: $note

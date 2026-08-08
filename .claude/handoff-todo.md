@@ -1,9 +1,6 @@
 ## Remaining
 
-- Implement pass 2 (transitions become modes) per the approved
-  `plans/2026-08-02-transition-modes-design.md`, red bats first. Its Tests
-  section lists the matrix; the held/armed pair and the two non-typing kinds
-  are the rows that must be mutation-checked.
+
 - Implement `plans/2026-08-05-checkpoint-root-via-updatedinput.md` — red bats
   first, including the batched-command row that a bare `VAR=` prefix would only
   pass by accident.

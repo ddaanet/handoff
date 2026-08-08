@@ -9,7 +9,7 @@ file per change, dated, indexed by [`changelog.md`](changelog.md). Those files a
 edited after the fact — they say what was true and what was believed when
 they were written, which is what makes them worth keeping.
 
-Last updated: 2026-07-28.
+Last updated: 2026-08-08.
 
 ## Problem
 
@@ -117,7 +117,7 @@ git / memory.
 
 ## Architecture
 
-Five skills, one write path, ten hooks, and two files that cross a
+Three skills, one write path, ten hooks, and two files that cross a
 boundary.
 
 ### The seam
@@ -145,8 +145,9 @@ commit/push status. The working set comes from the harness's own
 Both wrap-up skills decide their content and then make exactly one Bash
 call: `handoff-checkpoint`, a PATH-resident shim (`bin/`) over
 `scripts/checkpoint.sh`, taking the whole wrap-up as a schema-validated
-JSON payload on stdin — `skill`, `commit`, optional `rename`, and `task` /
-`todo` in the harness's own tool-call shape: `file_path` + `content` for a
+JSON payload on stdin — `skill`, `commit`, the boundary's transition field,
+`continue`, `rename` at the clear boundary, and `task` / `todo` in the
+harness's own tool-call shape: `file_path` + `content` for a
 Write, or — for `todo` alone — `file_path` + `old_string`/`new_string` for
 an Edit. The task file is authored whole at every boundary, so it takes no
 Edit form and the schema refuses one. A violation exits non-zero naming the
@@ -158,8 +159,8 @@ always has one, so its absence is abnormal, and the old fallback to `$PWD`
 was silently wrong whenever the session cwd had drifted.
 
 The checkpoint applies the writes, removes any file whose resulting body is
-empty, leaves `.claude/checkpoint-manifest` behind, and prints a directive
-on stdout. It **changes no git state** and touches tmux not at all — it
+empty, composes `.claude/autodrive` from the transition fields, leaves
+`.claude/checkpoint-manifest` behind, and prints a directive on stdout. It **changes no git state** and touches tmux not at all — it
 queries git read-only and stops there: it runs in the agent's
 sandboxed Bash, where `git add` can leave `.git/index.lock` behind and fail
 the *next* command (which in the routine wrap-up is the user's `/commit`),
@@ -171,30 +172,56 @@ included, plus the rename watcher spawn.
 (`checkpoint.sh` and `write-stage.sh`, sharing `checkpoint_is_empty_body`),
 not an instruction the agent has to remember.
 
-### The five skills
+### The three skills
 
-Two boundaries, and at each one a skill that prepares and a skill that also
-carries the transition out:
+One skill per boundary, plus the rename:
 
-| boundary | prepare only | prepare + drive |
+| boundary | skill | transition field |
 |---|---|---|
-| compaction | `/handoff:precompact` | `/handoff:compact-continue` |
-| clear | `/handoff:handoff` | `/handoff:handoff-continue` |
+| compaction | `/handoff:precompact` | `compact`: `false` \| `true` \| `"<directive>"` |
+| clear | `/handoff:handoff` | `clear`: `false` \| `true` |
 
 The judgment is per-boundary, not per-drive-mode: commit awareness, memory
 capture, the task/todo drafting rules and the file-vs-prompt seam are
-identical whether or not the agent types the command afterwards. So each
-boundary's full protocol lives in one file — `handoff/SKILL.md` and
-`precompact/SKILL.md` — and the two driven skills are short bodies that
-execute their sibling's protocol by reference and then arm. The alternative
-is two drifting copies of the paragraphs the whole design rests on.
+identical whether or not the agent types the command afterwards. So whether
+the transition is typed is a **field of the payload**, decided the way
+`commit` already is — one fact the agent supplies, everything downstream
+deterministic — rather than a skill of its own.
 
-The pair at each boundary is told apart by trigger vocabulary, not by
-inferring the situation from context: *prepare* and *end* against
-*continue*, with the bare boundary word falling to the prepare-only skill.
-An operator who wants the other default sets it in a user memory or a
-`CLAUDE.local.md`; the plugin ships no nudge, because that default is one
-operator's habit rather than a property of the boundary.
+A separate driven skill per boundary was the earlier shape, and it cost
+routing (six trigger phrases each, every one naming the sibling it was not,
+so "compact and continue" reaching `precompact` produced a prepared
+compaction nobody ran), duplication (the arming discipline and the sentinel's
+line shapes stated twice in prose), and expressiveness: driving a transition
+*without* a continuation prompt was unreachable, because the driven skills
+treated the prompt as intrinsic. The fields cover the cross product:
+
+```
+handoff     clear:false          continue:null   prepare only
+handoff     clear:true           continue:null   clear, then stop
+handoff     clear:true           continue:"…"    clear and continue
+precompact  compact:false        continue:null   prepare only
+precompact  compact:true|"…"     continue:null   compact, then stop
+precompact  compact:true|"…"     continue:"…"    compact and continue
+```
+
+The transition field is named after the command it types, and its value is
+that command's argument: `/clear` takes none, so it is a bool; `/compact`
+takes an optional focus directive, so it is a bool or the directive itself.
+`false` does not mean "no sentinel" — it means the command is not typed.
+
+What the separate skills bought, and what this gives up, is that the
+transition was settled by *which name the description matched* rather than
+by reading the request: a misread now drives a transition where only
+preparation was asked for. The fields are required and have no default, so
+the question is at least always asked; and the prepare-only wording is the
+larger half of both descriptions, since that is the reading a bare
+"handoff" or "precompact" should get.
+
+- **`/handoff:autoname`** — rename only, neither boundary. Decides a title
+  and writes the sentinel with the Write tool. For `/btw` side
+  conversations and any session worth a name while the main thread stays
+  live.
 
 - **`/handoff:autoname`** — rename only, neither boundary. Decides a title
   and writes the sentinel with the Write tool. For `/btw` side
@@ -209,12 +236,18 @@ A **driven transition** is a sequence of lines to type, plus the
 | kind | typed before | typed after | confirming source |
 |---|---|---|---|
 | `rename` | `/rename <title>` | — | — |
-| `compact` | `/compact [directive]` | continuation prose | `compact` |
-| `clear` | `/rename <title>`, `/clear` | continuation prose | `clear` |
+| `compact` | `/compact [directive]` | continuation prose, if any | `compact` |
+| `clear` | `/rename <title>`, `/clear` | continuation prose, if any | `clear` |
 | `compact` (prepared) | — | — | `compact` |
 
+The after-line is optional on both driven kinds, because typing the
+transition and submitting a prompt into what it opens are separate
+decisions.
+
 One sentinel, `.claude/autodrive`, whose first line is its **state** and
-second line the kind. The remaining lines are the **literal keystrokes**, so
+second line the kind. The states are `held` → `armed` → `pending` → gone,
+and every one after the first is a hook's to write; the agent-authored
+channel (`write-drive.sh`) accepts `armed` alone. The remaining lines are the **literal keystrokes**, so
 the walker never needs to know which command belongs to which kind;
 validation anchors it instead — the *n*th line of kind *k* must begin with
 the expected command literal, so the file cannot be made to type something
@@ -250,12 +283,37 @@ moment anything can act on the news. That hook also sweeps a sentinel still
 in state `armed`, left by a turn that ended on Esc or a crash:
 `UserPromptSubmit` is the exact discriminator, since it cannot fire between
 the write and that turn's own `Stop`. A file that will not parse is swept
-too — it describes no transition anyone can complete.
+too — it describes no transition anyone can complete. `held` is exempt, and
+that is why the sweep names its states rather than taking anything that is
+not `pending`.
 
 The prepare-only compact path arms the kind line alone. Nothing is typed,
 but the transition is *expected*, and that expectation is what
 `SessionStart(compact)` gates the frame's re-injection on — otherwise a
 hand-typed `/compact` re-injects nothing.
+
+### Held: a transition an approval has not released
+
+The hazard a memory approval creates is keystrokes reaching a pane whose
+turn is about to end on a question: a transition armed alongside that
+question clears or compacts away the very conversation the answer applies
+to. So the checkpoint writes a sentinel in `held` exactly when it **types a
+transition** and a memory directive was emitted, and composes the
+instruction to release it onto the end of that directive.
+`bin/handoff-approved` is the one command that leaves the state, through the
+same `handoff_drive_arm` the `Stop` hook uses.
+
+The condition names the hazard rather than its trigger. A sentinel that
+types nothing — the `rename` kind, the bare compact marker — has no such
+hazard, so both keep their behaviour exactly, and a prepare-only precompact
+cannot lose its expectation marker to a gate it has no reason to wait on.
+Only the memory gate defers: the ledger nudge and the todo boundary are
+acts, not questions, and `Stop` comes after them either way.
+
+A stale `held` file is inert. No gate fires on that state, only
+`handoff-approved` leaves it, and the next checkpoint call overwrites the
+file outright — so nothing sweeps it, and it legitimately outlives the turn
+boundary the approval round trip costs.
 
 ### Scoping
 
@@ -331,7 +389,7 @@ internals.
 `checkpoint_ledger_path` is the one-row registry of foreign workflow-owned
 progress ledgers (currently superpowers SDD). It detects **liveness**, not
 presence: the current layout glob plus an identity first line, most-recent
-mtime among several, fail open. Both the nudge and the todo-file suppression
+mtime among several, fail open. Both the nudge and the todo-file boundary
 interpolate what it prints, so they cannot disagree about what exists.
 
 ### Release infrastructure delegated to claude-plugin-dev
@@ -406,13 +464,29 @@ scales with volume, and trimming changes length, not register.
 list](changelog/2026-07-17-task-frame-drops-transcript.md)
 
 **The agent supplies one fact; the code owns the branch.** Commit awareness
-— *is a commit going to carry this session's memory?* — is a fact about the
-conversation and the tree that no script can see, and everything downstream
-of the answer is deterministic. It changes what memory *says* (under
-`with-commit`, bodies state present-tense truth, because a body phrased as
-pending is false the moment the change exists and gets re-injected that way)
-and where the memory commit *lands*.
-[Commit awareness](changelog/2026-07-25-commit-awareness.md)
+— *does the ask this call serves imply a commit?* — is a fact about the
+conversation that no script can see, and everything downstream of the answer
+is deterministic. It changes what memory *says* (under `with-commit`, bodies
+state present-tense truth, because a body phrased as pending is false the
+moment the change exists and gets re-injected that way) and where the memory
+commit *lands*. The transition fields are the same shape, which is why they
+are fields and not skills.
+[Commit awareness](changelog/2026-07-25-commit-awareness.md),
+[Transitions become modes](changelog/2026-08-05-transitions-become-modes.md)
+
+**Ask the question the request can answer.** The rule this replaced counted
+a commit landing in a later session, because it framed the question as where
+the memory belongs rather than whether anything present decides it — and
+that is unanswerable in the prepare-only modes, where the agent has no
+evidence in front of it and guesses. It is also the hazard: withholding
+gitlore's trigger defers the memory commit to a parent commit's pre-commit
+hook, and a commit on the far side of a `/clear` is owed by no live session,
+so the approved summary goes unread and the next session's memory write
+stales it. The ask stops at the transition, uniformly — a compaction keeps
+the session alive, so a commit named in *its* continuation prompt would in
+fact have a live hook, but one sentence that holds for every mode is worth
+more than one correctly deferred memory commit.
+[Transitions become modes](changelog/2026-08-05-transitions-become-modes.md)
 
 **Withholding is a mechanism.** The standalone memory commit is reachable
 only through one filename, and the `with-commit` directive's reader is a
@@ -489,11 +563,21 @@ file](changelog/2026-07-20-watcher-failure-becomes-a-file.md)
 
 **A foreign tool's state file is detected by liveness, not presence.**
 Layouts move and the old path becomes a declared stray; abandoned files are
-never cleaned up. Presence alone false-positives, and here the harm is the
-*suppression* — deferring the real remainder to an abandoned ledger. Detection
-is read-only and fails open.
+never cleaned up. Presence alone false-positives, and the harm is a directive
+naming another plan's file as this session's ledger. Detection is read-only
+and fails open.
 [An orphaned ledger hijacks the
 handoff](changelog/2026-07-26-orphaned-ledger.md)
+
+**A foreign ledger scopes the todo file; it does not replace it.** An SDD
+ledger holds the tasks of one plan and is deleted with it. `handoff-todo.md`
+holds work outstanding across sessions, most of it belonging to no plan and
+often to another repository. Only their overlap — the plan's own tasks,
+copied across — can drift, so only the overlap is excluded. Standing the
+whole file down discards every item no ledger will ever carry, in the one
+direction a `/clear` cannot recover.
+[The ledger and the todo file are different
+scopes](changelog/2026-08-08-ledger-and-todo-are-different-scopes.md)
 
 **The design names no todo tool.** The harness's task-list family is behind
 a server-side killswitch and has already changed generations once; an
@@ -584,15 +668,19 @@ way), explicit conditional wording is the strong one, and it needs a
 once-per-session latch on a per-turn hook.
 [A place for the todo list](changelog/2026-07-22-a-place-for-the-todo-list.md)
 
-**Accepting SDD's pre-6.2.0 flat ledger path for back-compatibility**, and
-**dropping the todo suppression altogether** — the first honours the bug,
-since the current skill guarantees such a file is somebody else's leftover;
-for the second, the two-ledgers-drift rationale is sound and the defect was
-in the detection, not the policy. Gating on the named plan file still
-existing was rejected too: it false-negatives on a plan that landed and was
-tidied away.
+**Accepting SDD's pre-6.2.0 flat ledger path for back-compatibility** — it
+honours the bug, since the current skill guarantees such a file is somebody
+else's leftover. Gating on the named plan file still existing was rejected
+too: it false-negatives on a plan that landed and was tidied away.
 [An orphaned ledger hijacks the
 handoff](changelog/2026-07-26-orphaned-ledger.md)
+
+**Letting the plan's tasks live in both files**, tracked in the ledger and
+mirrored into `handoff-todo.md` — two records of one thing drift, and the
+stale one gets believed. Excluding the overlap costs nothing, which is why
+the boundary is drawn there rather than around the file.
+[The ledger and the todo file are different
+scopes](changelog/2026-08-08-ledger-and-todo-are-different-scopes.md)
 
 **Merging the `PostToolUse(Write|Edit)` scripts** into one — they share a
 preamble, now factored into `handoff_match_target()`, but not a job.
@@ -607,13 +695,23 @@ the pipeline around them. Also rejected: **omitting `/clear` from the
 sentinel body** as ceremony (true only while the filename named the
 transition), **naming the skills `compact` and `clear`** (namespaced anyway,
 so the short name is never available and the collision is paid for in every
-doc sentence), **`autocompact`/`autoclear` as skill names** (collides with
-the harness's own threshold auto-compaction, a real named feature), and
-**one skill per boundary with a prepare/drive mode argument** — the
-description is what triggers invocation, so the mode would be inferred from
-phrasing, and a false positive compacts or clears a session where the user
-asked only for preparation.
+doc sentence), and **`autocompact`/`autoclear` as skill names** (collides
+with the harness's own threshold auto-compaction, a real named feature).
 [Driven transitions](changelog/2026-07-29-driven-transitions.md)
+
+**Keeping the sentinel a skill-body write** once the transition became a
+payload field — a minimal diff, but the fields would then be advisory: the
+checkpoint could validate the combination and nothing more, the line shapes
+would stay as prose in two skill bodies, and arming discipline would stay a
+rule the agent is asked to follow rather than one the code enforces. Also
+rejected: **printing the sentinel for the agent to write when deferring**
+(transcription through the model on the one path where correctness matters
+most), **a second full checkpoint call carrying the resolved gate** (it
+deadlocks — under `with-commit` the memory worktree is still dirty when the
+gate resolves, so the second call re-emits the same directive and refuses to
+arm), and **`--arm` as a flag on `handoff-checkpoint`** (overloads a command
+whose contract is "read a payload on stdin" with one that reads nothing).
+[Transitions become modes](changelog/2026-08-05-transitions-become-modes.md)
 
 **Injecting the frame on any compaction where one exists**, closing the
 auto-compaction gap for free — but `handoff-task.md` is durable and

@@ -89,6 +89,11 @@ maintenance trap the JSONL-coupling stance already warns about. The agent
 knows its own list for free and cannot rot, and a probe branch would cost the
 single-parallel-turn requirement a detection round-trip.
 
+> **Superseded 2026-08-08** (see [The ledger and the todo file are different
+> scopes](2026-08-08-ledger-and-todo-are-different-scopes.md)) — the
+> stand-down in the paragraph below. A foreign ledger now excludes only its
+> own plan's tasks from `handoff-todo.md`, which keeps everything else.
+
 The probes keep the one question a script *can* answer: whether a foreign
 workflow ledger exists. `probe_ledger_path` is the registry; when it hits,
 `handoff-todo.md` stands down, so an SDD session tracks in one place. Both

@@ -27,24 +27,28 @@ since both paths end with one parent commit carrying the source change and
 the gitlink bump. See `docs/changelog/2026-07-25-commit-awareness.md` and
 `docs/changelog/2026-07-27-one-channel-one-writer.md`.
 
-**Two boundaries, four skills, one flow.** At each boundary a skill prepares
-and a sibling also drives: `handoff`/`handoff-continue` for `/clear`,
-`precompact`/`compact-continue` for `/compact`. All four route through the
-same checkpoint call, discriminated by the payload's `skill` field, from which
-`checkpoint.sh` derives the **boundary** — that is what keys the directive
-composition (memory gate + todo suppression for clear, memory gate + SDD
-ledger nudge for compact), so the pair at each boundary cannot drift. All four
-can carry `task` — the durable side of the seam, content that must survive
-verbatim — while the continuation prompt is only a handle to it.
+**Two boundaries, two skills, one flow.** One skill per boundary — `handoff`
+for `/clear`, `precompact` for `/compact` — and the `skill` field names it,
+which is also what keys the directive composition (memory gate + todo
+boundary for clear, memory gate + SDD ledger nudge for compact). Both carry
+`task`, the durable side of the seam: content that must survive verbatim,
+while the continuation prompt is only a handle to it.
 
-The judgment is per-boundary, not per-drive-mode, so each boundary's full
-protocol lives in one file (`handoff/SKILL.md`, `precompact/SKILL.md`) and the
-driven skills are short bodies that run their sibling's protocol by reference
-and then arm. What the driven skills add is `.claude/autodrive` with lines to
-type; the prepare-only compact path arms the kind line alone (FR-G), which
-types nothing but is what `SessionStart(compact)` gates the frame's
-re-injection on. Every typed line goes through the detached walker spawned by
-a hook at a turn boundary, never from inside a live turn. See
+Whether the transition is typed is a **field of the payload**, not a skill of
+its own: `clear` (bool) at one boundary, `compact` (bool or focus directive)
+at the other, plus `continue` (null or one line of prose) at both. All three
+are required with no default. The judgment was always per-boundary — commit
+awareness, memory capture, the drafting rules and the seam are identical
+either way — so a separate driven skill per boundary bought nothing and cost
+routing, duplicated prose, and a cross product it could not express (a driven
+transition with no continuation). `checkpoint.sh` composes `.claude/autodrive`
+from those fields and reads it back through `handoff_drive_read`, so the
+composer and the parser cannot drift; `compact: false` still writes the
+two-line expectation marker (FR-G), which types nothing but is what
+`SessionStart(compact)` gates the frame's re-injection on. Every typed line
+goes through the detached walker spawned by a hook at a turn boundary, never
+from inside a live turn. See
+`docs/changelog/2026-08-05-transitions-become-modes.md` and
 `docs/changelog/2026-07-29-driven-transitions.md`. `handoff-task.md` is written **only** by the checkpoint
 (FR3): a direct agent Write/Edit is denied outright by `write-guard.sh`.
 
@@ -62,45 +66,33 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
 
 - `.claude-plugin/plugin.json` — manifest
 - `skills/handoff/SKILL.md` — the clear boundary's full protocol
-  (`/handoff:handoff`), and the single source of truth for the markdown
-  templates of `handoff-task.md` and `handoff-todo.md`, plus the seam between
-  what belongs in a file and what belongs in a continuation prompt (the seam
-  lives here rather than in `precompact/SKILL.md` because both driven skills
-  read this file). Its first step is the commit-awareness decision — is a
-  commit going to carry this session's memory — which it passes to the
-  checkpoint call and which makes it write memory as if the change has
-  landed. Step 3 decides the title/task/remainder, then issues one
-  `handoff-checkpoint` Bash call with the whole wrap-up as a JSON heredoc;
-  step 4 follows whatever directive the checkpoint prints; step 5 reports what
-  the boundary is ready for, in one line. Prepares only — it arms nothing.
-- `skills/handoff-continue/SKILL.md` — the `/handoff:handoff-continue` skill.
-  Runs `handoff`'s protocol by reference with `"skill": "handoff-continue"`
-  and **no** `rename` (schema-forbidden — the title is a line of the
-  sentinel), then writes `.claude/autodrive`: `clear`, `/rename <title>`,
-  `/clear`, continuation prose. Carries the arming discipline `handoff` has no
-  need of — never in the same turn as a question the directive requires, and
-  the commit lands before the sentinel is written.
+  (`/handoff:handoff`), driven or not, and the single source of truth for the
+  markdown templates of `handoff-task.md` and `handoff-todo.md`, plus the seam
+  between what belongs in a file and what belongs in a continuation prompt
+  (the seam lives here rather than in `precompact/SKILL.md` because that file
+  reads this one). Step 1 decides all three fields the payload cannot derive:
+  whether the transition is typed, whether a continuation follows it, and
+  commit awareness — **does the ask this call serves imply a commit** — which
+  makes it write memory as if the change has landed. Step 3 decides the
+  title/task/remainder, then issues one `handoff-checkpoint` Bash call with
+  the whole wrap-up as a JSON heredoc; step 4 follows whatever directive the
+  checkpoint prints, which may be the one naming `handoff-approved`; step 5
+  reports what the boundary is ready for, in one line. It writes no sentinel
+  itself — the checkpoint composes it.
 - `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
   session title from the conversation (no tool calls) and writes
   `.claude/autodrive` directly with the Write tool, two lines: `rename`, then
   `/rename <title>`. Rename-only — no task file, no memory. For `/btw` side
   conversations and any session worth a name while the main thread stays live.
 - `skills/precompact/SKILL.md` — the compact boundary's full protocol
-  (`/handoff:precompact`). Decide commit awareness (same first step as
-  handoff), capture durable learnings in auto-memory, decide the task/todo
-  content, run one `handoff-checkpoint` Bash call (`"skill": "precompact"`, no
-  `rename` — schema-forbidden there), follow whatever directive it prints
-  (memory commit and/or ledger flush), write `.claude/autodrive` containing
-  the single line `compact` (FR-G's expectation marker), and report readiness
-  in one line. Prepares only: no compact directive, no continuation prompt, no
-  keystrokes, no tmux.
-- `skills/compact-continue/SKILL.md` — the `/handoff:compact-continue` skill.
-  Runs `precompact`'s steps 1–3 by reference with
-  `"skill": "compact-continue"`, then writes `.claude/autodrive`: `compact`,
-  `/compact [directive]`, continuation prose. Carries the same arming
-  discipline as `handoff-continue`, and the anti-patterns that used to forbid
-  `precompact` from stopping short ("telling the user to run `/compact`";
-  "invoking it is the authorization to compact") live here now.
+  (`/handoff:precompact`), driven or not. Decide the same three fields as
+  handoff's step 1 (`compact` carries the focus directive when there is one),
+  capture durable learnings in auto-memory, decide the task/todo content, run
+  one `handoff-checkpoint` Bash call (`"skill": "precompact"`, no `rename` —
+  schema-forbidden there), follow whatever directive it prints (memory commit,
+  ledger flush, and/or the arming instruction), and report readiness in one
+  line. It defers the templates and the seam rules to `handoff/SKILL.md` and
+  writes no sentinel itself.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in `docs/design.md`
 - `hooks/hooks.json` — declares ten hooks.
@@ -174,11 +166,14 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   files must stay one parse.
   `handoff_drive_read()` parses and validates the sentinel into `DRIVE_STATE`,
   `DRIVE_KIND`, `DRIVE_BEFORE[]`, `DRIVE_AFTER[]` — or `DRIVE_ERR` naming the
-  constraint that failed. Line 1 is the state (`armed` or `pending`) and line 2
-  the kind, and the kind still fixes the shape, so the remaining lines need no
-  separator; the counts are of the whole file, state line included: `rename`
-  takes 3 lines, `compact` 4 or the state and kind lines alone (FR-G), `clear`
-  5. The state is reported, never interpreted — which state a caller wants is
+  constraint that failed. Line 1 is the state (`held`, `armed` or `pending`)
+  and line 2 the kind, and the kind still fixes the shape, so the remaining
+  lines need no separator; the counts are of the whole file, state line
+  included: `rename` takes 3 lines, `compact` 2, 3 or 4, `clear` 4 or 5. The
+  continuation line is optional on both driven kinds — typing the transition
+  and submitting a prompt into what it opens are separate decisions, and the
+  payload carries them as separate fields. The state is reported, never
+  interpreted — which state a caller wants is
   the caller's business, and one answer serves the `Stop` gate, both loaders
   and the sweep. Each command literal is pinned to its slot, so the
   file cannot be made to type something else, and a prose line may not begin
@@ -333,7 +328,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   later turn begins never armed, and would otherwise be armed by the next
   `Stop` — days later, possibly in another session. A file that will not parse
   is swept too — it describes no transition anyone can complete, which is what
-  the bare-filename gate did before the states were content.
+  the bare-filename gate did before the states were content. `held` is exempt,
+  which is why the sweep names the states it takes rather than taking anything
+  that is not `pending`: a held transition waits on an approval whose answer
+  arrives at this very hook, so outliving the turn boundary is what it is for.
   `UserPromptSubmit` is the
   exact discriminator; it cannot fire between the write and that turn's own
   `Stop`. Only the failure branch touches a `pending` — sweeping on that
@@ -374,7 +372,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   of the same turn. Takes the **last** `.message.usage` in a `tail -c` window
   (never a sum: the several JSONL entries of one API response repeat the same
   `usage`), and past `HANDOFF_CONTEXT_THRESHOLD` injects one directive naming
-  `/handoff:compact-continue`. A nudge, never a halt. Exits before reading
+  `/handoff:precompact` and asking for the compaction to be carried out — the
+  skill reads the transition decision off the ask, so naming it alone would
+  turn every crossing into a prepared compaction nobody runs. A nudge, never a
+  halt. Exits before reading
   anything when `agent_id` is present (a subagent has no boundary to prepare,
   and the transcript it is handed is the parent's) or when the marker already
   exists (still over threshold means the boundary has not happened yet).
@@ -386,6 +387,16 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   bodies invoke it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
   the agent's Bash, so the shim is the entry point. Replaces
   `bin/handoff-memory-probe` and `bin/handoff-precompact-probe`.
+- `bin/handoff-approved` — the one command that leaves the sentinel's `held`
+  state, invoked by bare name off PATH when the checkpoint's memory directive
+  says so. No stdin, no arguments. The whole script rather than a shim over
+  `scripts/`: it is short enough to read at once, its only caller would be its
+  own shim, and `bin/*` is already inside the `shellcheck -x` line, so sourcing
+  `../scripts/_lib.sh` from here lints as it does from `scripts/`. Takes its
+  root from the same session pointer the checkpoint reads and refuses on its
+  absence with the same message; moves the file to `armed` through
+  `handoff_drive_arm`; exits 2 naming the state it found when the file is
+  absent or not `held`. NFR1: no git, no tmux — it rewrites one file.
 - `scripts/checkpoint.sh` — the one write path for the handoff/precompact
   wrap-up (FR1). Takes its root from the pointer `session-pointer.sh`
   published, keyed by `CLAUDE_CODE_SESSION_ID`, and refuses when there is
@@ -397,16 +408,19 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   or-null only), removes a file whose resulting body is empty via
   `checkpoint_is_empty_body` (FR6), writes `.claude/checkpoint-manifest` —
   always, even with zero lines, so `bash-post.sh`'s presence-gate still
-  fires for a rename-only call — and `.claude/autodrive` when `rename` is
-  present (FR8), as the two-line `rename` kind, flattening the title's
-  whitespace on the way (`bash-post.sh` used to do that at consume time, and
-  there is no consumer left to). `rename` is required under `skill: "handoff"`
-  and forbidden under the other three, which is the whole reason the enum has
-  four values rather than two: it makes a `handoff` call that forgot its title
-  an error rather than a silent non-rename. Then it prints the directive output
-  (FR9, via `_checkpoint-lib.sh`), composed on the **boundary** derived from
-  `skill`, not on `skill` itself. NFR1: it does no `git`
-  or `tmux` work itself — see `bash-post.sh`. The Edit form's exact string
+  fires for a call that touched neither file — and composes `.claude/autodrive`
+  (FR8) from the transition fields, flattening the title's whitespace on the
+  way (`bash-post.sh` used to do that at consume time, and there is no consumer
+  left to), then reads its own output back through `handoff_drive_read` so the
+  composer and the parser cannot drift. The state it writes is `held` iff the
+  sentinel types a transition **and** a memory directive was emitted, and
+  `armed` otherwise; `bin/handoff-approved` is the only thing that leaves
+  `held`. `rename` is required under `skill: "handoff"` and forbidden under
+  `precompact`: it makes a `handoff` call that forgot its title an error rather
+  than a silent non-rename. Then it prints the directive output (FR9, via
+  `_checkpoint-lib.sh`), with the arming instruction composed onto the memory
+  directive when the sentinel is held. NFR1: it does no `git` or `tmux` work
+  itself — see `bash-post.sh`. The Edit form's exact string
   replacement (first occurrence, error if `old_string` is absent or
   ambiguous) is applied by a `python3` heredoc, not shell, so a multi-line
   `old_string`/`new_string` needs no quoting.
@@ -448,7 +462,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   Couples only to the two IPC filenames — never gitlore internals.
   `checkpoint_ledger_path` is the one-row registry of known workflow-owned
   progress ledgers (currently superpowers SDD), so the nudge and the
-  suppression can never disagree about what exists — and both interpolate
+  boundary can never disagree about what exists — and both interpolate
   what it prints, because with a glob there is no path to hardcode. It
   detects **liveness**, not presence: a match under
   `.superpowers/sdd/*/progress.md` counts only with SDD's identity first
@@ -456,8 +470,12 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   most-recently-modified wins. See
   `docs/changelog/2026-07-26-orphaned-ledger.md`. `checkpoint_sdd_directive`
   holds the structured-workflow ledger nudge (precompact only) and ends by
-  standing `handoff-todo.md` down; `checkpoint_todo_suppression` is that
-  stand-down alone, for the handoff path — composed in
+  drawing the boundary between the two lists — the plan's tasks belong to the
+  ledger, `handoff-todo.md` holds only work outstanding outside the plan, and
+  the file is never stood down (`docs/changelog/2026-08-08-ledger-and-todo-are-different-scopes.md`);
+  `checkpoint_todo_boundary` is that boundary alone, for the handoff path,
+  naming the removal as well because it lands in the same turn as the writes
+  — composed in
   `checkpoint.sh`'s `skill: "handoff"` vs `skill: "precompact"` branch,
   memory first, same order the two deleted probes used.
 - `scripts/bash-post.sh` — `PostToolUse(Bash)` entry point. Fires on every
@@ -586,11 +604,21 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   (`old_string` absent, ambiguous, successful), empty-body removal through
   both writers (`checkpoint.sh` and `write-stage.sh`) including that the
   deletion reaches the manifest, and `bash-post.sh` (manifest absent,
-  manifest present, a sentinel left untouched). The `skill` enum's four values
-  each accepted, `rename` rejected under each of the three that forbid it, the
-  boundary derivation asserted through the directive output, and the
-  load-bearing negative — `handoff-continue` writes no sentinel — mutation-
-  checked rather than observed passing.
+  manifest present, a sentinel left untouched). The `skill` enum's two values
+  each accepted, the two retired driven-skill names rejected, `rename` rejected
+  under `precompact`, and each boundary's directive asserted against the
+  absence of the other's.
+  The transition fields add their own matrix: each of `clear`/`compact`/
+  `continue` missing, each with a value outside its type, the other boundary's
+  transition field present, an empty or multi-line `compact` directive, a
+  `continue` that is multi-line, whitespace-only, begins with `/`, or stands
+  against an untyped transition — each asserting a non-zero exit naming the
+  field. The six legal combinations each pin the sentinel's exact content and
+  read it back through `handoff_drive_read`. Three rows are load-bearing and
+  mutation-checked rather than observed passing: the held/armed pair over one
+  fixture (never hold ⟹ the held row alone reds; hold regardless of typing ⟹
+  the non-typing row alone reds), and `handoff-approved`'s bare-name row, which
+  is the only one a `100644` entry point would fail.
   Session-root drift is covered across all three: `tests/test_worktree_root.py`
   for the branch matrix (including the containment rule that keeps a submodule
   `inside`), `tests/hook-test.bats` for `handoff_root_read`'s labels, the fast

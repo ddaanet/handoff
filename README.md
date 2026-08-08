@@ -7,22 +7,22 @@ complement to Claude Code's auto-memory: memory holds durable facts
 *ephemeral task frame* memory avoids — what you were doing right now,
 what decisions are still open.
 
-Five skills sit on that seam — two boundaries, and at each one a skill that
-prepares and a skill that also carries the reset out for you:
+Three skills sit on that seam — one per boundary, plus the rename:
 
-| | prepare only | prepare, then do it |
-|---|---|---|
-| **before `/clear`** | `/handoff:handoff` | `/handoff:handoff-continue` |
-| **before `/compact`** | `/handoff:precompact` | `/handoff:compact-continue` |
+| | skill |
+|---|---|
+| **before `/clear`** | `/handoff:handoff` |
+| **before `/compact`** | `/handoff:precompact` |
 
-The prepare-only pair write the task file and stop; you type the command.
-The driven pair write the same file and then type the command for you, plus
-a one-line prompt that resumes the work on the far side. `/handoff:autoname`
-is the fifth: the rename alone, for a session worth a title while the main
+Each one either prepares and stops — writing the task file and leaving you
+to type the command — or carries the transition out for you, typing the
+command and a one-line prompt that resumes the work on the far side. Which
+one you get is decided by what you ask for. `/handoff:autoname` is the
+third skill: the rename alone, for a session worth a title while the main
 thread stays live.
 
-All four write the same file; a `SessionStart` hook injects it back,
-verbatim, into whatever comes next.
+Both write the same file; a `SessionStart` hook injects it back, verbatim,
+into whatever comes next.
 
 ## Setup
 
@@ -65,11 +65,11 @@ To have the reset carried out instead, ask for the continuation:
 
 - "continue after clear"
 - "continue in a new session"
-- "handoff, clear, continue"
+- "clear and continue"
 
-or invoke `/handoff:handoff-continue`. It does everything `handoff` does,
-then names the session, clears it, and submits a one-line prompt into the
-fresh one. No summarisation cost — the task frame is what crosses.
+It does everything the prepare-only path does, then names the session,
+clears it, and submits a one-line prompt into the fresh one. No
+summarisation cost — the task frame is what crosses.
 
 To name the session *without* a handoff — a `/btw` side conversation, or
 any session worth a title while the main thread stays live — invoke
@@ -86,15 +86,15 @@ the conversation — anything that has to survive *exactly* should be on disk
 first. Both skills capture durable learnings in auto-memory, commit them if
 your repo is gitlore-managed, and write the task file.
 
-`/handoff:precompact` stops there, and you run `/compact` yourself; the task
-file is still re-injected when it finishes, because the skill marked the
-compaction as expected. `/handoff:compact-continue` goes on to drive it:
-`/compact` is typed into the prompt once your turn ends, and once it
-finishes, the task file is re-injected and a one-line continuation prompt is
-submitted. You do not run `/compact` yourself, and you do not have to type
-anything to resume.
+Ask for the compaction to be prepared — "precompact", "before I compact" —
+and you run `/compact` yourself; the task file is still re-injected when it
+finishes, because the skill marked the compaction as expected. Ask for it to
+be carried out — "compact and continue" — and `/compact` is typed into the
+prompt once your turn ends, and once it finishes, the task file is
+re-injected and a one-line continuation prompt is submitted. You do not run
+`/compact` yourself, and you do not have to type anything to resume.
 
-All four write the same `.claude/handoff-task.md`. That is the durable side
+Both boundaries write the same `.claude/handoff-task.md`. That is the durable side
 of the seam — it carries whatever must survive verbatim, at whatever length
 the work demands. The continuation prompt is only a handle to it.
 
@@ -146,7 +146,7 @@ files instead of leaving stale ones, so the next session starts clean.
 | Durable facts, preferences, feedback | auto-memory |
 | Conversation transcript, resume | session JSONL + `claude -c` |
 | Summarising the conversation | Claude Code `/compact`, Session Memory |
-| **Compacting without losing the thread** | **this plugin** (`precompact` / `compact-continue`) |
+| **Compacting without losing the thread** | **this plugin** (`precompact`) |
 | Code state | the repo |
 | **Current task + open decisions across `/clear`** | **this plugin** |
 
@@ -212,8 +212,7 @@ current project is modified.
 - [`skills/handoff/SKILL.md`](skills/handoff/SKILL.md) — the skill
   that the agent follows when you ask for a handoff.
 - [`skills/precompact/SKILL.md`](skills/precompact/SKILL.md) — the
-  compact-boundary protocol; `compact-continue` runs it and then arms the
-  transition.
+  compact-boundary protocol.
 
 ## License
 

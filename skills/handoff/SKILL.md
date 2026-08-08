@@ -1,32 +1,57 @@
 ---
 name: handoff
-description: Snapshot the in-progress task and still-open decisions before a `/clear` or new session, so the next session resumes where this one left off. A lightweight, local task frame — not a conversation summary. Prepares only; it types nothing. Use when the user asks to "save handoff", "save context", "prepare handoff", "prepare clear", "write handoff", "before /clear", "before I clear", "clear handoff", "discard handoff", "clean handoff", "finalize", "wrap up", "I'm done", "/handoff", "handoff", "conversation too long", "end", or "goodbye", or otherwise signals an imminent `/clear` or end of task. When the user wants the reset carried out rather than prepared — "continue after clear", "continue in a new session" — use the handoff-continue skill instead.
+description: Snapshot the in-progress task and still-open decisions before a `/clear` or new session, so the next one resumes where this left off — and, when asked, carry the reset out: name the session, `/clear`, and submit a continuation prompt into the fresh one. A lightweight, local task frame, not a conversation summary. Use when the user asks to "save handoff", "save context", "prepare handoff", "prepare clear", "write handoff", "before /clear", "before I clear", "clear handoff", "discard handoff", "clean handoff", "finalize", "wrap up", "I'm done", "/handoff", "handoff", "conversation too long", "end", "goodbye", "continue after clear", "continue in a new session", "clear and continue", "pick this up in a new chat", or otherwise signals an imminent `/clear` or end of task. To compact rather than clear, use the precompact skill.
 ---
 
-# handoff — Pre-Clear Task Snapshot
+# handoff — Task Snapshot at the Clear Boundary
 
-Preserve the irreducible residual across `/clear`: what was in
-progress and what's still undecided. `handoff-checkpoint` handles the
-writes and staging — this skill's job is deciding what goes in the task
-file.
+Preserve the irreducible residual across `/clear`: what was in progress
+and what's still undecided. When the user wants the reset carried out
+rather than prepared, this skill drives it too — the rename, the `/clear`,
+and the prompt that resumes the work on the far side.
+
+A clear is the cheaper reset. A compaction pays to summarise and loses
+accuracy doing it; a clear discards the conversation and carries the frame
+across intact. What it gives up is everything the frame does not carry,
+which is the plugin's whole thesis about what a session boundary needs.
+
+`handoff-checkpoint` handles the writes, the staging and the transition
+file — this skill's job is deciding what goes in them.
 
 ## Protocol
 
-### Step 1: Will a commit carry this session's memory?
+### Step 1: Decide what this call is for
 
-Decide from the request and the state of the work, without making any tool
-calls. Two answers, of equal weight:
+Three answers, from the request and the state of the work, without making
+any tool calls. None of them has a default: a default is the answer given
+by an agent that never considered the question, and considering it is the
+whole contribution.
 
-- **`with-commit`** — a commit is going to land the change this session's
-  memory documents. The routine wrap-up (`/handoff`, then `/commit`) is
-  this answer; so is a change already made but committed later, even in a
-  later session, since the memory belongs in that commit either way.
-- **`without-commit`** — no such commit is coming. What the session learned
-  stands on its own.
+**Is the transition typed?** `clear: true` when the user asked for the
+reset to be carried out — "clear and continue", "continue in a new
+session", "pick this up in a new chat". `clear: false` when they are
+preparing one they will run themselves — "save handoff", "before I clear",
+"wrap up". A request that asks for the clear **is** the authorization to
+clear; do not ask whether to proceed.
 
-There is no default, and the answer is about where the memory belongs
-rather than which command the user typed. It feeds the probe invocation in
-Step 3, and it changes what the other steps write.
+**Is there a continuation prompt?** `continue` is one line of prose,
+submitted into the session the clear opens, or `null` when nothing follows
+it. The seam section below decides what it carries. It is only meaningful
+alongside a typed transition — nothing would type it otherwise, and the
+checkpoint rejects the combination.
+
+**Does the ask imply a commit?** Two answers of equal weight:
+
+- **`with-commit`** — the request this call serves implies a commit.
+  "handoff and commit" does; so do "handoff and amend" and "handoff and
+  ci", which contain neither the word nor a substring of it. The test is
+  interpretation, not a keyword.
+- **`without-commit`** — it does not. What the session learned stands on
+  its own.
+
+The ask stops at the transition. A commit named in a continuation prompt is
+on the far side of it, where no live session owes it, so it is not evidence
+of `with-commit`.
 
 Under `with-commit`, memory bodies state present-tense truth — the change
 described as made rather than proposed. Memory phrased as pending is false
@@ -62,6 +87,8 @@ handoff-checkpoint <<'JSON'
   "skill": "handoff",
   "commit": "<with-commit|without-commit>",
   "rename": "<session title>",
+  "clear": <true|false>,
+  "continue": <"one line of prose"|null>,
   "task": {"file_path": "<abs path to>/.claude/handoff-task.md", "content": "<task content, or omit the whole field with null>"},
   "todo": {"file_path": "<abs path to>/.claude/handoff-todo.md", "content": "<todo content, or omit the whole field with null>"}
 }
@@ -74,6 +101,16 @@ not from a wipe. `todo` may also carry an incremental edit
 (`old_string`/`new_string`) instead of full `content`, for striking a
 finished item without regenerating the whole list.
 
+Author the continuation prompt **silently**. It gets typed visibly into the
+composer and lands in scrollback, so reprinting it in the reply shows the
+same text twice with no veto value.
+
+When the ask includes a commit, it lands **before** the transition is
+armed: before this call when nothing holds the sentinel back, and before
+`handoff-approved` when the directive in step 4 does. Arm first and the
+clear runs at the turn boundary instead of the commit — and under
+`with-commit` that strands memory owed to a commit nobody makes.
+
 ### Step 4: Follow the directive
 
 `handoff-checkpoint` prints nothing when there is nothing further to do. If
@@ -82,12 +119,18 @@ instructions. The checkpoint owns the decision — do not re-derive or verify
 it. A non-zero exit names the offending field on stderr — fix the payload
 and retry.
 
+A driven transition whose directive needs an answer is written but not
+armed, and the directive says how to release it. That is what keeps the
+clear from running at the end of the turn that asked the question.
+
 ### Step 5: Say what the boundary is ready for
 
-Once nothing is left awaiting an answer, end on one line naming what comes
-next. Under `with-commit` that is the commit, then the clear — "Ready to
-commit, then /clear". Under `without-commit` it is the clear alone. One
-line: the frame is on disk and this is a handover, not a report.
+Once nothing is left awaiting an answer, end on one line. Where the
+transition is prepared, name what comes next: under `with-commit` the
+commit then the clear — "Ready to commit, then /clear" — and under
+`without-commit` the clear alone. Where it is driven, one line saying the
+clear is armed, and the turn ends. The frame is on disk and this is a
+handover, not a report.
 
 **Task file template:**
 
@@ -145,9 +188,9 @@ Todo file rules:
 
 ## The seam: files vs. continuation prompt
 
-Both files are re-injected verbatim on the far side of the transition. A
-continuation prompt — which the driven skills author and this one does not
-— is one line typed into a composer. So they carry different things:
+Both files are re-injected verbatim on the far side of the transition. The
+continuation prompt is one line typed into a composer. So they carry
+different things:
 
 - **Task file** — everything that must survive exactly: in-flight threads,
   open questions, identifiers, commit ranges, paths a decision hinges on.
@@ -158,7 +201,8 @@ continuation prompt — which the driven skills author and this one does not
 The failure mode is a prompt carrying facts. `report on the driver, then
 cut the release covering 7f3c70c..a3b9cef` is wrong: that commit range is
 content, and it belongs in the task file. `pick up the release described
-in the task file` is right.
+in the task file` is right. A clear does not summarise, so a fact left out
+of the files is simply gone.
 
 Write the prompt as an instruction to the agent on the far side, which will
 have the files and the repo — and, after a compaction, a summary — but not
@@ -167,9 +211,8 @@ this conversation. Name the next action, not the topic.
 - Good: `continue with the watcher tests per the task file`
 - Bad: `continue` / `keep going with the plugin work`
 
-Author it **silently**. Do not reprint it in the reply: it gets typed
-visibly into the prompt and lands in scrollback, so echoing it shows the
-same text twice with no veto value.
+It must be a **single line**: one Enter is one submit, so an embedded
+newline would submit it early.
 
 ## Anti-patterns
 
@@ -187,6 +230,14 @@ same text twice with no veto value.
   at load time and goes stale the moment the user commits after handoff.
   If uncommitted work matters, what matters is *why* (tests red, decision
   pending) — write that as an open decision, not a status line.
+- Asking whether to clear, or telling the user to run `/clear`, under a
+  driven transition. Both are settled by the request and the armed file.
+- Reprinting the continuation prompt, or printing the `/clear` line, as
+  something for the user to run. There is one producer of that pasteable
+  form and it is the hook — which is also what covers a session outside
+  tmux, where there is no composer to type into.
+- Writing `.claude/autodrive` directly. The checkpoint composes it from
+  the payload; a hand-written one is a second writer of the same channel.
 
 ## Additional resources
 

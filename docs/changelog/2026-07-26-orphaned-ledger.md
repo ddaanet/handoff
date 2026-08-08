@@ -19,6 +19,13 @@ suppressed by that file and was told to bring "the ledger" current. It
 complied: unrelated findings appended to a ledger whose header claims a
 different plan, and the todo file it had already written deleted.
 
+> **Superseded 2026-08-08** (see [The ledger and the todo file are different
+> scopes](2026-08-08-ledger-and-todo-are-different-scopes.md)) — the
+> suppression itself, which stood `handoff-todo.md` down whenever a ledger was
+> live. Only the plan's own tasks are excluded from it now. The liveness
+> detection this entry introduces is unchanged, and so is everything below
+> about how to detect it.
+
 **The harm is the suppression, not the nudge.** `handoff-todo.md` is the half
 of the frame that survives a `/clear`; deferring to an abandoned ledger risks
 losing the real remainder or believing a stale one — precisely the failure
