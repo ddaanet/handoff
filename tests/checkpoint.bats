@@ -740,6 +740,84 @@ continue with task 3" ]
 }
 
 # ==========================================================================
+# skill: "autoname" — the rename on its own
+#
+# Neither boundary: no wrap-up, no memory, no transition. Its payload is its own
+# name and a title, and every field either boundary carries is a schema error
+# under it rather than a silent ignore — a field nobody reads is a decision
+# nobody made. Routing it through here is what leaves the checkpoint as the
+# sentinel's one writer.
+# ==========================================================================
+
+@test "checkpoint: autoname -> the rename sentinel, armed, and nothing else" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"autoname", rename:"A Side Conversation"}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$repo/.claude/autodrive")" = "armed
+rename
+/rename A Side Conversation" ]
+    handoff_drive_read "$repo/.claude/autodrive"
+    [ "$DRIVE_STATE" = "armed" ]
+    [ "$DRIVE_KIND" = "rename" ]
+}
+
+# It touches neither file, and the manifest is still written: bash-post.sh's
+# fast-exit gate is the manifest's presence, so a zero-line one is what lets it
+# notice a call that wrote nothing but the sentinel.
+@test "checkpoint: autoname -> manifest present but empty, neither file touched" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"autoname", rename:"A Side Conversation"}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ -f "$repo/.claude/checkpoint-manifest" ]
+    [ ! -s "$repo/.claude/checkpoint-manifest" ]
+    [ ! -e "$repo/.claude/handoff-task.md" ]
+    [ ! -e "$repo/.claude/handoff-todo.md" ]
+}
+
+@test "checkpoint: rename missing under autoname -> error naming rename" {
+    repo="$(make_repo)"
+    payload=$(jq -nc '{skill:"autoname"}')
+    run_checkpoint_err "$repo" "$payload"
+    [[ "$stderr" == *"rename"* ]]
+}
+
+@test "checkpoint: every field of the two boundaries is a schema error under autoname" {
+    repo="$(make_repo)"
+    while read -r field value; do
+        payload=$(jq -nc --arg f "$field" --argjson v "$value" \
+            '{skill:"autoname", rename:"A Side Conversation"} + {($f): $v}')
+        run_checkpoint_err "$repo" "$payload"
+        [[ "$stderr" == *"$field"* ]]
+        [[ "$stderr" == *"autoname"* ]]
+    done <<'FIELDS'
+commit "with-commit"
+task {"file_path":"/x/.claude/handoff-task.md","content":"body"}
+todo {"file_path":"/x/.claude/handoff-todo.md","content":"body"}
+clear true
+compact true
+continue "pick up per the task file"
+FIELDS
+}
+
+# The load-bearing negative. autoname's own description promises no memory
+# write, and a memory directive is an instruction to make one — so the gate
+# belongs inside the boundary branch rather than ahead of it.
+#
+# Mutation check: restore the unconditional checkpoint_memory_directive and this
+# row alone goes red, while the handoff and precompact directive rows below stay
+# green.
+@test "checkpoint: autoname against dirty memory -> no directive at all" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    payload=$(jq -nc '{skill:"autoname", rename:"A Side Conversation"}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+# ==========================================================================
 # bin/handoff-approved — the one command that leaves `held`
 # ==========================================================================
 

@@ -1,5 +1,12 @@
 ## Remaining
 
+- Have the walker confirm the line reached the composer before Enter. Observed
+  2026-08-09: a `/compact` line left the composer empty with nothing in the
+  transcript, and `submit_consumed` reported "was typed and Entered" 300s
+  later — asserted, never observed. Both a `send-keys` to a dead pane (exit
+  status unread) and a pane in copy mode swallow the text this way. The pane is
+  the legitimate witness for *typing landing*; only did-it-take-effect is
+  forbidden to read there, and `is_unknown_command` already reads it.
 - Implement `plans/2026-08-05-checkpoint-root-via-updatedinput.md` — red bats
   first, including the batched-command row that a bare `VAR=` prefix would only
   pass by accident.

@@ -50,7 +50,12 @@ goes through the detached walker spawned by a hook at a turn boundary, never
 from inside a live turn. See
 `docs/changelog/2026-08-05-transitions-become-modes.md` and
 `docs/changelog/2026-07-29-driven-transitions.md`. `handoff-task.md` is written **only** by the checkpoint
-(FR3): a direct agent Write/Edit is denied outright by `write-guard.sh`.
+(FR3), and so is the sentinel — `autoname` is a third `skill` value on the same
+call rather than a Write from a template in its skill body, which leaves one
+producer for a file whose composer reads its own output back through the
+parser. A direct agent Write/Edit to either is denied outright by
+`write-guard.sh`. See
+`docs/changelog/2026-08-09-one-writer-for-the-sentinel.md`.
 
 `handoff-todo.md` is different: it is a scratch list the agent edits freely
 all session (FR4), and the checkpoint's wrap-up call is only where the final
@@ -80,10 +85,16 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   reports what the boundary is ready for, in one line. It writes no sentinel
   itself — the checkpoint composes it.
 - `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
-  session title from the conversation (no tool calls) and writes
-  `.claude/autodrive` directly with the Write tool, two lines: `rename`, then
-  `/rename <title>`. Rename-only — no task file, no memory. For `/btw` side
-  conversations and any session worth a name while the main thread stays live.
+  session title from the conversation (no tool calls), then runs one
+  `handoff-checkpoint` Bash call whose whole payload is
+  `{"skill": "autoname", "rename": "<title>"}`. Rename-only — no task file, no
+  memory, no transition — and every other field is schema-forbidden there,
+  which is also what keeps the memory directive from being composed for a call
+  whose description promises no memory write. It writes no sentinel itself; the
+  checkpoint composes the same `rename` kind it composes for an untyped
+  `handoff`. For `/btw` side conversations and any session worth a name while
+  the main thread stays live. See
+  `docs/changelog/2026-08-09-one-writer-for-the-sentinel.md`.
 - `skills/precompact/SKILL.md` — the compact boundary's full protocol
   (`/handoff:precompact`), driven or not. Decide the same three fields as
   handoff's step 1 (`compact` carries the focus directive when there is one),
@@ -95,7 +106,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   writes no sentinel itself.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in `docs/design.md`
-- `hooks/hooks.json` — declares ten hooks.
+- `hooks/hooks.json` — declares nine hooks.
   `SessionStart` (every source, wildcard matcher): publish this session's
   resolved root at `/tmp/claude/handoff-root-<session_id>` via
   `session-pointer.sh`, so the agent's own Bash can reach it.
@@ -104,10 +115,11 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `additionalContext`; on `clear`, also consume a transition in state `pending`
   of kind `clear` and spawn the walker for its after-line.
   `PreToolUse(Write|Edit)`: deny any direct agent Write/Edit to
-  `handoff-task.md` — it is checkpoint-only (FR3) — and deny writes whose
+  `handoff-task.md` (checkpoint-only, FR3) or to `autodrive` (composed by the
+  checkpoint, which reads its own output back) — and deny writes whose
   resolved path is not `$cwd/.claude/<file>` (cross-project guard).
   `PostToolUse(Write|Edit)`: stage `handoff-todo.md` for commit when the
-  agent writes it directly; validate an `autodrive` write.
+  agent writes it directly.
   `PostToolUse(Bash)`: consume `.claude/checkpoint-manifest` after
   `handoff-checkpoint` runs — stage every listed path (deletions included).
   `PostToolBatch` (no matcher): measure this session's prompt size and nudge
@@ -197,11 +209,16 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `handoff-task.md` written only by the checkpoint (FR3), there is no
   "before/after activation" distinction left to detect. See
   `docs/changelog/2026-07-27-one-channel-one-writer.md`.
-- `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard. Denies any
-  direct agent Write/Edit to `handoff-task.md` unconditionally — it is
-  checkpoint-only (FR3) — and denies writes whose resolved path is not
-  `$cwd/.claude/<file>` (cross-project misfires). No longer covers
-  `handoff-todo.md`, which the agent is meant to edit directly (FR4).
+- `scripts/write-guard.sh` — PreToolUse(Write|Edit) guard over the two
+  checkpoint-only files: `handoff-task.md` (FR3) and `autodrive`, the second
+  (basename, rel) pair `handoff_match_target` takes. Denies any direct agent
+  Write/Edit to either unconditionally, naming the one that matched via
+  `MATCHED_NAME`, and denies writes whose resolved path is not
+  `$cwd/.claude/<file>` (cross-project misfires). Its deny is what replaced
+  `write-drive.sh`, the sentinel's `PostToolUse` validator: with no agent
+  writer left, a second parser position had no subject, and the arm-only rule
+  it enforced died with it. No longer covers `handoff-todo.md`, which the agent
+  is meant to edit directly (FR4).
 - `scripts/drive-when-idle.sh` — the one detached watcher: the walker.
   Spawned by `stop-drive.sh` for the lines typed before a transition, and by
   the transition's own `SessionStart` loader for the lines typed after it. One
@@ -256,19 +273,6 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   the removal when the edit left it with no substantive content (a `##
   Remaining` with no items). `handoff-task.md` no longer takes this path; it
   is checkpoint-only (FR3) and staged via the manifest instead.
-- `scripts/write-drive.sh` — PostToolUse(Write|Edit) entry point for the
-  transition driver. Matches writes resolving to `$cwd/.claude/autodrive` and
-  **validates only**, via `handoff_drive_read`. Never spawns, never deletes —
-  the file must survive to `Stop`. A malformed file gets a `systemMessage` plus
-  an imperative `additionalContext` naming the constraint that failed, so the
-  agent can fix it in the same turn instead of hitting a silent no-op at `Stop`;
-  it deliberately does not restate the legal shapes, since the skill body that
-  wrote the file is their source of truth. It does state the one rule no skill
-  body owns: this channel writes state `armed` only. Every state after that is
-  a hook's to write, and an agent-authored `pending` would be inert on every
-  gate — `Stop` ignores it, no loader owns its kind, the sweep exempts it — so
-  it would survive until something overwrote it. Path matching is the
-  consume-time cross-project guard: no PreToolUse guard, no activation gate.
 - `scripts/stop-drive.sh` — `Stop` entry point: arms the transition. Acts only
   on state `armed`, so a transition already in flight cannot be re-armed — the
   guarantee its consume-before-spawn ordering used to give implicitly, and that
@@ -415,9 +419,13 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   composer and the parser cannot drift. The state it writes is `held` iff the
   sentinel types a transition **and** a memory directive was emitted, and
   `armed` otherwise; `bin/handoff-approved` is the only thing that leaves
-  `held`. `rename` is required under `skill: "handoff"` and forbidden under
-  `precompact`: it makes a `handoff` call that forgot its title an error rather
-  than a silent non-rename. Then it prints the directive output (FR9, via
+  `held`. `rename` is required wherever a title is decided — `skill: "handoff"`
+  and `skill: "autoname"` — and forbidden under `precompact`: it makes a call
+  that forgot its title an error rather than a silent non-rename. `autoname` is
+  the third `skill` value and neither boundary: its whole payload is its own
+  name and a title, every other field is a schema error under it, and the
+  memory gate lives inside the boundary branch so that call composes no
+  directive at all. Then it prints the directive output (FR9, via
   `_checkpoint-lib.sh`), with the arming instruction composed onto the memory
   directive when the sentinel is held. NFR1: it does no `git` or `tmux` work
   itself — see `bash-post.sh`. The Edit form's exact string
@@ -604,10 +612,17 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   (`old_string` absent, ambiguous, successful), empty-body removal through
   both writers (`checkpoint.sh` and `write-stage.sh`) including that the
   deletion reaches the manifest, and `bash-post.sh` (manifest absent,
-  manifest present, a sentinel left untouched). The `skill` enum's two values
+  manifest present, a sentinel left untouched). The `skill` enum's three values
   each accepted, the two retired driven-skill names rejected, `rename` rejected
-  under `precompact`, and each boundary's directive asserted against the
-  absence of the other's.
+  under `precompact` and required under the other two, and each boundary's
+  directive asserted against the absence of the other's.
+  `skill: "autoname"` adds five rows: the exact sentinel it composes (read back
+  through `handoff_drive_read` as kind `rename` in state `armed`), the empty
+  manifest with neither file touched, `rename` missing, each of the six fields
+  the boundaries carry rejected by name, and the load-bearing negative —
+  an `autoname` call against a dirty memory submodule emits no directive at
+  all, mutation-checked by restoring the unconditional
+  `checkpoint_memory_directive` and watching that row alone go red.
   The transition fields add their own matrix: each of `clear`/`compact`/
   `continue` missing, each with a value outside its type, the other boundary's
   transition field present, an empty or multi-line `compact` directive, a
@@ -646,7 +661,7 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   verified by mutation afterwards rather than in the red phase.
   The compaction driver is covered in the two existing suites rather than a
   new file: `tests/hook-test.bats` for the `handoff_drive_read` shape matrix,
-  `write-drive.sh` / `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on
+  `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on
   `source: "clear"` / `report-watcher-failure.sh`, and `tests/watcher-test.bats`
   for the walker, the pane predicates,
   and — since the states became content — the four state gates, each paired

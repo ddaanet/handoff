@@ -219,12 +219,10 @@ larger half of both descriptions, since that is the reading a bare
 "handoff" or "precompact" should get.
 
 - **`/handoff:autoname`** — rename only, neither boundary. Decides a title
-  and writes the sentinel with the Write tool. For `/btw` side
-  conversations and any session worth a name while the main thread stays
-  live.
-
-- **`/handoff:autoname`** — rename only, neither boundary. Decides a title
-  and writes the sentinel with the Write tool. For `/btw` side
+  and calls the checkpoint with `{"skill": "autoname", "rename": …}`, the
+  whole payload. Every other field is a schema error under it, and no
+  directive is composed — its description promises no memory write, and a
+  memory directive is an instruction to make one. For `/btw` side
   conversations and any session worth a name while the main thread stays
   live.
 
@@ -246,8 +244,10 @@ decisions.
 
 One sentinel, `.claude/autodrive`, whose first line is its **state** and
 second line the kind. The states are `held` → `armed` → `pending` → gone,
-and every one after the first is a hook's to write; the agent-authored
-channel (`write-drive.sh`) accepts `armed` alone. The remaining lines are the **literal keystrokes**, so
+and every one after the first is a hook's to write. `checkpoint.sh` is the
+file's one writer — it composes the sentinel and reads its own output back
+through the parser, so composer and parser cannot drift, and a direct agent
+Write or Edit is denied at `PreToolUse`. The remaining lines are the **literal keystrokes**, so
 the walker never needs to know which command belongs to which kind;
 validation anchors it instead — the *n*th line of kind *k* must begin with
 the expected command literal, so the file cannot be made to type something

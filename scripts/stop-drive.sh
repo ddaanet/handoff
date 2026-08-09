@@ -29,8 +29,9 @@ drive="$cwd/$HANDOFF_REL_DRIVE"
 [[ -f "$drive" ]] || exit 0
 
 if ! handoff_drive_read "$drive"; then
-    # write-drive.sh already told the agent in-turn; consuming the file here
-    # stops the same complaint from repeating at every subsequent Stop.
+    # Unreadable: the checkpoint reads its own output back and refuses to leave
+    # one behind, so this is a file no writer of this version composed.
+    # Consuming it stops the complaint repeating at every subsequent Stop.
     rm -f "$drive"
     jq -nc --arg e "$DRIVE_ERR" \
         '{systemMessage: ("handoff: autodrive malformed — " + $e + "; discarded, transition not armed.")}'

@@ -600,6 +600,47 @@ compact" ]
         | test("checkpoint")' >/dev/null
 }
 
+# autodrive is the guard's second (basename, rel) pair. It is composed by
+# handoff-checkpoint, which reads its own output back through the parser, so a
+# direct agent write is denied on the same ground as handoff-task.md — and the
+# arm-only rule dies with the channel it lived in.
+@test "write-guard (autodrive: deny a Write, checkpoint-only)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autodrive" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
+        | test("autodrive") and test("checkpoint")' >/dev/null
+}
+
+@test "write-guard (autodrive: deny an Edit too)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$1/.claude/autodrive" \
+            "{cwd:\$cwd, tool_name:\"Edit\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+# MATCHED_NAME is what lets one deny name the file that matched; with two pairs,
+# a cross-project autodrive that reported handoff-task.md would send the agent
+# to the wrong file.
+@test "write-guard (cross-project autodrive: deny naming autodrive)" {
+    run bash -c '
+        jq -nc --arg cwd "$1" --arg fp "$2/.claude/autodrive" \
+            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | bash scripts/write-guard.sh
+    ' _ "$tmp" "$other"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.permissionDecisionReason
+        | test("autodrive")' >/dev/null
+}
+
 # handoff-todo.md is a scratch list the agent edits freely all session (FR4)
 # — no PreToolUse guard covers it any more.
 @test "write-guard (handoff-todo.md: allow, no longer guarded)" {
@@ -823,110 +864,11 @@ run_load_handoff() {
     echo "$output" | jq -e '.systemMessage | test("pick up") | not' >/dev/null
 }
 
-# --- write-drive (PostToolUse validator) ---
-#
-# Validate only: never spawns, never deletes. The file must survive to Stop,
-# which is the hook that actually arms the transition.
-
-# Seed .claude/autodrive under $1 in state `armed` — what an agent or the
-# checkpoint writes — with the remaining args as the lines below it.
+# Seed .claude/autodrive under $1 in state `armed` — what the checkpoint, the
+# file's one writer, leaves behind — with the remaining args as the lines below.
 seed_drive() {
     local dir="$1"; shift
     printf '%s\n' "armed" "$@" > "$dir/.claude/autodrive"
-}
-
-run_write_drive() {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$2/.claude/autodrive" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-drive.sh
-    ' _ "$1" "${2:-$1}"
-}
-
-@test "write-drive (well-formed rename: silent, file survives)" {
-    seed_drive "$tmp" "rename" "/rename Driven Transitions"
-    run_write_drive "$tmp"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-    [ -f "$tmp/.claude/autodrive" ]
-}
-
-@test "write-drive (well-formed compact: silent)" {
-    seed_drive "$tmp" "compact" "/compact focus on the parser" "continue with task 3"
-    run_write_drive "$tmp"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-drive (well-formed clear: silent)" {
-    seed_drive "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
-    run_write_drive "$tmp"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-drive (prepare-only compact marker: silent)" {
-    seed_drive "$tmp" "compact"
-    run_write_drive "$tmp"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-drive (malformed: directive on both channels, file survives)" {
-    seed_drive "$tmp" "clear" "/rename A Title"
-    run_write_drive "$tmp"
-    [ "$status" -eq 0 ]
-    [ -f "$tmp/.claude/autodrive" ]
-    echo "$output" | jq -e '.systemMessage | test("malformed")' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("4 or 5 lines")' >/dev/null
-}
-
-@test "write-drive (unknown kind: directive names the kinds)" {
-    seed_drive "$tmp" "reboot" "/reboot now"
-    run_write_drive "$tmp"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("transition kind")' >/dev/null
-}
-
-# The agent's channel is arm-only. Every state after `armed` is a hook's to
-# write, and a `pending` file the agent authored is inert on every gate: Stop
-# ignores it, no loader owns its kind, and the sweep exempts pending. It would
-# sit there until something overwrote it.
-@test "write-drive (agent writes a non-armed state: reported, file survives)" {
-    seed_pending "$tmp" "clear" "/rename A Title" "/clear" "pick up per the task file"
-    run_write_drive "$tmp"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.systemMessage | test("armed")' >/dev/null
-    echo "$output" | jq -e \
-        '.hookSpecificOutput.additionalContext | test("Rewrite it now")' >/dev/null
-    # Validate only — this hook never deletes, whatever it finds.
-    [ -f "$tmp/.claude/autodrive" ]
-}
-
-@test "write-drive (unrelated path: no-op)" {
-    run bash -c '
-        jq -nc --arg cwd "$1" --arg fp "$1/README.md" \
-            "{cwd:\$cwd, tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
-        | bash scripts/write-drive.sh
-    ' _ "$tmp"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-drive (cross-project autodrive: no-op)" {
-    seed_drive "$other" "clear" "/rename A Title" "/clear"
-    run_write_drive "$tmp" "$other"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "write-drive (worktree cwd: validates the worktree autodrive)" {
-    wt="$(make_worktree wtC)"
-    seed_drive "$wt" "bad kind" "/whatever"
-    run_write_drive "$wt"
-    [ "$status" -eq 0 ]
-    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("transition kind")' >/dev/null
 }
 
 # --- stop-drive (Stop: arm the transition) ---

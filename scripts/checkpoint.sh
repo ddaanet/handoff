@@ -64,39 +64,50 @@ pointer="$(handoff_pointer_path "$session_id")"
 root="$(head -n1 "$pointer")"
 [ -d "$root" ] || err "root" "the session root pointer at $pointer does not name a directory (got \"$root\")"
 
-# Two skills, one per boundary. Whether the transition is typed is a field of
-# the payload, not a skill of its own — the judgment the directive output
-# encodes was always per-boundary, and the driven skills only ever added the
-# keystrokes.
+# Two boundaries, one skill each — plus autoname, which is neither. Whether the
+# transition is typed is a field of the payload, not a skill of its own: the
+# judgment the directive output encodes was always per-boundary, and the driven
+# skills only ever added the keystrokes.
 skill="$(field_get skill)"
 case "$skill" in
-    handoff | precompact) ;;
-    "" | null) err "skill" 'required, one of "handoff" or "precompact"' ;;
-    *) err "skill" "must be \"handoff\" or \"precompact\", got \"$skill\"" ;;
+    handoff | precompact | autoname) ;;
+    "" | null) err "skill" 'required, one of "handoff", "precompact" or "autoname"' ;;
+    *) err "skill" "must be \"handoff\", \"precompact\" or \"autoname\", got \"$skill\"" ;;
 esac
 
-commit_mode="$(field_get commit)"
-case "$commit_mode" in
-    with-commit | without-commit) ;;
-    "" | null) err "commit" 'required, one of "with-commit" or "without-commit"' ;;
-    *) err "commit" "must be \"with-commit\" or \"without-commit\", got \"$commit_mode\"" ;;
-esac
+# autoname carries one field beside its own name. It writes neither file, makes
+# no commit-awareness decision, no transition decision and no continuation
+# decision — so a field for one would be a decision nobody acted on, which is a
+# schema error here for the same reason `rename` is under "precompact".
+if [ "$skill" = "autoname" ]; then
+    for forbidden in commit task todo clear compact continue; do
+        ! payload_has_key "$forbidden" \
+            || err "$forbidden" 'forbidden when skill is "autoname"'
+    done
+else
+    commit_mode="$(field_get commit)"
+    case "$commit_mode" in
+        with-commit | without-commit) ;;
+        "" | null) err "commit" 'required, one of "with-commit" or "without-commit"' ;;
+        *) err "commit" "must be \"with-commit\" or \"without-commit\", got \"$commit_mode\"" ;;
+    esac
+fi
 
-# rename: required under skill:"handoff", forbidden (a schema error, not a
-# silent ignore) under "precompact", which renames nothing at all. Keeping it
-# required in the one place it belongs is what makes a `handoff` call that
-# forgot its title an error rather than a silent non-rename.
+# rename: required wherever a title is decided — "handoff" and "autoname" —
+# forbidden (a schema error, not a silent ignore) under "precompact", which
+# renames nothing at all. Keeping it required in the places it belongs is what
+# makes a call that forgot its title an error rather than a silent non-rename.
 rename=""
 if ! field_is_null rename; then
     rename="$(field_get rename)"
 fi
-if [ "$skill" = "handoff" ]; then
-    [ -n "$rename" ] || err "rename" 'required when skill is "handoff"'
+if [ "$skill" = "precompact" ]; then
+    [ -z "$rename" ] || err "rename" "forbidden when skill is \"$skill\""
+else
+    [ -n "$rename" ] || err "rename" "required when skill is \"$skill\""
     title="$(printf '%s' "$rename" | tr -s '[:space:]' ' ')"
     title="${title# }"; title="${title% }"
     [ -n "$title" ] || err "rename" "must be a non-empty title"
-else
-    [ -z "$rename" ] || err "rename" "forbidden when skill is \"$skill\""
 fi
 
 # The transition, and the continuation prompt submitted into what it opens.
@@ -115,7 +126,10 @@ fi
 drive_kind=""
 drive_cmds=()
 typed=false
-if [ "$skill" = "handoff" ]; then
+if [ "$skill" = "autoname" ]; then
+    drive_kind=rename
+    drive_cmds=("/rename $title")
+elif [ "$skill" = "handoff" ]; then
     ! payload_has_key compact || err "compact" 'forbidden when skill is "handoff"'
     payload_has_key clear || err "clear" 'required when skill is "handoff"'
     [ "$(field_type clear)" = "boolean" ] || err "clear" "must be true or false"
@@ -124,8 +138,8 @@ if [ "$skill" = "handoff" ]; then
         drive_kind=clear
         drive_cmds=("/rename $title" "/clear")
     else
-        # No transition, but the session is still renamed — the same one-line
-        # sentinel /handoff:autoname writes.
+        # No transition, but the session is still renamed — the same kind an
+        # autoname call composes above.
         drive_kind=rename
         drive_cmds=("/rename $title")
     fi
@@ -150,21 +164,23 @@ else
     esac
 fi
 
-payload_has_key continue || err "continue" "required, either null or one line of prose"
 continuation=""
-if ! field_is_null continue; then
-    [ "$(field_type continue)" = "string" ] \
-        || err "continue" "must be null or one line of prose"
-    continuation="$(field_get continue)"
-    require_one_line "continue" "$continuation"
-    # The walker dispatches on the leading character: a prose line that looked
-    # like a command would be confirmed by the wrong primitive.
-    case "$continuation" in
-        /*) err "continue" "must not begin with \`/\`" ;;
-    esac
-    # Nothing would type it. A silent drop loses a prompt the agent authored and
-    # reports nothing about it.
-    $typed || err "continue" "must be null when the transition is not typed"
+if [ "$skill" != "autoname" ]; then
+    payload_has_key continue || err "continue" "required, either null or one line of prose"
+    if ! field_is_null continue; then
+        [ "$(field_type continue)" = "string" ] \
+            || err "continue" "must be null or one line of prose"
+        continuation="$(field_get continue)"
+        require_one_line "continue" "$continuation"
+        # The walker dispatches on the leading character: a prose line that
+        # looked like a command would be confirmed by the wrong primitive.
+        case "$continuation" in
+            /*) err "continue" "must not begin with \`/\`" ;;
+        esac
+        # Nothing would type it. A silent drop loses a prompt the agent authored
+        # and reports nothing about it.
+        $typed || err "continue" "must be null when the transition is not typed"
+    fi
 fi
 
 # Validate one Write-form-or-null field ($1 = "task", never Edit) or one
@@ -336,10 +352,21 @@ fi
 # FR9: directive output (memory gate, SDD ledger nudge) unchanged in content
 # and composition order from the probes this replaces. One per boundary, and
 # the skill names the boundary.
-memory="$(checkpoint_memory_directive "$root" "$commit_mode")"
+#
+# The memory gate is inside the branch, not ahead of it: autoname is not a
+# boundary, its own description promises no memory write, and a memory directive
+# is an instruction to make one.
+memory=""
+second=""
 case "$skill" in
-    handoff)    second="$(checkpoint_todo_boundary "$root")" ;;
-    precompact) second="$(checkpoint_sdd_directive "$root")" ;;
+    handoff)
+        memory="$(checkpoint_memory_directive "$root" "$commit_mode")"
+        second="$(checkpoint_todo_boundary "$root")"
+        ;;
+    precompact)
+        memory="$(checkpoint_memory_directive "$root" "$commit_mode")"
+        second="$(checkpoint_sdd_directive "$root")"
+        ;;
 esac
 
 # The sentinel: its state, its kind, then the literal keystrokes. Composed here

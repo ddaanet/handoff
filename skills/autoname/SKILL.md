@@ -17,22 +17,24 @@ calls** to decide it. Title rules: ≤ ~50 characters, Title Case, no
 surrounding quotes, no trailing punctuation. The title is always
 derived from the conversation — autoname takes no argument.
 
-Then issue a single `Write` to `./.claude/autodrive`, of exactly three lines —
-the literal word `armed`, the literal word `rename`, then the rename as it
-will be typed:
+Then run `handoff-checkpoint` (Bash), piping the whole call as JSON on
+stdin via a heredoc:
 
 ```
-armed
-rename
-/rename <title>
+handoff-checkpoint <<'JSON'
+{"skill": "autoname", "rename": "<session title>"}
+JSON
 ```
 
-Line 1 is the transition's state. What the agent writes is always `armed`; the
-hooks own every state after that.
+Those two fields are the whole payload. Every other field the checkpoint
+takes belongs to a boundary this skill is not — no task file, no memory,
+no transition — and each is a schema error here rather than a silent
+ignore. A non-zero exit names the offending field on stderr.
 
-That is the only tool call. The hooks do the rest at the end of the turn:
-the session is renamed once the prompt goes idle, and outside tmux the
-lines are emitted for the user to paste instead.
+That is the only tool call. The checkpoint composes the transition file
+and the hooks do the rest at the end of the turn: the session is renamed
+once the prompt goes idle, and outside tmux the lines are emitted for the
+user to paste instead.
 
 ## Anti-patterns
 
@@ -40,5 +42,5 @@ lines are emitted for the user to paste instead.
   autoname is rename-only; for residual task state use the handoff skill.
 - Taking a title from the user's words verbatim when the conversation
   implies a better one. Derive the title; do not transcribe the request.
-- Any location other than `./.claude/autodrive` — the hook reads this
-  exact path.
+- Writing `.claude/autodrive` directly. The checkpoint is its one writer,
+  and a direct Write or Edit is denied.
