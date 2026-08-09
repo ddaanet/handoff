@@ -609,6 +609,19 @@ which is the inference this design refuses everywhere else.
 [Nudge the boundary at a context-size
 threshold](changelog/2026-08-01-context-threshold-trigger.md)
 
+**The newest sample on disk is one API call stale, and a compaction is where
+that matters.** `PostToolBatch` fires before the assistant entry carrying the
+current call's `usage` is flushed, so the measurement is always the previous
+call's — a rounding error while the prompt grows, an inversion across a
+compaction, where that sample measures the discarded context and is the largest
+of the session. So the measurement is scoped to samples newer than the last
+`isCompactSummary` entry, keying on the flag rather than on content as every
+transcript reader here does. A boundary with nothing newer measures nothing:
+between a compaction and its first API call there is no number to report, and
+the once-per-climb marker cannot cover the gap, `SessionStart(compact)` having
+just cleared it to re-arm the nudge. [A compaction invalidates every sample
+above it](changelog/2026-08-09-samples-are-scoped-to-the-compaction.md)
+
 ## Rejected alternatives
 
 **Loading via an `@.claude/handoff.md` reference** — the reference is

@@ -45,20 +45,31 @@ marker="$(handoff_context_path "$session_id")"
 
 [[ -n "$transcript" && -f "$transcript" ]] || exit 0
 
-# The newest usage sample in the tail window. `inputs` with `fromjson? // empty`
-# skips the partial line tail -c lands on, and `last` — rather than a sum — is
-# what makes the repeated message id harmless: the several JSONL entries of one
-# API response each repeat the same usage.
+# The newest usage sample in the tail window, since the last compaction.
+# `fromjson? // empty` skips the partial line tail -c lands on, and taking the
+# last rather than a sum is what makes the repeated message id harmless: the
+# several JSONL entries of one API response each repeat the same usage.
+#
+# The fold resets at each isCompactSummary entry. This hook fires before the
+# current call's entry is flushed, so the reading is always one API call late —
+# harmless while the prompt grows, wrong across a compaction, where that sample
+# measures the discarded context and is the session's largest. A boundary with
+# nothing newer yields nothing; one older than the window needs no handling,
+# everything in the window being newer than it.
 size="$(
     tail -c "${HANDOFF_CONTEXT_WINDOW:-262144}" "$transcript" |
         jq -Rn '[inputs
                  | fromjson? // empty
-                 | select(.message.usage)
-                 | .message.usage
-                 | (.input_tokens // 0)
-                   + (.cache_creation_input_tokens // 0)
-                   + (.cache_read_input_tokens // 0)]
-                | last // empty'
+                 | if .isCompactSummary == true then "boundary"
+                   elif .message.usage then
+                       (.message.usage
+                        | (.input_tokens // 0)
+                          + (.cache_creation_input_tokens // 0)
+                          + (.cache_read_input_tokens // 0))
+                   else empty end]
+                | reduce .[] as $x (null;
+                    if $x == "boundary" then null else $x end)
+                | . // empty'
 )"
 [[ -n "$size" ]] || exit 0
 

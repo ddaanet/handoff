@@ -1232,6 +1232,13 @@ usage_entry() {
             cache_read_input_tokens:$cr}}}'
 }
 
+# The compaction boundary the harness writes into the transcript. Flags, never
+# content: isCompactSummary is what marks the entry whose arrival means every
+# sample above it measures a context that no longer exists.
+compact_boundary() {
+    printf '%s\n' '{"type":"user","isCompactSummary":true,"message":{"content":"summary"}}'
+}
+
 run_context_threshold() {
     local tp="$1" sid="${2-$SESSION_ID}" aid="${3-}"
     run bash -c '
@@ -1299,6 +1306,43 @@ run_context_threshold() {
     run_context_threshold "$tmp/t.jsonl"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
+}
+
+# Load-bearing negative 3, and the live incident of 2026-08-09: a 197354 nudge
+# against a real context of 87253. The sample above a boundary measures the
+# context the compaction discarded, and SessionStart(compact) has just cleared
+# the marker that would otherwise absorb a second nudge.
+@test "context-threshold (compaction boundary, no newer sample: silent)" {
+    { usage_entry m1 100000 30000 40000; compact_boundary; } > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
+# A large pre-compaction sample, then a real post-compaction one well under
+# threshold. Silence here must come from measuring the newer sample, not from
+# the boundary suppressing the hook — which the row below separates it from.
+@test "context-threshold (compaction boundary, newer sample under: silent)" {
+    { usage_entry m1 100000 30000 40000; compact_boundary
+      usage_entry m2 10000 2000 3000; } > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
+# Paired with the two above: a post-compaction context climbs past the
+# threshold again, and the number reported must be that climb's.
+@test "context-threshold (compaction boundary, newer sample over: nudges)" {
+    { usage_entry m1 500000 0 0; compact_boundary
+      usage_entry m2 100000 30000 40000; } > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/handoff:precompact"* ]]
+    [[ "$output" == *"170000"* ]]
+    [[ "$output" != *"500000"* ]]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
 }
 
 @test "context-threshold (no usage entry in the window: silent)" {

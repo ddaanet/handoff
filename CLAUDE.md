@@ -375,7 +375,12 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `usage` sample, with `additionalContext` reaching the model on the next call
   of the same turn. Takes the **last** `.message.usage` in a `tail -c` window
   (never a sum: the several JSONL entries of one API response repeat the same
-  `usage`), and past `HANDOFF_CONTEXT_THRESHOLD` injects one directive naming
+  `usage`) **since the last `isCompactSummary` entry** — the hook fires before
+  the current call's entry is flushed, so it reads the previous call's sample,
+  harmless while the prompt grows and wrong across a compaction, where that
+  sample measures the discarded context. A boundary with nothing newer measures
+  nothing rather than falling back. Past
+  `HANDOFF_CONTEXT_THRESHOLD` it injects one directive naming
   `/handoff:precompact` and asking for the compaction to be carried out — the
   skill reads the transition decision off the ask, so naming it alone would
   turn every crossing into a prepared compaction nobody runs. A nudge, never a
@@ -647,14 +652,20 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   files survive (drop `-mtime +7`). Those guard-rails reach as far as their
   fixture: the foreign file is named `somebody-elses-file`, so widening the
   filter to any `handoff-`-prefixed name is not caught.
-  The context-size threshold adds eleven rows to `tests/hook-test.bats` over a
-  synthetic transcript fixture (`usage_entry` builds one assistant entry;
+  The context-size threshold adds fourteen rows to `tests/hook-test.bats` over a
+  synthetic transcript fixture (`usage_entry` builds one assistant entry,
+  `compact_boundary` the flagged compaction entry;
   `run_context_threshold` drives the hook), plus three on `session-pointer.sh`
-  for the re-arm and its scoping. Two negatives are load-bearing and
+  for the re-arm and its scoping. Three negatives are load-bearing and
   mutation-checked rather than observed passing, each paired with a positive
-  over the same fixture: the subagent skip and the marker gate. Disable either
+  over the same fixture: the subagent skip, the marker gate, and the compaction
+  boundary with no newer sample. Disable any
   guard and the negative must go red while *"over threshold: nudges and writes
-  the marker"* stays green. The eleventh row asserts the invocation path — a
+  the marker"* stays green. The boundary's two companion rows (a newer sample
+  under and over the threshold) pass under the old unscoped `last` too, since
+  taking the newest number is already right whenever a newer number exists;
+  they are regression guards, and the mutation check is what says so — it reds
+  the no-newer-sample row alone. The invocation-path row asserts — a
   script `hooks.json` never names runs at no point, and every other row would
   still pass. The re-arm's own scoping row (*"leaves another session's context
   marker alone"*) cannot go red before the `rm -f` it guards exists, so it is
