@@ -1,5 +1,11 @@
 ## Remaining
 
+- Guard the walker's two transcript readers against a line that parses to a
+  scalar. `transcript_prompt_count` and `transcript_title_count` in
+  `scripts/_watcher-lib.sh` both call `.get()` on whatever `json.loads` returned,
+  and their `except json.JSONDecodeError` does not catch the `AttributeError` —
+  the Python mirror of the jq fold just fixed in `context-threshold.sh`. No
+  fixture exercises it.
 - Have the walker confirm the line reached the composer before Enter. Observed
   2026-08-09: a `/compact` line left the composer empty with nothing in the
   transcript, and `submit_consumed` reported "was typed and Entered" 300s
@@ -10,16 +16,16 @@
 - Implement `plans/2026-08-05-checkpoint-root-via-updatedinput.md` — red bats
   first, including the batched-command row that a bare `VAR=` prefix would only
   pass by accident.
-- Retire memory facts for index headroom. `MEMORY.md` is 23.1KB against the
-  24.4KB cutoff past which the loader silently drops the tail. Classify
-  WHEN / HOW / acted-inline first and relocate the acted-inline class, rather
-  than shortening hooks to hit a byte target.
+- Retire memory facts for index headroom. `MEMORY.md` is 23.4KB against the
+  24.4KB cutoff past which the loader silently drops the tail, and the write
+  hook now nudges on every edit. Classify WHEN / HOW / acted-inline first and
+  relocate the acted-inline class, rather than shortening hooks to hit a byte
+  target.
 - Fix `shared-claude.md`'s own contradiction in the `ddaanet` tier: it forbids
   naming the user in anything the agent authors, then says "get David's call".
   Six repos load that file, so the fix belongs at the tier and needs a push.
-- Release the context-size threshold trigger (minor bump), then keep watching
-  whether a nudge is ever ignored outright — that is the evidence that reopens
-  the halt.
+- Release the context-size threshold trigger, then keep watching whether a nudge
+  is ever ignored outright — that is the evidence that reopens the halt.
 - Split bash/Python per `plans/2026-07-31-python-rewrite-brief.md`.
 - Add handoff's `restart` transition kind per `brief-driven-restart.md`,
   including the `SessionEnd` marker hook and a `SessionStart(resume)` matcher —

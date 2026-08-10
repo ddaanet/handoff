@@ -97,15 +97,22 @@ fi
 # forbidden (a schema error, not a silent ignore) under "precompact", which
 # renames nothing at all. Keeping it required in the places it belongs is what
 # makes a call that forgot its title an error rather than a silent non-rename.
-rename=""
-if ! field_is_null rename; then
-    rename="$(field_get rename)"
-fi
+#
+# Forbidden means the key is absent, not that its value is empty: a template
+# that always emits the field and blanks it is the drift this catches, and it is
+# what the autoname branch above already means by forbidden. Required means a
+# string, checked before the flattening below — an object or a number survives
+# `jq -r` as pretty-printed text and would be typed as the session title.
+title=""
 if [ "$skill" = "precompact" ]; then
-    [ -z "$rename" ] || err "rename" "forbidden when skill is \"$skill\""
+    ! payload_has_key rename || err "rename" "forbidden when skill is \"$skill\""
 else
-    [ -n "$rename" ] || err "rename" "required when skill is \"$skill\""
-    title="$(printf '%s' "$rename" | tr -s '[:space:]' ' ')"
+    if ! payload_has_key rename || field_is_null rename; then
+        err "rename" "required when skill is \"$skill\""
+    fi
+    [ "$(field_type rename)" = "string" ] \
+        || err "rename" "must be a title string, got $(field_type rename)"
+    title="$(field_get rename | tr -s '[:space:]' ' ')"
     title="${title# }"; title="${title% }"
     [ -n "$title" ] || err "rename" "must be a non-empty title"
 fi
@@ -377,13 +384,20 @@ esac
 # The hazard `held` exists for: keystrokes reaching a pane whose turn is about
 # to end on an approval question. A transition armed alongside that question
 # clears or compacts away the very conversation the answer applies to. So a
-# sentinel that types waits while a memory gate is outstanding, and
-# handoff-approved is what releases it; one that types nothing has no such
-# hazard. Only the memory gate defers — the ledger nudge and the todo boundary
-# are acts, not questions.
+# sentinel with keystrokes waits while a memory gate is outstanding, and
+# handoff-approved is what releases it; one with none has no such hazard.
+#
+# The gate is the keystrokes, not `$typed`: an untyped handoff types no
+# transition but still types `/rename`, into the same pane, racing the same
+# answer. What is exempt is the sentinel that types nothing at all — the FR-G
+# marker, which would otherwise strand the expectation both loaders gate the
+# frame's re-injection on. Only the memory gate defers; the ledger nudge and the
+# todo boundary are acts, not questions.
+#
+# Held names its owner: the approval arrives in this session or not at all.
 state=armed
-if $typed && [ -n "$memory" ]; then
-    state=held
+if [ "${#drive_cmds[@]}" -gt 0 ] && [ -n "$memory" ]; then
+    state="held $session_id"
     memory="$memory"$'\n\n'"$(checkpoint_arming_directive)"
 fi
 

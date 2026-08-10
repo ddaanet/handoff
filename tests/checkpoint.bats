@@ -219,6 +219,39 @@ todo_write() { jq -nc --arg fp "$1" --arg c "$2" '{file_path:$fp, content:$c}'; 
     [[ "$stderr" == *"precompact"* ]]
 }
 
+# The forbidden branch tests key presence, not the extracted value's emptiness:
+# an agent template that always emits the field and blanks it is exactly the
+# drift this rule exists to catch, and a blank one is not a call that decided
+# against renaming — it is a call that carried the field to the boundary that
+# has no use for it. It also keeps the two forbidden branches (this one and
+# autoname's) agreeing on what "present" means.
+@test "checkpoint: an empty or null rename under precompact -> error naming rename" {
+    repo="$(make_repo)"
+    for value in '""' 'null'; do
+        payload=$(jq -nc --argjson v "$value" \
+            '{skill:"precompact", commit:"with-commit", compact:false, continue:null, task:null, todo:null, rename:$v}')
+        run_checkpoint_err "$repo" "$payload"
+        [[ "$stderr" == *"rename"* ]]
+        [[ "$stderr" == *"precompact"* ]]
+    done
+}
+
+# Every other field that becomes a line of the sentinel is type-checked, and
+# rename is what the whitespace flattening below then runs on: a non-string
+# reaches `jq -r`, is pretty-printed, flattened to one line, and typed as the
+# session title. FR2 promises a named schema error for a malformed field, not a
+# silently wrong rename.
+@test "checkpoint: a rename that is not a string -> error naming rename" {
+    repo="$(make_repo)"
+    for value in '{"title":"Fix parser"}' '42' '["A Title"]' 'true'; do
+        payload=$(jq -nc --argjson v "$value" \
+            '{skill:"handoff", commit:"with-commit", clear:false, continue:null, task:null, todo:null, rename:$v}')
+        run_checkpoint_err "$repo" "$payload"
+        [[ "$stderr" == *"rename"* ]]
+        [ ! -e "$repo/.claude/autodrive" ]
+    done
+}
+
 @test "checkpoint: precompact with rename omitted entirely -> accepted" {
     repo="$(make_repo)"
     payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
@@ -709,8 +742,23 @@ continue with task 3" ]
     payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:true, continue:"pick up per the task file", task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
-    [ "$(head -n1 "$repo/.claude/autodrive")" = "held" ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "held $CLAUDE_CODE_SESSION_ID" ]
     echo "$output" | grep -qF 'handoff-approved'
+}
+
+# The held state names the session whose approval it waits on. That approval
+# arrives in this session or not at all, so without the name a file left behind
+# by a session that quit before answering stays armable by any later session in
+# the repo — a dead session's /clear fired into a live conversation.
+@test "checkpoint: a held sentinel names the session that holds it" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:true, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    handoff_drive_read "$repo/.claude/autodrive"
+    [ "$DRIVE_STATE" = "held" ]
+    [ "$DRIVE_OWNER" = "$CLAUDE_CODE_SESSION_ID" ]
 }
 
 @test "checkpoint: a typed transition with no memory gate -> armed, no arming instruction" {
@@ -722,18 +770,39 @@ continue with task 3" ]
     [[ "$output" != *"handoff-approved"* ]]
 }
 
-# A sentinel that types nothing carries no such hazard, so both non-typing kinds
-# keep today's behaviour exactly — and a prepare-only precompact cannot lose its
-# FR-G marker to a memory gate it has no reason to wait on.
-@test "checkpoint: the non-typing kinds arm even with a memory gate pending" {
+# The hazard is keystrokes reaching that pane, not which transition they carry.
+# An untyped handoff types nothing *transitional* but still types `/rename`, and
+# the walker's is_typing check races the user answering the approval question —
+# so it holds too. What is exempt is a sentinel with no keystrokes at all.
+@test "checkpoint: an untyped handoff still types /rename, so it holds too" {
     repo="$(make_gitlore_repo)"
     dirty_memory "$repo"
     payload=$(jq -nc '{skill:"handoff", commit:"without-commit", rename:"A Title", clear:false, continue:null, task:null, todo:null}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
-    [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "held $CLAUDE_CODE_SESSION_ID" ]
+    echo "$output" | grep -qF 'handoff-approved'
+}
 
+# The FR-G marker types nothing at all, so it cannot be held hostage to a memory
+# gate it has no reason to wait on — and holding it would strand the expectation
+# both loaders gate the frame's re-injection on.
+@test "checkpoint: a sentinel that types nothing arms even with a memory gate pending" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
     payload=$(jq -nc '{skill:"precompact", commit:"without-commit", compact:false, continue:null, task:null, todo:null}')
+    run_checkpoint "$repo" "$payload"
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
+    [[ "$output" != *"handoff-approved"* ]]
+}
+
+# autoname types a /rename too, but composes no memory directive at all, so
+# there is no outstanding question for its keystrokes to land on.
+@test "checkpoint: autoname arms against dirty memory, having asked nothing" {
+    repo="$(make_gitlore_repo)"
+    dirty_memory "$repo"
+    payload=$(jq -nc '{skill:"autoname", rename:"A Side Conversation"}')
     run_checkpoint "$repo" "$payload"
     [ "$status" -eq 0 ]
     [ "$(head -n1 "$repo/.claude/autodrive")" = "armed" ]
@@ -832,8 +901,8 @@ run_approved() {
 
 @test "handoff-approved: a held sentinel becomes armed, every line below preserved" {
     repo="$(make_repo)"
-    printf '%s\n' held clear "/rename A Title" /clear "pick up per the task file" \
-        > "$repo/.claude/autodrive"
+    printf '%s\n' "held $CLAUDE_CODE_SESSION_ID" clear "/rename A Title" /clear \
+        "pick up per the task file" > "$repo/.claude/autodrive"
     run_approved "$repo"
     [ "$status" -eq 0 ]
     [ "$(cat "$repo/.claude/autodrive")" = "armed
@@ -841,6 +910,20 @@ clear
 /rename A Title
 /clear
 pick up per the task file" ]
+}
+
+# The approval this command speaks for is the one *this* session was asked for.
+# A held file another session left behind waits on an answer that can no longer
+# arrive, and arming it drives that session's /rename and /clear into this
+# conversation — so the state alone is not enough to act on.
+@test "handoff-approved: a held sentinel from another session -> exit 2, left held" {
+    repo="$(make_repo)"
+    printf '%s\n' "held sess-someone-else" clear "/rename A Title" /clear \
+        > "$repo/.claude/autodrive"
+    run_approved "$repo"
+    [ "$status" -eq 2 ]
+    [[ "$stderr" == *"session"* ]]
+    [ "$(head -n1 "$repo/.claude/autodrive")" = "held sess-someone-else" ]
 }
 
 @test "handoff-approved: no sentinel -> exit 2 naming the absence" {
@@ -874,7 +957,8 @@ pick up per the task file" ]
 # non-executable entry point is a failure every other row here would miss.
 @test "handoff-approved: runs by bare name off PATH" {
     repo="$(make_repo)"
-    printf '%s\n' held compact "/compact" > "$repo/.claude/autodrive"
+    printf '%s\n' "held $CLAUDE_CODE_SESSION_ID" compact "/compact" \
+        > "$repo/.claude/autodrive"
     write_pointer "$repo"
     run bash -c 'cd "$1" && PATH="$2:$PATH" handoff-approved' _ "$repo" "$repo_root/bin"
     [ "$status" -eq 0 ]

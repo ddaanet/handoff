@@ -283,9 +283,9 @@ moment anything can act on the news. That hook also sweeps a sentinel still
 in state `armed`, left by a turn that ended on Esc or a crash:
 `UserPromptSubmit` is the exact discriminator, since it cannot fire between
 the write and that turn's own `Stop`. A file that will not parse is swept
-too — it describes no transition anyone can complete. `held` is exempt, and
-that is why the sweep names its states rather than taking anything that is
-not `pending`.
+too — it describes no transition anyone can complete. `held` is exempt while
+it belongs to the session at the prompt, and that is why the sweep names its
+states rather than taking anything that is not `pending`.
 
 The prepare-only compact path arms the kind line alone. Nothing is typed,
 but the transition is *expected*, and that expectation is what
@@ -297,23 +297,33 @@ hand-typed `/compact` re-injects nothing.
 The hazard a memory approval creates is keystrokes reaching a pane whose
 turn is about to end on a question: a transition armed alongside that
 question clears or compacts away the very conversation the answer applies
-to. So the checkpoint writes a sentinel in `held` exactly when it **types a
-transition** and a memory directive was emitted, and composes the
+to. So the checkpoint writes a sentinel in `held` exactly when it **types
+anything at all** and a memory directive was emitted, and composes the
 instruction to release it onto the end of that directive.
 `bin/handoff-approved` is the one command that leaves the state, through the
 same `handoff_drive_arm` the `Stop` hook uses.
 
-The condition names the hazard rather than its trigger. A sentinel that
-types nothing — the `rename` kind, the bare compact marker — has no such
-hazard, so both keep their behaviour exactly, and a prepare-only precompact
-cannot lose its expectation marker to a gate it has no reason to wait on.
-Only the memory gate defers: the ledger nudge and the todo boundary are
-acts, not questions, and `Stop` comes after them either way.
+The condition names the hazard rather than its trigger, and the hazard is
+the keystrokes, not which transition they carry. An untyped handoff types no
+transition but still types `/rename`, into the same pane, racing the same
+answer — so it holds too. What is exempt is the sentinel that types nothing
+at all: the bare compact marker, which would otherwise lose the expectation
+`SessionStart(compact)` gates the frame's re-injection on to a gate it has
+no reason to wait on. Only the memory gate defers: the ledger nudge and the
+todo boundary are acts, not questions, and `Stop` comes after them either
+way.
 
-A stale `held` file is inert. No gate fires on that state, only
-`handoff-approved` leaves it, and the next checkpoint call overwrites the
-file outright — so nothing sweeps it, and it legitimately outlives the turn
-boundary the approval round trip costs.
+`held` is the one state that outlives the turn that wrote it, so it is the
+one that names its owner — the session whose approval it waits on, carried
+on line 1 as `held <session-id>`. That approval arrives in that session or
+not at all: once another session is taking prompts in the repo, the file is
+abandoned, and `report-watcher-failure.sh` sweeps it exactly as it sweeps a
+stale `armed` one. Without the name it would stay armable indefinitely, and
+`handoff-approved` — which verifies the state and nothing else — would drive
+a dead session's `/rename` and `/clear` into a live conversation.
+`handoff_drive_arm` replaces line 1 whole, so leaving `held` drops the owner
+with it, which is right: past the approval there is no outstanding one, and
+no state below `held` accepts an owner.
 
 ### Scoping
 

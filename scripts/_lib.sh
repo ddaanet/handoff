@@ -135,17 +135,20 @@ _handoff_drive_prose() {
     return 0
 }
 
-# Parse and validate the sentinel ($1) into the caller's DRIVE_STATE, DRIVE_KIND,
-# DRIVE_BEFORE (lines typed before the transition) and DRIVE_AFTER (lines typed
-# into the session the transition opens). Returns 0 when well-formed; otherwise
-# returns 1 with DRIVE_ERR set to a one-phrase reason naming the constraint that
-# failed.
+# Parse and validate the sentinel ($1) into the caller's DRIVE_STATE,
+# DRIVE_OWNER, DRIVE_KIND, DRIVE_BEFORE (lines typed before the transition) and
+# DRIVE_AFTER (lines typed into the session the transition opens). Returns 0 when
+# well-formed; otherwise returns 1 with DRIVE_ERR set to a one-phrase reason
+# naming the constraint that failed.
 #
 # Line 1 is the state and line 2 is the kind, and the kind fixes the shape — so
 # the remaining lines need no separator, and each kind keeps its own rules:
 #
-#   held     written, but not yet the turn's to arm: a memory approval is
-#            outstanding, and handoff-approved is what releases it
+#   held <session-id>
+#            written, but not yet the turn's to arm: a memory approval is
+#            outstanding, and handoff-approved is what releases it. The session
+#            id is the one whose approval it waits on — the state that outlives
+#            its turn by design is the one that must say whose turn
 #   armed    the transition this turn's Stop will arm
 #   pending  armed, in flight, waiting on its confirming SessionStart
 #
@@ -173,7 +176,8 @@ _handoff_drive_prose() {
 handoff_drive_read() {
     local file="$1" line n
     local -a lines=()
-    DRIVE_STATE=""; DRIVE_KIND=""; DRIVE_BEFORE=(); DRIVE_AFTER=(); DRIVE_ERR=""
+    DRIVE_STATE=""; DRIVE_OWNER=""; DRIVE_KIND=""
+    DRIVE_BEFORE=(); DRIVE_AFTER=(); DRIVE_ERR=""
 
     while IFS= read -r line || [ -n "$line" ]; do
         lines+=("$line")
@@ -184,10 +188,34 @@ handoff_drive_read() {
         DRIVE_ERR="the file is empty; line 1 must be the transition state"
         return 1
     fi
-    DRIVE_STATE="${lines[0]}"
+    DRIVE_STATE="${lines[0]%% *}"
+    case "${lines[0]}" in
+        *' '*) DRIVE_OWNER="${lines[0]#* }" ;;
+    esac
     case "$DRIVE_STATE" in
-        held | armed | pending) ;;
+        held)
+            # `held` alone among the states outlives the turn that wrote it, so
+            # it is the one that has to say whose turn that was: the approval it
+            # waits on arrives in that session or not at all. Without the name,
+            # a file left by a session that quit before answering stays armable
+            # by any later session in the repo.
+            if [ -z "$DRIVE_OWNER" ]; then
+                DRIVE_ERR="line 1 state \`held\` must name the session holding it"
+                return 1
+            fi
+            case "$DRIVE_OWNER" in *' '*)
+                DRIVE_ERR="line 1 state \`held\` takes one session id, not \`$DRIVE_OWNER\`"
+                return 1 ;;
+            esac
+            ;;
+        armed | pending)
+            if [ -n "$DRIVE_OWNER" ]; then
+                DRIVE_ERR="line 1 state \`$DRIVE_STATE\` takes no session id (got \`$DRIVE_OWNER\`)"
+                return 1
+            fi
+            ;;
         *)
+            DRIVE_STATE="${lines[0]}"
             DRIVE_ERR="line 1 must be the transition state — held, armed or pending — not \`$DRIVE_STATE\`"
             return 1 ;;
     esac
@@ -247,6 +275,10 @@ handoff_drive_has_source() {
 # Rewrite the sentinel ($1) into state $2, preserving every line below the
 # first. The state is the only field any transition changes, so one helper
 # serves them all and none of them has to know the kind's shape.
+#
+# Line 1 is replaced whole, so leaving `held` drops its session id with it —
+# which is right: the owner answers "whose approval is outstanding", and past
+# the approval there is none. No state below `held` accepts one.
 #
 # Atomic: a sibling temp file renamed over the original. Concurrent readers
 # exist — both loaders and Stop parse this file, and the walker stats it — so a

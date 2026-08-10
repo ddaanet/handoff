@@ -177,14 +177,21 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   cover two files, and the jq parse is on the Write/Edit hot path, so N
   files must stay one parse.
   `handoff_drive_read()` parses and validates the sentinel into `DRIVE_STATE`,
-  `DRIVE_KIND`, `DRIVE_BEFORE[]`, `DRIVE_AFTER[]` — or `DRIVE_ERR` naming the
+  `DRIVE_OWNER`, `DRIVE_KIND`, `DRIVE_BEFORE[]`, `DRIVE_AFTER[]` — or
+  `DRIVE_ERR` naming the
   constraint that failed. Line 1 is the state (`held`, `armed` or `pending`)
   and line 2 the kind, and the kind still fixes the shape, so the remaining
   lines need no separator; the counts are of the whole file, state line
   included: `rename` takes 3 lines, `compact` 2, 3 or 4, `clear` 4 or 5. The
   continuation line is optional on both driven kinds — typing the transition
   and submitting a prompt into what it opens are separate decisions, and the
-  payload carries them as separate fields. The state is reported, never
+  payload carries them as separate fields. `held` alone carries an owner on
+  line 1 (`held <session-id>`) — it is the one state that outlives the turn
+  that wrote it, and the approval it waits on arrives in that session or not at
+  all; `armed` and `pending` reject one rather than ignoring it. Both ends
+  check it: `handoff-approved` refuses another session's held file, and
+  `report-watcher-failure.sh` sweeps it as abandoned. The state is reported,
+  never
   interpreted — which state a caller wants is
   the caller's business, and one answer serves the `Stop` gate, both loaders
   and the sweep. Each command literal is pinned to its slot, so the
@@ -336,6 +343,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   which is why the sweep names the states it takes rather than taking anything
   that is not `pending`: a held transition waits on an approval whose answer
   arrives at this very hook, so outliving the turn boundary is what it is for.
+  The exemption reaches exactly as far as that reason — a `held` file whose
+  owner is not the session at the prompt is reclassified as abandoned before
+  the sweep, since the session that would approve it is gone and
+  `handoff-approved` would otherwise arm it into this conversation.
   `UserPromptSubmit` is the
   exact discriminator; it cannot fire between the write and that turn's own
   `Stop`. Only the failure branch touches a `pending` — sweeping on that
@@ -379,7 +390,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   the current call's entry is flushed, so it reads the previous call's sample,
   harmless while the prompt grows and wrong across a compaction, where that
   sample measures the discarded context. A boundary with nothing newer measures
-  nothing rather than falling back. Past
+  nothing rather than falling back. Every parsed line is `select`ed to objects
+  first: `fromjson?` filters lines that do not parse, not lines that parse to a
+  scalar or an array, and indexing one of those is a jq error that would kill
+  the hook on every tool batch until it left the window. Past
   `HANDOFF_CONTEXT_THRESHOLD` it injects one directive naming
   `/handoff:precompact` and asking for the compaction to be carried out — the
   skill reads the transition decision off the ask, so naming it alone would
@@ -405,7 +419,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   root from the same session pointer the checkpoint reads and refuses on its
   absence with the same message; moves the file to `armed` through
   `handoff_drive_arm`; exits 2 naming the state it found when the file is
-  absent or not `held`. NFR1: no git, no tmux — it rewrites one file.
+  absent or not `held`, and naming the owner when the held file is another
+  session's — the approval it speaks for is the one *this* session was asked
+  for, and the state alone does not say that. NFR1: no git, no tmux — it
+  rewrites one file.
 - `scripts/checkpoint.sh` — the one write path for the handoff/precompact
   wrap-up (FR1). Takes its root from the pointer `session-pointer.sh`
   published, keyed by `CLAUDE_CODE_SESSION_ID`, and refuses when there is
@@ -421,12 +438,20 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   (FR8) from the transition fields, flattening the title's whitespace on the
   way (`bash-post.sh` used to do that at consume time, and there is no consumer
   left to), then reads its own output back through `handoff_drive_read` so the
-  composer and the parser cannot drift. The state it writes is `held` iff the
-  sentinel types a transition **and** a memory directive was emitted, and
-  `armed` otherwise; `bin/handoff-approved` is the only thing that leaves
+  composer and the parser cannot drift. The state it writes is `held <session>`
+  iff the sentinel types **anything at all** and a memory directive was emitted,
+  and `armed` otherwise; the gate is the keystrokes, not the transition, since
+  an untyped handoff types no transition but still types `/rename` into the pane
+  holding the approval question, and the one exemption is the sentinel that
+  types nothing (FR-G's marker, which holding would strand).
+  `bin/handoff-approved` is the only thing that leaves
   `held`. `rename` is required wherever a title is decided — `skill: "handoff"`
-  and `skill: "autoname"` — and forbidden under `precompact`: it makes a call
-  that forgot its title an error rather than a silent non-rename. `autoname` is
+  and `skill: "autoname"`, where it must be a **string**, checked before the
+  whitespace flattening that would otherwise pretty-print an object into a
+  title — and forbidden under `precompact`, by key presence rather than value
+  emptiness, the way the `autoname` branch beside it already reads: it makes a
+  call that forgot its title, or carried one to the boundary that renames
+  nothing, an error rather than a silent non-rename. `autoname` is
   the third `skill` value and neither boundary: its whole payload is its own
   name and a title, every other field is a schema error under it, and the
   memory gate lives inside the boundary branch so that call composes no
@@ -636,9 +661,14 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   field. The six legal combinations each pin the sentinel's exact content and
   read it back through `handoff_drive_read`. Three rows are load-bearing and
   mutation-checked rather than observed passing: the held/armed pair over one
-  fixture (never hold ⟹ the held row alone reds; hold regardless of typing ⟹
-  the non-typing row alone reds), and `handoff-approved`'s bare-name row, which
-  is the only one a `100644` entry point would fail.
+  fixture (never hold ⟹ the held row alone reds; hold whatever the sentinel
+  types ⟹ the types-nothing row alone reds), and `handoff-approved`'s bare-name
+  row, which is the only one a `100644` entry point would fail. The held state
+  adds its owner: the checkpoint naming the session, `handoff-approved`
+  refusing another session's held file, and — in `tests/hook-test.bats` — the
+  sweep's own pair, where the dead-session row was green in the red phase (an
+  owned state line did not parse yet) and is mutation-checked afterwards
+  against the same-session row that must stay green.
   Session-root drift is covered across all three: `tests/test_worktree_root.py`
   for the branch matrix (including the containment rule that keeps a submodule
   `inside`), `tests/hook-test.bats` for `handoff_root_read`'s labels, the fast

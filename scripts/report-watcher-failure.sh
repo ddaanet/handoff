@@ -84,12 +84,22 @@ drive="$cwd/$HANDOFF_REL_DRIVE"
 # file. A file that will not parse is recorded as its own value — it describes
 # no transition anyone can complete, so the sweep takes it.
 drive_state=""
+drive_owner=""
 if [[ -f "$drive" ]]; then
     if handoff_drive_read "$drive"; then
         drive_state="$DRIVE_STATE"
+        drive_owner="$DRIVE_OWNER"
     else
         drive_state="malformed"
     fi
+fi
+
+# A held file waits on an approval that arrives in the session that composed it.
+# Once another session is taking prompts in this repo, that session is gone and
+# the answer can never come — so its exemption from the sweep below ends with it.
+# Left on disk it stays armable by handoff-approved indefinitely.
+if [[ "$drive_state" == "held" && -n "$session_id" && "$drive_owner" != "$session_id" ]]; then
+    drive_state="abandoned"
 fi
 
 if [[ -f "$failed" ]]; then
@@ -114,9 +124,10 @@ fi
 # `held` is the exception, and the reason this is a list rather than "anything
 # but pending": a held transition is *waiting* on an approval whose answer
 # arrives at this very hook, so surviving the turn boundary is what it is for.
-# Nothing else acts on that state — no gate fires on it, only handoff-approved
-# leaves it, and the next checkpoint call overwrites the file outright — so a
-# stale one is inert rather than dangerous.
+# The exemption reaches exactly as far as that reason — a held file owned by
+# another session was reclassified above, because the approval it waits on
+# cannot arrive and handoff-approved would otherwise arm it into this
+# conversation.
 if [[ -n "$drive_state" && "$drive_state" != "pending" && "$drive_state" != "held" ]]; then
     rm -f "$drive"
     msgs+=("stale autodrive discarded — its turn ended without arming")

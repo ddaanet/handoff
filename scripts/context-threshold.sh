@@ -50,6 +50,12 @@ marker="$(handoff_context_path "$session_id")"
 # last rather than a sum is what makes the repeated message id harmless: the
 # several JSONL entries of one API response each repeat the same usage.
 #
+# The type guard is not redundant with it: `fromjson?` filters lines that do not
+# parse, not lines that parse to something other than an object, and indexing a
+# scalar is a jq error rather than a null. One such line anywhere in the window
+# would kill the program, and under `set -euo pipefail` the hook with it, on
+# every tool batch until it scrolls out.
+#
 # The fold resets at each isCompactSummary entry. This hook fires before the
 # current call's entry is flushed, so the reading is always one API call late —
 # harmless while the prompt grows, wrong across a compaction, where that sample
@@ -60,6 +66,7 @@ size="$(
     tail -c "${HANDOFF_CONTEXT_WINDOW:-262144}" "$transcript" |
         jq -Rn '[inputs
                  | fromjson? // empty
+                 | select(type == "object")
                  | if .isCompactSummary == true then "boundary"
                    elif .message.usage then
                        (.message.usage

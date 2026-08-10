@@ -326,11 +326,46 @@ read_drive() {
 
 # The state a memory approval holds a typing transition in, so the keystrokes
 # do not reach a pane whose turn is about to end on the approval question.
-@test "handoff_drive_read (held): parsed like any other state" {
-    read_drive "held" "clear" "/rename A Title" "/clear" "pick up per the task file"
+#
+# Alone among the states it names its owner: the session whose approval it waits
+# on. Every other state is this turn's or the walker's, and both are reached
+# from the session that wrote them; `held` is the one that outlives a turn
+# boundary on purpose, so it is the one that has to say whose boundary.
+@test "handoff_drive_read (held): parsed like any other state, and names its owner" {
+    read_drive "held sess-42" "clear" "/rename A Title" "/clear" "pick up per the task file"
     [ "$DRIVE_STATE" = held ]
+    [ "$DRIVE_OWNER" = sess-42 ]
     [ "$DRIVE_KIND" = clear ]
     [ "${DRIVE_AFTER[0]}" = "pick up per the task file" ]
+}
+
+# An unowned `held` names no session, so nothing can tell whose approval it
+# waits on — which is exactly the file the sweep and handoff-approved must be
+# able to reject.
+@test "handoff_drive_read (held with no owner): rejected, naming the owner" {
+    run read_drive "held" "clear" "/rename A Title" "/clear" "resume"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"session"* ]]
+}
+
+# Rejected as an owned state, not as an unknown one: `armed` is a state this
+# parser knows, and the reason has to name what is actually wrong with the line,
+# or the same message covers a typo and this.
+@test "handoff_drive_read (owner on a state that takes none): rejected" {
+    run read_drive "armed sess-42" "clear" "/rename A Title" "/clear" "resume"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"no session"* ]]
+}
+
+# The other states carry no owner. Read a held file first: the owner must be
+# cleared by the next read, or a caller comparing it acts on the previous file's
+# session — which is the whole discriminator.
+@test "handoff_drive_read (armed after held): no owner carried over" {
+    read_drive "held sess-42" "clear" "/rename A Title" "/clear"
+    [ "$DRIVE_OWNER" = sess-42 ]
+    read_drive "armed" "clear" "/rename A Title" "/clear"
+    [ "$DRIVE_STATE" = armed ]
+    [ "$DRIVE_OWNER" = "" ]
 }
 
 @test "handoff_drive_read (unknown state): rejected, naming the states" {
@@ -444,6 +479,19 @@ pick up per the task file" ]
     handoff_drive_arm "$BATS_TEST_TMPDIR/sentinel" pending
     [ "$(cat "$BATS_TEST_TMPDIR/sentinel")" = "pending
 compact" ]
+}
+
+# Leaving `held` drops the owner with it: the owner answers "whose approval is
+# outstanding", and past the approval there is none. Every state below `held`
+# takes no owner, so carrying it through would compose a file the parser rejects.
+@test "handoff_drive_arm (leaving held: the owner goes with the state)" {
+    printf '%s\n' "held sess-42" "clear" "/rename A Title" "/clear" \
+        > "$BATS_TEST_TMPDIR/sentinel"
+    handoff_drive_arm "$BATS_TEST_TMPDIR/sentinel" armed
+    [ "$(head -n1 "$BATS_TEST_TMPDIR/sentinel")" = "armed" ]
+    handoff_drive_read "$BATS_TEST_TMPDIR/sentinel"
+    [ "$DRIVE_STATE" = armed ]
+    [ "$DRIVE_OWNER" = "" ]
 }
 
 # Readers exist concurrently — both loaders and Stop parse this file, and the
@@ -1289,6 +1337,20 @@ run_context_threshold() {
     [ "$output" = "" ]
 }
 
+# `fromjson? // empty` filters lines that do not parse, not lines that parse to
+# something other than an object. `.isCompactSummary` and `.message.usage` both
+# index whatever came through, and indexing a scalar is a jq error, not a null —
+# it kills the whole program, and under `set -euo pipefail` the hook with it, on
+# every tool batch for as long as that line sits in the tail window.
+@test "context-threshold (a valid-JSON non-object line: skipped, still measures)" {
+    { printf '%s\n' '42' '"a bare string"' '[1,2,3]'
+      usage_entry m1 100000 30000 40000; } > "$tmp/t.jsonl"
+    run_context_threshold "$tmp/t.jsonl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"170000"* ]]
+    [ -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
+}
+
 @test "context-threshold (under threshold: silent, no marker)" {
     usage_entry m1 10000 2000 3000 > "$tmp/t.jsonl"
     run_context_threshold "$tmp/t.jsonl"
@@ -1505,17 +1567,29 @@ run_report_failure() {
 
 # `held` is the one state that legitimately survives a turn boundary: the
 # approval round trip it waits on costs at least one turn, and the answer arrives
-# at a UserPromptSubmit — this hook. Nothing else acts on a held file (no gate
-# fires on that state, only handoff-approved leaves it, and the next checkpoint
-# call overwrites it outright), so sweeping it here would silently cancel the
-# transition the user is in the middle of approving.
-@test "report-watcher-failure (held file: left alone, no report)" {
-    printf '%s\n' "held" "clear" "/rename A Title" "/clear" "resume" \
+# at a UserPromptSubmit — this hook. Sweeping this session's own held file would
+# silently cancel the transition the user is in the middle of approving.
+@test "report-watcher-failure (held file owned by this session: left alone)" {
+    printf '%s\n' "held $SESSION_ID" "clear" "/rename A Title" "/clear" "resume" \
         > "$tmp/.claude/autodrive"
     run_report_failure "$tmp"
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
-    [ "$(head -n1 "$tmp/.claude/autodrive")" = "held" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "held $SESSION_ID" ]
+}
+
+# The exemption reaches exactly as far as its reason. A held file belongs to the
+# session whose approval it waits on; once *another* session is taking prompts in
+# this repo, that approval can never arrive — the session that would have given
+# it is gone. Left on disk it stays armable indefinitely, and handoff-approved
+# would arm a dead session's `/rename` + `/clear` into a live conversation.
+@test "report-watcher-failure (held file owned by a dead session: discarded)" {
+    printf '%s\n' "held sess-someone-else" "clear" "/rename A Title" "/clear" "resume" \
+        > "$tmp/.claude/autodrive"
+    run_report_failure "$tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    echo "$output" | jq -e '.systemMessage | test("stale|discarded")' >/dev/null
 }
 
 @test "report-watcher-failure (failure and stale file: one report covering both)" {

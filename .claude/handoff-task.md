@@ -1,33 +1,24 @@
 ## Current task
 
-Pass 3 of the transition work — `autoname` routed through `handoff-checkpoint`
-so the checkpoint is the sentinel's one writer — is implemented per
-`plans/2026-08-09-autoname-through-checkpoint-design.md` and green on
-`just precommit` (260 bats rows, 11 pytest). **Uncommitted.** `skill` takes a
-third value whose whole payload is `{"skill","rename"}`, the memory gate moved
-inside the boundary branch so an autoname call composes no directive,
-`write-drive.sh` is deleted with its hook entry (nine hooks now), and
-`write-guard.sh` carries `autodrive` as a second (basename, rel) pair. Docs
-landed in the same pass: `docs/changelog/2026-08-09-one-writer-for-the-sentinel.md`,
-its index line, `docs/design.md`, and the `CLAUDE.md` entries.
+A high-effort code review of `7525961..HEAD` returned five confirmed defects,
+all now fixed red-bats-first with `just precommit` green: the held sentinel
+carries its owner on line 1 (`held <session-id>`) and both ends check it, the
+hold gates on whether the sentinel types anything rather than on the transition,
+`context-threshold.sh` selects objects before indexing, and `rename` is
+type-checked and forbidden by key presence under `precompact`. The `rename`
+sense inversion flagged before the review was refuted as a defect in itself.
+Docs landed in the same pass: `docs/changelog/2026-08-10-held-names-its-owner.md`
+plus its index line, and the invalidated prose in `docs/design.md` and
+`CLAUDE.md`.
 
-Red-first throughout. The load-bearing negative — an `autoname` call against a
-dirty memory submodule emits no directive at all — is mutation-checked:
-restoring the unconditional `checkpoint_memory_directive` reds that row alone.
-
-A code review of pass 2 and the ledger/todo scope boundary runs alongside,
-fed one item at a time as prose naming a file and a line range. One item has
-landed: the comment above `checkpoint.sh`'s held/armed branch, cut back to the
-hazard `held` exists for. The rest has not been given yet.
+Two rows were green in the red phase and are mutation-checked rather than
+assumed — the dead-session sweep and arm-drops-owner. Both mutations reverted.
 
 ## Open decisions
 
-- Whether to commit pass 3 now or hold it for the remaining review items.
-  Neither was asked for.
-- Whether to cut a release, and at what bump. Pass 2 removes two user-visible
-  skill names (`handoff-continue`, `compact-continue`) and pass 3 changes
-  `autoname`'s contract from a single Write to a Bash call, so the earlier
-  minor/patch answer covers neither. The context-size threshold is a minor;
-  the state machine, the ledger boundary and pass 3 ride as a patch.
-  `just release` pushes, cuts a GH release and bumps the marketplace, so it
-  waits for an explicit yes.
+- Release bump, and whether anything still gates it. Three unreleased passes now
+  stack: pass 2 removes two user-visible skill names (`handoff-continue`,
+  `compact-continue`), pass 3 changes `autoname`'s contract from a Write to a
+  Bash call, and this pass changes the sentinel's state-line shape. The earlier
+  minor/patch answer covers none of them. `just release` pushes, cuts a GH
+  release and bumps the marketplace, so it waits for an explicit yes.

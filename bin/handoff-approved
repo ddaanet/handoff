@@ -47,6 +47,13 @@ handoff_drive_read "$drive" || err "$HANDOFF_REL_DRIVE is malformed — $DRIVE_E
 [ "$DRIVE_STATE" = "held" ] \
     || err "the transition is in state \`$DRIVE_STATE\`, not \`held\`; nothing to arm"
 
+# And only this session's. The approval this command speaks for is the one this
+# session was asked for; a held file another session left behind waits on an
+# answer that can no longer arrive, and arming it drives that session's
+# transition into this conversation.
+[ "$DRIVE_OWNER" = "$session_id" ] \
+    || err "the held transition belongs to session \`$DRIVE_OWNER\`, not this one; it is not this session's approval to give"
+
 handoff_drive_arm "$drive" armed \
     || err "could not rewrite $HANDOFF_REL_DRIVE"
 
