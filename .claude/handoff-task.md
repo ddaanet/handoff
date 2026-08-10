@@ -1,13 +1,12 @@
 ## Current task
 
-Working through the numbered pending-tasks list one item at a time, under
-TDD (red tests, then fix, then `just precommit`) per
-`superpowers:test-driven-development`. Item 6 (bash/Python split) and item 7
-(handoff's `restart` transition kind, per `brief-driven-restart.md`) are both
-done and independently `just precommit`-verified; this handoff's own commit
-bundles them together with item 3's checkpoint-root-via-updatedInput work,
-which had been sitting uncommitted since before this segment. Item 8 (probe
-what `reason` an interactive `/exit` writes to `SessionEnd`) is next.
+Working through the numbered pending-tasks list one item at a time, under TDD
+(red tests, then fix, then `just precommit`) per
+superpowers:test-driven-development. This segment dropped the context-size
+nudge outright (fired too early on large contexts, once right after a
+compaction despite the 2026-08-09 fix, and was inconsistently followed) —
+`just precommit`-verified and committed. Item 8 (probe what `reason` an
+interactive `/exit` writes to `SessionEnd`) is next.
 
 ## Open decisions
 

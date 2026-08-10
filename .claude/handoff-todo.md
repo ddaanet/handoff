@@ -1,11 +1,5 @@
 ## Remaining
 
-- Keep watching whether a context-size nudge is ever ignored outright — that is
-  the evidence that reopens the halt. (Standing watch, not a discrete task.)
-- Probe what `reason` an interactive `/exit` writes to `SessionEnd`. Next
-  actionable item — start here.
-- Patch `handoff-checkpoint`'s gitlore diagnosis into its three real cases, with
-  the relaunch as the remedy.
 - Propose excluding the memory submodule from the clean-tree check in
   claude-plugin-dev's `release.sh`: `git diff --quiet HEAD` fails on ` M memory`,
   a gitlore repo's resting state, so `release` and `resume-release` both abort

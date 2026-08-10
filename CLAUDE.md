@@ -688,6 +688,15 @@ resolver with **pytest**. pytest runs off a uv-managed venv that
 invocation; `uv.lock` is committed, `.venv/` is gitignored). See
 [[feedback-uv-direnv-venv]].
 
+Manual probing of the walker/watcher against a *live* Claude Code TUI (not
+the bats tmux stub) means driving a real tmux session — this is the one
+project where that comes up. Never do it on the default socket
+(`/tmp/tmux-$UID/default`): that's the user's own live terminal, and a
+`new-session` there can collide with whatever they're doing in it. Ask first,
+or use a private socket (`tmux -S <path>` / `-L <name>`) — either way it
+needs `dangerouslyDisableSandbox`, since the sandbox blocks socket creation
+outright regardless of path.
+
 - `just precommit` — lint manifest + settings, `shellcheck -x` the
   scripts + `.bats` files, ruff/docformatter/mypy/ty the Python, then
   run both test suites (`bats tests/*.bats` + `pytest`). The toolkit's

@@ -1654,7 +1654,7 @@ def test_clause_file_unset_names_key_and_restart(tmp_path: Path) -> None:
     result = run_checkpoint(repo, handoff_payload("without-commit"))
     assert result.returncode == 0
     assert "gitlore.memoryapprovalclausefile" in result.stdout.lower()
-    assert "restart" in result.stdout.lower()
+    assert "/handoff:restart" in result.stdout
     assert str(repo / ".claude" / "gitlore-memory-message") not in result.stdout
     assert str(repo / ".claude" / "gitlore-commit-memory") not in result.stdout
 
@@ -1675,8 +1675,37 @@ def test_clause_file_missing_same_key_and_restart_report(tmp_path: Path) -> None
     result = run_checkpoint(repo, handoff_payload("without-commit"))
     assert result.returncode == 0
     assert "gitlore.memoryapprovalclausefile" in result.stdout.lower()
-    assert "restart" in result.stdout.lower()
+    assert "/handoff:restart" in result.stdout
     assert str(repo / ".claude" / "gitlore-memory-message") not in result.stdout
+
+
+def test_unset_and_missing_clause_reports_are_the_same(tmp_path: Path) -> None:
+    repo_unset = make_gitlore_repo(tmp_path, "glrepo_unset")
+    dirty_memory(repo_unset)
+    subprocess.run(
+        ["git", "config", "--unset", "gitlore.memoryApprovalClauseFile"],
+        cwd=repo_unset,
+        check=True,
+    )
+    unset_result = run_checkpoint(repo_unset, handoff_payload("without-commit"))
+
+    repo_missing = make_gitlore_repo(tmp_path, "glrepo_missing")
+    dirty_memory(repo_missing)
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "gitlore.memoryApprovalClauseFile",
+            str(repo_missing / "gone.txt"),
+        ],
+        cwd=repo_missing,
+        check=True,
+    )
+    missing_result = run_checkpoint(repo_missing, handoff_payload("without-commit"))
+
+    assert unset_result.returncode == 0
+    assert missing_result.returncode == 0
+    assert unset_result.stdout == missing_result.stdout
 
 
 def test_with_commit_summary_write_only_no_trigger_mention(tmp_path: Path) -> None:

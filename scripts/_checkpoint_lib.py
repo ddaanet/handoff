@@ -94,9 +94,9 @@ def memory_directive(root: str, mode: str) -> str:
             "gitlore memory has uncommitted changes, but this session cannot read "
             "the memory-approval wording: git config "
             "gitlore.memoryApprovalClauseFile is unset or its file is missing. "
-            "gitlore pins that key at SessionStart — restart Claude Code and "
-            "retry. Nothing has been written and the memory changes are still "
-            "pending."
+            "gitlore pins that key at SessionStart — run /handoff:restart (or "
+            "exit and relaunch with --resume, by hand), then retry. Nothing has "
+            "been written and the memory changes are still pending."
         )
 
     msgfile = Path(root) / ".claude" / "gitlore-memory-message"
