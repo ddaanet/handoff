@@ -16,16 +16,13 @@
 - Implement `plans/2026-08-05-checkpoint-root-via-updatedinput.md` — red bats
   first, including the batched-command row that a bare `VAR=` prefix would only
   pass by accident.
-- Retire memory facts for index headroom. `MEMORY.md` is 23.4KB against the
-  24.4KB cutoff past which the loader silently drops the tail, and the write
-  hook now nudges on every edit. Classify WHEN / HOW / acted-inline first and
-  relocate the acted-inline class, rather than shortening hooks to hit a byte
-  target.
-- Fix `shared-claude.md`'s own contradiction in the `ddaanet` tier: it forbids
-  naming the user in anything the agent authors, then says "get David's call".
-  Six repos load that file, so the fix belongs at the tier and needs a push.
-- Release the context-size threshold trigger, then keep watching whether a nudge
-  is ever ignored outright — that is the evidence that reopens the halt.
+- Retire memory facts for index headroom. `MEMORY.md` is 24237 bytes against the
+  24.4KB (24985-byte) cutoff past which the loader silently drops the tail —
+  748 bytes of headroom, two index lines' worth, after the tier merge added two
+  facts and retired one. Classify WHEN / HOW / acted-inline first and relocate
+  the acted-inline class, rather than shortening hooks to hit a byte target.
+- Keep watching whether a context-size nudge is ever ignored outright — that is
+  the evidence that reopens the halt.
 - Split bash/Python per `plans/2026-07-31-python-rewrite-brief.md`.
 - Add handoff's `restart` transition kind per `brief-driven-restart.md`,
   including the `SessionEnd` marker hook and a `SessionStart(resume)` matcher —
