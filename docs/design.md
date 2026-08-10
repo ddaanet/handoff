@@ -556,8 +556,8 @@ checks, which is the same guarantee stated directly: `Stop` will not re-arm
 something already in flight, and the sweep will not take something
 legitimately mid-window. Adding a state is now a value, not a filename and
 four new gates. The state being content rather than a name also makes a
-wrong one writable, so the agent-authored channel is held to `armed` —
-every state after that is a hook's to write.
+wrong one writable, which is why the file has a single writer: the
+checkpoint composes it, and a direct agent Write or Edit is denied outright.
 [One transition, one file, explicit
 state](changelog/2026-08-03-one-transition-one-file.md)
 

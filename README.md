@@ -128,7 +128,9 @@ learnings land instead of waiting for your next commit. When a commit is going
 to land the change that memory documents — the one you are about to make, or a
 later one — the memory rides *that* commit instead of committing separately
 first, which saves a step, and it is written as if the change has already
-happened, because it has.
+happened, because it has. When that same turn also has a transition to carry
+out, the keystrokes wait for your answer — clearing or compacting first would
+take away the conversation the question belongs to.
 
 ## Staleness and cleanup
 
@@ -181,9 +183,11 @@ directly.
   staged for git automatically, same as the task file (track this).
 - `autodrive` — transient file describing the transition to carry out:
   first line its state, second the kind (`rename`, `compact` or `clear`),
-  then the lines to type. Written by whichever skill is arming one, or by
-  the checkpoint for a rename, always in state `armed`. When the transition
-  is armed at the end of your turn its state becomes `pending`, and it is
+  then the lines to type. Written by the checkpoint and by nothing else — a
+  direct agent write is denied. It starts out `held` when it would type into
+  a pane still holding an unanswered memory question, and your approval
+  releases it to `armed`; otherwise it starts `armed`. When it goes into
+  flight at the end of your turn its state becomes `pending`, and it is
   consumed once the transition completes. At most one exists at a time — one
   prompt, one transition.
 - `autodrive.failed` — written only when a line could not be delivered, and
