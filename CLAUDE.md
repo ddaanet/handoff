@@ -7,7 +7,7 @@ to edit the plugin's skill, hook, or script.
 
 High-level flow: the skill decides the task/todo/rename content, then issues
 one `handoff-checkpoint` Bash call carrying the whole wrap-up as a
-schema-validated JSON payload on stdin → `checkpoint.sh` writes
+schema-validated JSON payload on stdin → `checkpoint.py` writes
 `.claude/handoff-task.md`/`.claude/handoff-todo.md`/`.claude/autodrive` (per
 FR5/FR6 write semantics — a Write or Edit form, empty body ⟹ removed) and
 leaves `.claude/checkpoint-manifest` behind, since staging can't run from the
@@ -41,7 +41,7 @@ are required with no default. The judgment was always per-boundary — commit
 awareness, memory capture, the drafting rules and the seam are identical
 either way — so a separate driven skill per boundary bought nothing and cost
 routing, duplicated prose, and a cross product it could not express (a driven
-transition with no continuation). `checkpoint.sh` composes `.claude/autodrive`
+transition with no continuation). `checkpoint.py` composes `.claude/autodrive`
 from those fields and reads it back through `handoff_drive_read`, so the
 composer and the parser cannot drift; `compact: false` still writes the
 two-line expectation marker (FR-G), which types nothing but is what
@@ -106,10 +106,23 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   writes no sentinel itself.
 - `skills/handoff/references/design.md` — condensed design notes;
   full rationale is in `docs/design.md`
-- `hooks/hooks.json` — declares nine hooks.
-  `SessionStart` (every source, wildcard matcher): publish this session's
-  resolved root at `/tmp/claude/handoff-root-<session_id>` via
-  `session-pointer.sh`, so the agent's own Bash can reach it.
+- `skills/restart/SKILL.md` — the `/handoff:restart` skill. Decides only
+  whether a continuation prompt follows the resume (no tool calls), then runs
+  one `handoff-checkpoint` Bash call whose whole payload is
+  `{"skill": "restart", "continue": "<prompt>"|null}`. Neither boundary — no
+  title, no task file, no todo, no commit awareness — and every boundary
+  field is schema-forbidden there, the same key-presence rule `autoname`
+  uses; no directive is composed either, for the same reason. The session id
+  and the argv to replay are filled in downstream (`checkpoint.py` from
+  `CLAUDE_CODE_SESSION_ID`, `stop-drive.sh` from the exiting process's own
+  cmdline), not decided here. For a mid-session plugin upgrade, a `hooks.json`
+  edit, or any other frozen-at-startup config that only a relaunch adopts —
+  `--resume` carries the conversation over whole, so this costs no context.
+  See `docs/changelog/2026-08-10-restart-transition-kind.md`.
+- `hooks/hooks.json` — declares twelve hooks.
+  `SessionStart` (every source, wildcard matcher): re-arm the context-size
+  nudge and sweep this plugin's stale files at `$HANDOFF_POINTER_DIR` via
+  `session-pointer.sh`.
   `SessionStart(startup|clear)`: assemble the frame in memory via
   `load-handoff.sh` (header + inlined task file) and inject it via
   `additionalContext`; on `clear`, also consume a transition in state `pending`
@@ -118,6 +131,10 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `handoff-task.md` (checkpoint-only, FR3) or to `autodrive` (composed by the
   checkpoint, which reads its own output back) — and deny writes whose
   resolved path is not `$cwd/.claude/<file>` (cross-project guard).
+  `PreToolUse(Bash)`: match a `handoff-checkpoint`/`handoff-approved`
+  invocation and inject this session's resolved root into it as
+  `HANDOFF_ROOT`, via `inject-checkpoint-root.sh`, since neither entry point
+  can resolve it itself.
   `PostToolUse(Write|Edit)`: stage `handoff-todo.md` for commit when the
   agent writes it directly.
   `PostToolUse(Bash)`: consume `.claude/checkpoint-manifest` after
@@ -125,8 +142,13 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `PostToolBatch` (no matcher): measure this session's prompt size and nudge
   the boundary once it crosses a threshold, via `context-threshold.sh`.
   `Stop`: arm the transition when `.claude/autodrive` is in state `armed`.
+  `SessionEnd`: confirm a `restart`'s `/exit` line by writing
+  `.claude/autodrive.exited`, via `session-end.sh`.
   `SessionStart(compact)`: re-inject the frame and fire the continuation
   prompt after a compaction completes.
+  `SessionStart(resume)`: consume a `pending` `restart` and fire its
+  continuation, via `load-restart.sh` — no frame, since `--resume` already
+  restores the conversation whole.
   `UserPromptSubmit`: report a non-delivery, sweep a stale sentinel, and
   report a session cwd that has left the launch repo.
 - `scripts/load-handoff.sh` — SessionStart(startup|clear) entry
@@ -135,6 +157,20 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   via `hookSpecificOutput.additionalContext` (agent-facing) plus a curt
   `systemMessage` with bytes + age (user-facing). Silent no-op when
   the task file is missing or empty.
+- `scripts/load-restart.sh` — `SessionStart(resume)` entry point: consumes a
+  `restart` sentinel in state `pending` and fires its continuation, exactly
+  like `load-compact.sh`'s after-line handling, but assembles and injects no
+  frame at all — `--resume` already restores the full prior conversation, so
+  there is nothing for a frame to hand a summariser's paraphrase back to.
+  Silent when nothing is pending (a hand-typed `--resume` fires the same
+  hook) or when the pending file is another kind's.
+- `scripts/session-end.sh` — `SessionEnd` entry point: writes
+  `.claude/autodrive.exited` when a `restart` sentinel is `pending` —
+  otherwise silent, since this fires on every session end. The opposite
+  polarity of `.claude/autodrive.failed`: created, never removed by this
+  hook, and `stop-drive.sh` clears any stale copy before spawning the walker
+  so an earlier, only-partly-successful restart cannot false-positive a
+  later one's `/exit` confirmation.
 - `scripts/_lib.sh` — sourced helper for the write hooks and
   `bash-post.sh`. Defines the `HANDOFF_REL_*` path constants and
   `handoff_resolve()`, which canonicalizes multiple paths in one `python3`
@@ -163,11 +199,14 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   trivial branches) so the every-turn hooks (`Stop`, `UserPromptSubmit`)
   skip the python3 spawn in the common case — and labels the branch itself,
   or a caller would read the previous resolution's label.
-  `HANDOFF_POINTER_DIR` (`/tmp/claude`, overridable for tests) and
-  `handoff_pointer_path()` address the session root pointer: a literal
-  directory rather than `$TMPDIR`, since its producer is a hook and its
-  consumer the agent's sandboxed Bash, and the two share no environment but
-  the session id.
+  `HANDOFF_POINTER_DIR` (`/tmp/claude`, overridable for tests) holds this
+  plugin's remaining state outside a project — the context-size marker and
+  the drift marker — a literal directory rather than `$TMPDIR`, since its
+  writers are hooks and one reader is the agent's sandboxed Bash, which
+  shares no environment with them but the session id. It used to also hold a
+  session-keyed root pointer (`handoff_pointer_path()`); that mechanism is
+  gone (see `scripts/inject-checkpoint-root.sh` below), and the sweep in
+  `session-pointer.sh` still cleans up whatever such files are left on disk.
   `handoff_match_target()` is the shared preamble of every path-scoped
   hook: one call does the jq field parse, basename fast-path, root
   resolution, and resolved-path comparison against the expected
@@ -182,7 +221,9 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   constraint that failed. Line 1 is the state (`held`, `armed` or `pending`)
   and line 2 the kind, and the kind still fixes the shape, so the remaining
   lines need no separator; the counts are of the whole file, state line
-  included: `rename` takes 3 lines, `compact` 2, 3 or 4, `clear` 4 or 5. The
+  included: `rename` takes 3 lines, `compact` 2, 3 or 4, `clear` and `restart`
+  each 4 or 5 — `restart`'s shape is `clear`'s exactly, `/exit` then
+  `claude --resume <sid…>` in the two command slots. The
   continuation line is optional on both driven kinds — typing the transition
   and submitting a prompt into what it opens are separate decisions, and the
   payload carries them as separate fields. `held` alone carries an owner on
@@ -202,7 +243,17 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   vintage callers must expand the arrays as `${DRIVE_BEFORE[@]+"${DRIVE_BEFORE[@]}"}`.
   `handoff_drive_has_source()` says whether a kind's transition is confirmed by
   a `SessionStart`; `rename` is not one, so `stop-drive.sh` deletes its sentinel
-  outright rather than leaving a `pending` nobody would clear.
+  outright rather than leaving a `pending` nobody would clear (`compact`,
+  `clear` and `restart` all are).
+  `handoff_resume_command()` composes the actual `claude --resume <sid>
+  <argv…>` line `stop-drive.sh` types or pastes for a `restart`: the
+  checkpoint can only supply the session id, not this process's own launch
+  flags, so this reads them fresh from `/proc/<pid>/cmdline` (Linux; NUL-
+  separated, so a value with an embedded space survives as one argument) or
+  falls back to `ps -o command=` (macOS, no `/proc`; a known, accepted gap for
+  that same case) and re-quotes each for replay.
+  `HANDOFF_TEST_CMDLINE_PATH` substitutes a fixture file for the `/proc` path
+  in tests, since `/proc` itself cannot be faked.
   `handoff_drive_arm()` rewrites line 1 into a new state, preserving every line
   below it — so it never has to know the kind's shape, which is what lets one
   helper serve `stop-drive.sh` and, in the next pass, `handoff-approved`. The
@@ -226,7 +277,11 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   writer left, a second parser position had no subject, and the arm-only rule
   it enforced died with it. No longer covers `handoff-todo.md`, which the agent
   is meant to edit directly (FR4).
-- `scripts/drive-when-idle.sh` — the one detached watcher: the walker.
+- `scripts/drive_when_idle.py` — the one detached watcher: the walker.
+  Python since 2026-08-10 (see
+  `docs/changelog/2026-08-10-python-split.md`); ported behavior-for-behavior
+  from `drive-when-idle.sh`, spawned by `handoff_spawn_detached()` picking
+  `python3` for its `.py` extension.
   Spawned by `stop-drive.sh` for the lines typed before a transition, and by
   the transition's own `SessionStart` loader for the lines typed after it. One
   argument per line, and the lines are the literal keystrokes — it never learns
@@ -238,12 +293,19 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   wrong title and nothing more. The re-gate at the top of each iteration is
   FR-H: confirming a line can take `CONSUME_TIMEOUT` (300s) and the pane is
   live throughout.
-- `scripts/_watcher-lib.sh` — sourced helper for the walker. Defines `is_busy`
+  A `claude --resume …` line (`restart`'s second command) is dispatched to
+  `_drive_shell_line` instead, bypassing `wait_for_idle`/`is_typing`
+  entirely: it targets a bare shell once `/exit` is confirmed, where neither
+  exists nor would reliably signal readiness across every user's shell
+  prompt. A fixed `HANDOFF_WATCHER_SHELL_SETTLE` stands in, then the same
+  `submit_consumed` confirmation as `/compact`/`/clear`.
+- `scripts/_watcher_lib.py` — imported helper module for the walker,
+  ported from `_watcher-lib.sh`. Defines `is_busy`
   (spinner present), `is_typing` (prompt has content) and `is_unknown_command`
   over captured tmux pane text — pure predicates, tested directly in
-  `tests/watcher-test.bats`. Also the shared scaffold: the `HANDOFF_WATCHER_*`
+  `tests/test_watcher_lib.py`. Also the shared scaffold: the `HANDOFF_WATCHER_*`
   tunables, `snap` (visible-pane capture — never scrollback), `wait_for_idle`
-  (stable-idle poll loop), and the three confirmation primitives, none of which
+  (stable-idle poll loop), and the four confirmation primitives, none of which
   reads the pane. `_submit_until` is their shared body: Enter, three fast
   retries at `VERIFY_DELAY` (the first Enter can be absorbed into the paste
   window as a line break), then a long poll without resending, since a
@@ -272,14 +334,19 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   the whole sequence and calls `watcher_fail` once, at the top — which records a
   non-delivery reason to `$HANDOFF_FAIL_FILE` (set by the spawning hook, which
   owns the path) and exits 1; unset is tolerated.
+  `submit_exited` confirms `/exit` by `$HANDOFF_EXIT_FILE` appearing (then
+  consumes it) — the opposite polarity of `submit_consumed`, since
+  `SessionEnd` can only ever create that marker.
 - `scripts/write-stage.sh` — PostToolUse(Write|Edit) entry point: matches
   writes/edits that resolve to `$cwd/.claude/handoff-todo.md` — the one path
   the checkpoint never sees, since the agent edits that scratch list directly
   all session (FR4). Stages the file with `git add -f`, or — via
-  `checkpoint_is_empty_body` from `_checkpoint-lib.sh` — removes it and stages
-  the removal when the edit left it with no substantive content (a `##
-  Remaining` with no items). `handoff-task.md` no longer takes this path; it
-  is checkpoint-only (FR3) and staged via the manifest instead.
+  `python3 _checkpoint_lib.py --is-empty-body` (a `python3` subprocess spawn
+  into the Python `is_empty_body`, paid only on this cold branch) — removes
+  it and stages the removal when the edit left it with no substantive
+  content (a `## Remaining` with no items). `handoff-task.md` no longer
+  takes this path; it is checkpoint-only (FR3) and staged via the manifest
+  instead.
 - `scripts/stop-drive.sh` — `Stop` entry point: arms the transition. Acts only
   on state `armed`, so a transition already in flight cannot be re-armed — the
   guarantee its consume-before-spawn ordering used to give implicitly, and that
@@ -287,7 +354,8 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   prompt. Leaves `armed` **before** spawning: `handoff_drive_arm` to `pending`
   for a kind with a confirming source, `rm` for `rename`, which no loader would
   ever clear. Then spawns the walker with
-  the before-lines, exporting `HANDOFF_FAIL_FILE`, `HANDOFF_PENDING_FILE` and
+  the before-lines, exporting `HANDOFF_FAIL_FILE`, `HANDOFF_PENDING_FILE`,
+  `HANDOFF_EXIT_FILE` and
   `HANDOFF_TRANSCRIPT` (this session's, from `Stop`'s own payload — what a
   `/rename` line confirms against): the hook owns the paths, the walker stays
   ignorant of the layout. An empty before-sequence (FR-G) leaves the file
@@ -296,6 +364,12 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   pasteable form, which is why no skill body prints one. Silent no-op when the
   file is absent — `Stop` fires every turn. `Stop` does not fire on Esc, so an
   interrupted turn cannot arm a transition.
+  For kind `restart`, before either the tmux check or the pasteable-form
+  fallback: clears a stale `.claude/autodrive.exited` (an earlier attempt's
+  leftover would false-positive `submit_exited`) and rewrites the
+  checkpoint-composed `claude --resume <sid>` before-line to the full launch
+  command via `handoff_resume_command` — the only place with access to the
+  exiting process's own argv.
 - `scripts/load-compact.sh` — `SessionStart(compact)` entry point: consumes
   `.claude/autodrive` — whose disappearance is itself the confirmation the
   walker was waiting on for the `/compact` line it typed — injects the
@@ -322,7 +396,11 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   untouched. `UserPromptSubmit` rather than `Stop` because the walker runs
   *after* the Stop that spawned it. Reports only what the walker observed
   itself; a file in state `pending` alone is never treated as failure (it is
-  legitimate for the whole Stop → transition window).
+  legitimate for the whole Stop → transition window). Unmodified for
+  `restart`: its files are already project-scoped, so a restart that fails
+  after `/exit` — where the session that armed it is gone — is reported by
+  whatever session next opens in that directory, at its own first
+  `UserPromptSubmit`. A deferred report, not a lost one.
   It also reports **session-root drift** — a cwd whose branch is `foreign` or
   `unrelated`, meaning it has left the launch repo while the root and every
   handoff file under it have not. Here rather than at a later gate because
@@ -361,21 +439,26 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `handoff_root_read`; lets each worktree own its `.claude/`. Unit-tested in
   `tests/test_worktree_root.py` (pytest).
 - `scripts/session-pointer.sh` — `SessionStart` entry point on the wildcard
-  matcher (the only hook that reaches `resume`): writes the resolved root as
-  one line at `/tmp/claude/handoff-root-<session_id>`. Its own script rather
-  than a preamble on the two loaders because the write must be unconditional
-  and both of those are gated. Silent no-op without a session id. Then removes
-  this session's context marker, which is the context-size nudge's re-arm: that
-  nudge fires once per climb, and a `SessionStart` is the harness-authoritative
-  signal that the context was rebuilt — `compact` (auto-compaction included),
-  `clear`, or a `resume` that restored it whole and may still be over. Then
-  sweeps the pointer directory — `-mtime +7`, scoped by name to
-  `handoff-root-*`, `handoff-drift-*` and `handoff-context-*` and by
-  `-maxdepth 1`, since that directory is shared and holds files this plugin
-  never wrote. The producer sweeps because none of those files has an owner
-  that outlives the session, and the ends that strand one are the ends no
-  `SessionEnd` fires for. After the write, so this session's own pointer is
-  fresh. See `docs/changelog/2026-07-31-pointer-lifecycle.md`.
+  matcher (the only hook that reaches `resume`). Used to also publish the
+  resolved root here, at a session-keyed path `handoff-checkpoint` (running in
+  the agent's own Bash, where `CLAUDE_PROJECT_DIR` is unset) could address
+  blind; replaced by `scripts/inject-checkpoint-root.sh` (`PreToolUse(Bash)`),
+  which resolves the root fresh on every matching call instead of once at
+  `SessionStart` — see `docs/changelog/2026-08-10-checkpoint-root-via-updatedinput.md`.
+  Its own script rather than a preamble on the two loaders because the sweep
+  below must be unconditional and both of those are gated. Silent no-op
+  without a session id. Removes this session's context marker, which is the
+  context-size nudge's re-arm: that nudge fires once per climb, and a
+  `SessionStart` is the harness-authoritative signal that the context was
+  rebuilt — `compact` (auto-compaction included), `clear`, or a `resume` that
+  restored it whole and may still be over. Then sweeps the pointer directory —
+  `-mtime +7`, scoped by name to `handoff-root-*` (still on the filter, to
+  clean up whatever the retired pointer mechanism left on disk),
+  `handoff-drift-*` and `handoff-context-*`, and by `-maxdepth 1`, since that
+  directory is shared and holds files this plugin never wrote. The producer
+  sweeps because none of those files has an owner that outlives the session,
+  and the ends that strand one are the ends no `SessionEnd` fires for. See
+  `docs/changelog/2026-07-31-pointer-lifecycle.md`.
 - `scripts/context-threshold.sh` — `PostToolBatch` entry point: the only hook
   that is **not** cwd-scoped. It touches no file under `.claude/`, so it
   resolves no root and spawns no `python3`, and sources `_lib.sh` only for
@@ -406,7 +489,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   installed, so the negative path is a `jq` over stdin and a `stat`. See
   `docs/changelog/2026-08-01-context-threshold-trigger.md`.
 - `bin/handoff-checkpoint` — PATH-resident shim (Claude Code adds each
-  plugin's `bin/` to PATH) that execs `scripts/checkpoint.sh`. Both skill
+  plugin's `bin/` to PATH) that execs `scripts/checkpoint.py`. Both skill
   bodies invoke it by bare name; `${CLAUDE_PLUGIN_ROOT}` is not available in
   the agent's Bash, so the shim is the entry point. Replaces
   `bin/handoff-memory-probe` and `bin/handoff-precompact-probe`.
@@ -416,23 +499,26 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `scripts/`: it is short enough to read at once, its only caller would be its
   own shim, and `bin/*` is already inside the `shellcheck -x` line, so sourcing
   `../scripts/_lib.sh` from here lints as it does from `scripts/`. Takes its
-  root from the same session pointer the checkpoint reads and refuses on its
-  absence with the same message; moves the file to `armed` through
+  root from `HANDOFF_ROOT`, injected the same way and by the same hook as
+  `handoff-checkpoint`'s, and refuses on its absence with the same message;
+  moves the file to `armed` through
   `handoff_drive_arm`; exits 2 naming the state it found when the file is
   absent or not `held`, and naming the owner when the held file is another
   session's — the approval it speaks for is the one *this* session was asked
   for, and the state alone does not say that. NFR1: no git, no tmux — it
   rewrites one file.
-- `scripts/checkpoint.sh` — the one write path for the handoff/precompact
-  wrap-up (FR1). Takes its root from the pointer `session-pointer.sh`
-  published, keyed by `CLAUDE_CODE_SESSION_ID`, and refuses when there is
-  none: it runs in the agent's Bash, where `CLAUDE_PROJECT_DIR` is unset and
-  the old fallback to `$PWD` wrote one repo's handoff files while every reader
-  stayed in the other. Reads the JSON payload on stdin, validates it against
+- `scripts/checkpoint.py` — the one write path for the handoff/precompact
+  wrap-up (FR1). Python since 2026-08-10, ported from `checkpoint.sh` (see
+  `docs/changelog/2026-08-10-python-split.md`). Takes its root from
+  `HANDOFF_ROOT`, injected by
+  `scripts/inject-checkpoint-root.sh` (`PreToolUse(Bash)`) into the very
+  command that invokes it, and refuses when unset or naming a non-directory:
+  it runs in the agent's Bash, where `CLAUDE_PROJECT_DIR` is unset, so nothing
+  else can supply it. Reads the JSON payload on stdin, validates it against
   the schema (FR2 — a violation exits 2 naming the offending field on stderr),
   applies the `task`/`todo` Write-or-Edit forms (FR5; `task` is Write-form-
   or-null only), removes a file whose resulting body is empty via
-  `checkpoint_is_empty_body` (FR6), writes `.claude/checkpoint-manifest` —
+  `is_empty_body` (FR6), writes `.claude/checkpoint-manifest` —
   always, even with zero lines, so `bash-post.sh`'s presence-gate still
   fires for a call that touched neither file — and composes `.claude/autodrive`
   (FR8) from the transition fields, flattening the title's whitespace on the
@@ -448,34 +534,62 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `held`. `rename` is required wherever a title is decided — `skill: "handoff"`
   and `skill: "autoname"`, where it must be a **string**, checked before the
   whitespace flattening that would otherwise pretty-print an object into a
-  title — and forbidden under `precompact`, by key presence rather than value
-  emptiness, the way the `autoname` branch beside it already reads: it makes a
-  call that forgot its title, or carried one to the boundary that renames
-  nothing, an error rather than a silent non-rename. `autoname` is
-  the third `skill` value and neither boundary: its whole payload is its own
-  name and a title, every other field is a schema error under it, and the
-  memory gate lives inside the boundary branch so that call composes no
-  directive at all. Then it prints the directive output (FR9, via
-  `_checkpoint-lib.sh`), with the arming instruction composed onto the memory
+  title — and forbidden under `precompact` and `restart`, by key presence
+  rather than value emptiness, the way the `autoname` branch beside it
+  already reads: it makes a
+  call that forgot its title, or carried one to a boundary that renames
+  nothing, an error rather than a silent non-rename. `autoname` and
+  `restart` are the third and fourth `skill` values and neither boundary:
+  each one's whole payload is its own name plus one or two small fields
+  (a title for `autoname`; an optional continuation for `restart`, its one
+  field besides the name), every boundary field is a schema error under
+  either, and the memory gate lives inside the boundary branch so neither
+  call composes a directive at all — `restart` never implies a memory write,
+  since the conversation is never lost, only the process. Then it prints the
+  directive output (FR9, via
+  `_checkpoint_lib.py`), with the arming instruction composed onto the memory
   directive when the sentinel is held. NFR1: it does no `git` or `tmux` work
   itself — see `bash-post.sh`. The Edit form's exact string
   replacement (first occurrence, error if `old_string` is absent or
-  ambiguous) is applied by a `python3` heredoc, not shell, so a multi-line
-  `old_string`/`new_string` needs no quoting.
-- `scripts/_checkpoint-lib.sh` — sourced helper for `checkpoint.sh` and, for
-  `checkpoint_is_empty_body`, `write-stage.sh`. Renamed from `_probe-lib.sh`;
-  `probe_*` functions became `checkpoint_*`, unchanged in content and
-  composition order (FR9) — only the commit-awareness mode's source moved
-  from a positional CLI argument (`probe_require_mode`, now gone; the
-  literal-value check is inline JSON validation in `checkpoint.sh`) to a
-  payload field.
-  `checkpoint_is_empty_body` is FR6's generic emptiness test: strips heading
+  ambiguous) needs no shell quoting for a multi-line `old_string`/`new_string`
+  now that the whole script is Python — it was a `python3` heredoc from
+  `checkpoint.sh` before the 2026-08-10 port.
+- `scripts/inject-checkpoint-root.sh` — `PreToolUse(Bash)` entry point:
+  matches any command containing `handoff-checkpoint` or `handoff-approved`
+  (a loose substring test — a false positive costs an unused env var on an
+  unrelated command, a false negative the refusal in `checkpoint.py`/
+  `bin/handoff-approved`), resolves this session's root the same way every
+  other cwd-scoped hook does, and rewrites the command to
+  `export HANDOFF_ROOT=<quoted>; <original command>` via `updatedInput`.
+  `export …;` rather than a bare `VAR=…` prefix, so the value survives a
+  batched command — `VAR=x a && b` would scope to `a` alone. Replaces a
+  session-keyed pointer file `session-pointer.sh` used to publish once at
+  `SessionStart`, sampled at the one moment the cwd does not yet belong to
+  the session: `SessionStart(resume)` fires with the resuming process's cwd,
+  before the harness moves the session into its own project dir. Resolving
+  here, on every matching call, has no such moment — the value is sampled
+  when it is used. NFR2: fires on every Bash call in every session with the
+  plugin installed, so the negative path is one jq field parse and a
+  substring test, with no root resolution unless the command matches. See
+  `docs/changelog/2026-08-10-checkpoint-root-via-updatedinput.md`.
+- `scripts/_checkpoint_lib.py` — imported helper module for `checkpoint.py`
+  and, for `is_empty_body`, `write-stage.sh` (via a `python3
+  _checkpoint_lib.py --is-empty-body` subprocess spawn — its `_cli` entry
+  point). Python since 2026-08-10, ported from `_checkpoint-lib.sh` (see
+  `docs/changelog/2026-08-10-python-split.md`); the `checkpoint_*` name
+  prefix dropped in the port since the module namespace now does that job —
+  `checkpoint_is_empty_body` is `is_empty_body`, `checkpoint_memory_directive`
+  is `memory_directive`, `checkpoint_ledger_path` is `ledger_path`,
+  `checkpoint_sdd_directive` is `sdd_directive`,
+  `checkpoint_todo_boundary` is `todo_boundary` — content and composition
+  order (FR9) unchanged.
+  `is_empty_body` is FR6's generic emptiness test: strips heading
   (`#`) and blank lines, and what remains decides — a `## Remaining` with no
   items or a task file with headings and no content both count as empty.
-  Shared by `checkpoint.sh` (after a Write/Edit it just applied) and
+  Shared by `checkpoint.py` (after a Write/Edit it just applied) and
   `write-stage.sh` (after the agent's own direct edit to `handoff-todo.md`)
   so the two writers cannot drift on what counts as empty.
-  `checkpoint_memory_directive` gates on the `gitlore-memory` submodule
+  `memory_directive` gates on the `gitlore-memory` submodule
   registration (FR12) and a dirty worktree, then instructs the agent to
   summarize → get approval → write `.claude/gitlore-memory-message`, and
   under `without-commit` also `.claude/gitlore-commit-memory`. That trigger
@@ -498,7 +612,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `git config gitlore.commitCommand` + `commit-memory.sh -F -` Bash path:
   all file writes, so it sidesteps the sandbox and the auto-mode classifier.
   Couples only to the two IPC filenames — never gitlore internals.
-  `checkpoint_ledger_path` is the one-row registry of known workflow-owned
+  `ledger_path` is the one-row registry of known workflow-owned
   progress ledgers (currently superpowers SDD), so the nudge and the
   boundary can never disagree about what exists — and both interpolate
   what it prints, because with a glob there is no path to hardcode. It
@@ -506,15 +620,15 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `.superpowers/sdd/*/progress.md` counts only with SDD's identity first
   line, the pre-6.2.0 flat path never counts, and among several the
   most-recently-modified wins. See
-  `docs/changelog/2026-07-26-orphaned-ledger.md`. `checkpoint_sdd_directive`
+  `docs/changelog/2026-07-26-orphaned-ledger.md`. `sdd_directive`
   holds the structured-workflow ledger nudge (precompact only) and ends by
   drawing the boundary between the two lists — the plan's tasks belong to the
   ledger, `handoff-todo.md` holds only work outstanding outside the plan, and
   the file is never stood down (`docs/changelog/2026-08-08-ledger-and-todo-are-different-scopes.md`);
-  `checkpoint_todo_boundary` is that boundary alone, for the handoff path,
+  `todo_boundary` is that boundary alone, for the handoff path,
   naming the removal as well because it lands in the same turn as the writes
   — composed in
-  `checkpoint.sh`'s `skill: "handoff"` vs `skill: "precompact"` branch,
+  `checkpoint.py`'s `skill: "handoff"` vs `skill: "precompact"` branch,
   memory first, same order the two deleted probes used.
 - `scripts/bash-post.sh` — `PostToolUse(Bash)` entry point. Fires on every
   Bash call in every session with the plugin installed (NFR2), so the
@@ -592,11 +706,12 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
 - `handoff-todo.md` holds **open items only**. A finished item is dropped,
   never checked off: what landed is reconstructable from `git log`, and a
   done item still listed reads as outstanding and gets redone.
-- Sourced helpers (`_lib.sh`, `_checkpoint-lib.sh`) need
-  `# shellcheck source-path=SCRIPTDIR source=<file>.sh` above the
-  `source` line so `shellcheck -x` follows them. Add
+- `_lib.sh`, the one remaining sourced bash helper, needs
+  `# shellcheck source-path=SCRIPTDIR source=_lib.sh` above the
+  `source` line so `shellcheck -x` follows it. Add
   `# shellcheck disable=SC2034` to vars consumed only by sourcing
-  scripts.
+  scripts. `_checkpoint_lib.py` and `_watcher_lib.py` are imported, not
+  sourced, so this convention does not apply to them.
 
 ## Testing
 
@@ -614,7 +729,7 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   `release` recipe depends on this name; it is also gitlore's
   `precommitCommand`, so it runs on every memory commit (needs the
   direnv-activated venv).
-- `just hook-test` — `bats tests/hook-test.bats tests/watcher-test.bats
+- `just hook-test` — `bats tests/hook-test.bats
   tests/checkpoint.bats`: end-to-end test of the handoff-specific hook
   scripts (and the rename scripts) against synthetic tool-event payloads. `bats run` captures
   exit codes/output without the `set +e` dance. `version-guard.sh` is
@@ -624,35 +739,55 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   watcher rely on this, since `TMUX=fake` does not stop tmux falling back to
   the default socket — unstubbed, those watchers drive a real pane belonging
   to whoever is running the suite.
-  `tests/checkpoint.bats` covers `scripts/checkpoint.sh`, `bin/handoff-checkpoint`,
-  and `scripts/bash-post.sh` (merged from the deleted
-  `tests/memory-probe.bats` + `tests/precompact-probe.bats`, over the shared
-  `tests/probe-helpers.bash` fixtures). Carries forward the commit-awareness
+  `tests/checkpoint.bats` covers only what stayed bash after the
+  2026-08-10 Python split (see
+  `docs/changelog/2026-08-10-python-split.md`): `inject-checkpoint-root.sh`,
+  `bin/handoff-approved`, the `bin/handoff-checkpoint` shim, and
+  `scripts/bash-post.sh`. Everything it used to cover about `checkpoint.sh`
+  itself — schema validation, write semantics, directive composition, the
+  transition/sentinel matrix — moved with the port to
+  `tests/test_checkpoint.py` (pytest), described below.
+  `tests/test_checkpoint.py` (89 tests) covers `scripts/checkpoint.py`'s own
+  behavior end-to-end via subprocess, ported from what was
+  `tests/checkpoint.bats`'s exhaustive coverage of `checkpoint.sh` (merged,
+  before that, from the deleted `tests/memory-probe.bats` +
+  `tests/precompact-probe.bats`). Carries forward the commit-awareness
   contract in full — the mode's four combinations with memory state, and the
   composed memory-then-SDD ordering under `skill: "precompact"` vs its
   absence under `skill: "handoff"` — plus the ledger-liveness matrix (flat
   path, unidentified workspace, several-workspaces mtime tiebreak). The
   load-bearing assertion is the negative — `with-commit` output never
   mentions the trigger file — and it is mutation-checked (disable the
-  branch, watch it go red), not observed passing. New: schema validation
+  branch, watch it go red), not observed passing. Also: schema validation
   (each required field missing, each literal with an unknown value, `rename`
   under `precompact`, `content`+`old_string` together, a partial Edit,
   `file_path` outside `$root/.claude/`, malformed JSON — each asserting a
   non-zero exit and that the message names the field), Edit application
   (`old_string` absent, ambiguous, successful), empty-body removal through
-  both writers (`checkpoint.sh` and `write-stage.sh`) including that the
+  both writers (`checkpoint.py` and `write-stage.sh`) including that the
   deletion reaches the manifest, and `bash-post.sh` (manifest absent,
-  manifest present, a sentinel left untouched). The `skill` enum's three values
+  manifest present, a sentinel left untouched). The `skill` enum's four values
   each accepted, the two retired driven-skill names rejected, `rename` rejected
-  under `precompact` and required under the other two, and each boundary's
-  directive asserted against the absence of the other's.
+  under `precompact` and `restart`, required under the other two, and each
+  boundary's directive asserted against the absence of the other's.
   `skill: "autoname"` adds five rows: the exact sentinel it composes (read back
   through `handoff_drive_read` as kind `rename` in state `armed`), the empty
   manifest with neither file touched, `rename` missing, each of the six fields
   the boundaries carry rejected by name, and the load-bearing negative —
   an `autoname` call against a dirty memory submodule emits no directive at
   all, mutation-checked by restoring the unconditional
-  `checkpoint_memory_directive` and watching that row alone go red.
+  `memory_directive` and watching that row alone go red.
+  `skill: "restart"` mirrors that shape in `tests/test_checkpoint.py`: the
+  exact sentinel with and without a continuation (read back as kind `restart`
+  in state `armed`, never `held` — restart composes no memory directive, so
+  the same never-holds row that is load-bearing for `autoname` needs no
+  restart-specific mutation check, since there is no gate for the mutation to
+  disable), the empty manifest, `continue` missing, `CLAUDE_CODE_SESSION_ID`
+  unset (a distinct failure from the six boundary fields, each rejected by
+  name against the generic "unknown skill" message a naive assertion could
+  pass on accident — every restart row guards against that vacuous pass
+  explicitly, since both "restart" and "compact" appear inside that message's
+  own fixed vocabulary).
   The transition fields add their own matrix: each of `clear`/`compact`/
   `continue` missing, each with a value outside its type, the other boundary's
   transition field present, an empty or multi-line `compact` directive, a
@@ -673,10 +808,11 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   for the branch matrix (including the containment rule that keeps a submodule
   `inside`), `tests/hook-test.bats` for `handoff_root_read`'s labels, the fast
   path labelling its own branch, `session-pointer.sh`, and the drift report's
-  episode semantics, and `tests/checkpoint.bats` for the pointer refusals plus
-  the load-bearing negative — a drifted cwd gets nothing written into its
-  `.claude/`, mutation-checked against the old `$PWD` fallback. The pointer
-  sweep's two guard-rails are load-bearing and each mutation-checked twice: a
+  episode semantics, and `tests/test_checkpoint.py` for the `HANDOFF_ROOT`
+  refusals plus the load-bearing negative — a drifted cwd gets nothing
+  written into its `.claude/`, mutation-checked against the old `$PWD`
+  fallback. The pointer sweep's two guard-rails are load-bearing and each
+  mutation-checked twice: a
   file the plugin did not write, and one a directory deeper, both survive
   (widen the name filter, drop `-maxdepth 1`), and another session's fresh
   files survive (drop `-mtime +7`). Those guard-rails reach as far as their
@@ -700,11 +836,11 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   still pass. The re-arm's own scoping row (*"leaves another session's context
   marker alone"*) cannot go red before the `rm -f` it guards exists, so it is
   verified by mutation afterwards rather than in the red phase.
-  The compaction driver is covered in the two existing suites rather than a
-  new file: `tests/hook-test.bats` for the `handoff_drive_read` shape matrix,
+  The compaction driver is covered in `tests/hook-test.bats`, unaffected by
+  the 2026-08-10 Python split since every script it drives here stayed bash:
+  the `handoff_drive_read` shape matrix,
   `stop-drive.sh` / `load-compact.sh` / `load-handoff.sh` on
-  `source: "clear"` / `report-watcher-failure.sh`, and `tests/watcher-test.bats`
-  for the walker, the pane predicates,
+  `source: "clear"` / `report-watcher-failure.sh`,
   and — since the states became content — the four state gates, each paired
   with the positive that already existed over the same fixture: `stop-drive.sh`
   ignoring a `pending`, each loader ignoring an `armed`, and the sweep leaving
@@ -713,11 +849,43 @@ invocation; `uv.lock` is committed, `.venv/` is gitignored). See
   conjunct and `handoff_drive_arm`'s no-temp-left-behind row — the last two
   because both were green in the red phase, the arm rows having failed at 127
   rather than on an assertion, which proves nothing.
-  `transcript_title_count`, and the `watcher_fail` recording. Two rows there are
-  load-bearing and mutation-checked: the FR-H re-idle gate, asserted on the
-  *delay* between two literal sends rather than on suppression (`wait_for_idle`
-  falls through on timeout by design, so a busy pane is typed into eventually),
-  and that the confirmation primitives return rather than exit. The same holds
+  The `restart` kind adds its own rows to `tests/hook-test.bats`: the shape
+  matrix (`clear`'s shape, `/exit`/`claude --resume` in the two command
+  slots), `handoff_resume_command` (argv replay with `--resume` appended, an
+  embedded-space argument surviving whole via a NUL-separated fixture file
+  substituting for `/proc/<pid>/cmdline` — `/proc` itself cannot be faked —
+  and the no-source-readable fallback), `stop-drive.sh`'s argv composition and
+  stale-exited-marker clearing (asserted through the not-in-tmux paste path,
+  a synchronous seam, rather than by waiting on the detached walker), the new
+  `session-end.sh` hook (silent absent a pending `restart`, writes the marker
+  when one is pending, worktree-scoped), and the new `load-restart.sh` hook
+  mirrored against `load-compact.sh`'s own matrix but with one added negative
+  — a task file present still injects no frame, which is the whole reason a
+  restart costs no context.
+  The walker and the pane predicates that used to be `tests/watcher-test.bats`
+  ported whole to pytest with the 2026-08-10 split (see
+  `docs/changelog/2026-08-10-python-split.md`), never trimmed:
+  `tests/test_watcher_lib.py` (24 tests) covers the pure predicates
+  (`is_busy`, `is_typing`, `is_unknown_command`), `transcript_prompt_count`,
+  `transcript_title_count`, and the `watcher_fail` recording, plus that the
+  four confirmation primitives (`submit_exited` since 2026-08-10) return
+  rather than raise on a non-delivery.
+  `tests/test_drive_when_idle.py` (23 tests) drives `drive_when_idle.py`
+  end-to-end via subprocess against the tmux stub (`tests/conftest.py`'s
+  `TmuxStub` fixture, replacing the bats `make_stub`/`on_enter` helpers):
+  the recognition read-back, the unrecognized-command clear, the
+  never-typed-while-composing gate, the four confirmation primitives, and
+  the multi-line sequence and stop-on-first-failure behavior. `/exit` and the
+  `claude --resume` shell-line path (2026-08-10) add five rows: `/exit`
+  confirming and failing, the shell line proceeding against pane text that
+  would fail `_drive_line`'s composer checks (demonstrating the bypass is
+  real, not just untested), its settle being configurable, and the full
+  `/exit`-then-`claude --resume` sequence running in order. Two rows there
+  are load-bearing and mutation-checked: the FR-H re-idle gate, asserted on
+  the *delay* between two literal sends rather than on suppression
+  (`wait_for_idle` falls through on timeout by design, so a busy pane is
+  typed into eventually), and the confirmation primitives returning rather
+  than raising, echoed from the predicate suite. The same holds
   for `load-handoff.sh`'s ordering hazard — a driven clear with an empty task
   file must still continue, so the consume and the spawn precede the no-frame
   exit.

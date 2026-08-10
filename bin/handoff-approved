@@ -26,15 +26,17 @@ err() {
 
 # The same channel the checkpoint reads its root from, and the same refusal:
 # this runs in the agent's Bash, where CLAUDE_PROJECT_DIR is unset and $PWD is
-# wherever the session cwd has drifted to.
+# wherever the session cwd has drifted to. scripts/inject-checkpoint-root.sh
+# (PreToolUse(Bash)) resolves it fresh on every matching call and injects it
+# into this very invocation as HANDOFF_ROOT.
+root="${HANDOFF_ROOT:-}"
+[ -n "$root" ] \
+    || err "HANDOFF_ROOT is unset — call by bare name, unmodified, so the PreToolUse(Bash) hook recognises and injects it"
+[ -d "$root" ] || err "HANDOFF_ROOT does not name a directory (got \"$root\")"
+
+# Unrelated to the root above; this is still read straight from the
+# environment, since only the session an approval was asked in may give it.
 session_id="${CLAUDE_CODE_SESSION_ID:-}"
-[ -n "$session_id" ] \
-    || err "CLAUDE_CODE_SESSION_ID is unset, so this session's root pointer cannot be addressed"
-pointer="$(handoff_pointer_path "$session_id")"
-[ -f "$pointer" ] \
-    || err "no session root pointer at $pointer; restart the session to publish one"
-root="$(head -n1 "$pointer")"
-[ -d "$root" ] || err "the session root pointer at $pointer does not name a directory (got \"$root\")"
 
 drive="$root/$HANDOFF_REL_DRIVE"
 [ -f "$drive" ] || err "no transition to arm: $HANDOFF_REL_DRIVE does not exist"

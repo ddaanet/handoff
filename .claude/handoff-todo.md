@@ -1,35 +1,20 @@
 ## Remaining
 
-- Guard the walker's two transcript readers against a line that parses to a
-  scalar. `transcript_prompt_count` and `transcript_title_count` in
-  `scripts/_watcher-lib.sh` both call `.get()` on whatever `json.loads` returned,
-  and their `except json.JSONDecodeError` does not catch the `AttributeError` —
-  the Python mirror of the jq fold just fixed in `context-threshold.sh`. No
-  fixture exercises it.
-- Have the walker confirm the line reached the composer before Enter. Observed
-  2026-08-09: a `/compact` line left the composer empty with nothing in the
-  transcript, and `submit_consumed` reported "was typed and Entered" 300s
-  later — asserted, never observed. Both a `send-keys` to a dead pane (exit
-  status unread) and a pane in copy mode swallow the text this way. The pane is
-  the legitimate witness for *typing landing*; only did-it-take-effect is
-  forbidden to read there, and `is_unknown_command` already reads it.
-- Implement `plans/2026-08-05-checkpoint-root-via-updatedinput.md` — red bats
-  first, including the batched-command row that a bare `VAR=` prefix would only
-  pass by accident.
-- Retire memory facts for index headroom. `MEMORY.md` is 24237 bytes against the
-  24.4KB (24985-byte) cutoff past which the loader silently drops the tail —
-  748 bytes of headroom, two index lines' worth, after the tier merge added two
-  facts and retired one. Classify WHEN / HOW / acted-inline first and relocate
-  the acted-inline class, rather than shortening hooks to hit a byte target.
 - Keep watching whether a context-size nudge is ever ignored outright — that is
-  the evidence that reopens the halt.
-- Split bash/Python per `plans/2026-07-31-python-rewrite-brief.md`.
-- Add handoff's `restart` transition kind per `brief-driven-restart.md`,
-  including the `SessionEnd` marker hook and a `SessionStart(resume)` matcher —
-  the drift work's matcher-less `SessionStart` entry already covers `resume`.
-- Probe what `reason` an interactive `/exit` writes to `SessionEnd`.
+  the evidence that reopens the halt. (Standing watch, not a discrete task.)
+- Probe what `reason` an interactive `/exit` writes to `SessionEnd`. Next
+  actionable item — start here.
 - Patch `handoff-checkpoint`'s gitlore diagnosis into its three real cases, with
   the relaunch as the remedy.
+- Propose excluding the memory submodule from the clean-tree check in
+  claude-plugin-dev's `release.sh`: `git diff --quiet HEAD` fails on ` M memory`,
+  a gitlore repo's resting state, so `release` and `resume-release` both abort
+  until someone hand-commits the memory the release would have carried anyway.
+  That repo is read-only from here and `plugin-dev/` is a vendored subtree —
+  propose, never hand-edit.
+- Refresh `claude-plugins`' gitlore hooks: its commit and its push both printed
+  "gitlore skipped: hooks dir is stale (plugin upgraded; cache GC'd)", so that
+  repo's memory gate is inert until Claude Code is started there once.
 - Apply `brief-merge-dispatch-authorization.md` in gitlore: its merge directive
   should state that the dispatch is authorized, so an agent bound by a blanket
   no-unsolicited-dispatch rule can act on it without a round trip.
@@ -49,3 +34,5 @@
   and `general` still point at a local `./.git/gitlore-placeholder`. Then
   `gitmoji` -> `general` -> `home` -> `devddaanet` -> `skills` -> `candidature`
   -> `edify` -> `Emploi` -> `cwd-safety`.
+- Resolve the open decision: whether to publish the `ddaanet` tier merge. See
+  the task file's `## Open decisions`.

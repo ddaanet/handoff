@@ -48,6 +48,13 @@ ignore = [
     "TD002",    # missing-todo-author
     "TD003",    # missing-todo-link
     "FIX",      # FIXME comments should not cause failure
+
+    # The watcher matches literal TUI glyphs (the prompt's "❯", box-drawing
+    # pane borders) — these are the real characters Claude Code's terminal
+    # renders, not stand-ins for ASCII.
+    "RUF001",   # ambiguous-unicode-character-string
+    "RUF002",   # ambiguous-unicode-character-docstring
+    "RUF003",   # ambiguous-unicode-character-comment
     "S101",     # Authorize assert
     "T201",     # Authorize print
     "T203",     # Authorize pprint

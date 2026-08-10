@@ -309,6 +309,43 @@ read_drive() {
     [ "${#DRIVE_AFTER[@]}" -eq 0 ]
 }
 
+# restart's shape mirrors clear's exactly (4 or 5 lines, two required
+# before-lines, one optional prose after) — only the literal commands differ.
+@test "handoff_drive_read (restart): two before-lines in order, prose after" {
+    read_drive "armed" "restart" "/exit" "claude --resume sess-42" "pick up per the task file"
+    [ "$DRIVE_KIND" = restart ]
+    [ "${#DRIVE_BEFORE[@]}" -eq 2 ]
+    [ "${DRIVE_BEFORE[0]}" = "/exit" ]
+    [ "${DRIVE_BEFORE[1]}" = "claude --resume sess-42" ]
+    [ "${DRIVE_AFTER[0]}" = "pick up per the task file" ]
+}
+
+@test "handoff_drive_read (restart, no continuation): typed, nothing submitted after" {
+    read_drive "armed" "restart" "/exit" "claude --resume sess-42"
+    [ "$DRIVE_KIND" = restart ]
+    [ "${#DRIVE_BEFORE[@]}" -eq 2 ]
+    [ "${DRIVE_BEFORE[1]}" = "claude --resume sess-42" ]
+    [ "${#DRIVE_AFTER[@]}" -eq 0 ]
+}
+
+@test "handoff_drive_read (restart, /exit with an argument): rejected" {
+    run read_drive "armed" "restart" "/exit now" "claude --resume sess-42"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly"* ]]
+}
+
+@test "handoff_drive_read (restart, resume line with no session id): rejected" {
+    run read_drive "armed" "restart" "/exit" "claude --resume"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"non-empty argument"* ]]
+}
+
+@test "handoff_drive_read (restart, wrong line count): rejected, naming the count" {
+    run read_drive "armed" "restart" "/exit"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"4 or 5 lines"* ]]
+}
+
 # The state a Stop has already consumed. The parser does not know which caller
 # wants which state — it reports the value and the gates decide.
 @test "handoff_drive_read (pending): parsed like any other state" {
@@ -503,6 +540,51 @@ compact" ]
     [ "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'sentinel*' | wc -l)" -eq 1 ]
 }
 
+# --- _lib.sh: handoff_resume_command ---
+
+# HANDOFF_TEST_CMDLINE_PATH substitutes a fixture file for /proc/<pid>/cmdline
+# — /proc itself cannot be faked. Round-trip the output back through a shell
+# to check the CONTRACT ("survives being retyped") rather than the exact
+# quoting bash's %q happens to choose.
+resplit() {
+    bash -c 'eval "set -- $1"; printf "%s\n" "$@"' _ "$1"
+}
+
+@test "handoff_resume_command (argv[0] and every flag replayed, --resume appended)" {
+    printf 'claude\0--plugin-dir\0/foo\0' > "$BATS_TEST_TMPDIR/cmdline"
+    HANDOFF_TEST_CMDLINE_PATH="$BATS_TEST_TMPDIR/cmdline" \
+        run handoff_resume_command "" "sess-99"
+    [ "$status" -eq 0 ]
+    got="$(resplit "$output")"
+    [ "$got" = "claude
+--plugin-dir
+/foo
+--resume
+sess-99" ]
+}
+
+# A value containing a space (a --plugin-dir path, say) must survive as ONE
+# argument once retyped, not split into two.
+@test "handoff_resume_command (an argument containing a space survives whole)" {
+    printf 'claude\0--plugin-dir\0/a path/with space\0' > "$BATS_TEST_TMPDIR/cmdline"
+    HANDOFF_TEST_CMDLINE_PATH="$BATS_TEST_TMPDIR/cmdline" \
+        run handoff_resume_command "" "sess-99"
+    [ "$status" -eq 0 ]
+    got="$(resplit "$output")"
+    [ "$got" = "claude
+--plugin-dir
+/a path/with space
+--resume
+sess-99" ]
+}
+
+@test "handoff_resume_command (no cmdline source readable: bare resume, still succeeds)" {
+    HANDOFF_TEST_CMDLINE_PATH="$BATS_TEST_TMPDIR/nope" PATH="" \
+        run handoff_resume_command "" "sess-99"
+    [ "$status" -eq 0 ]
+    [ "$output" = "claude --resume sess-99" ]
+}
+
 # --- write-stage ---
 # Stages handoff-task.md with `git add -f` and does NOT create handoff.md.
 
@@ -529,8 +611,9 @@ compact" ]
 
 # FR6: an edit that leaves handoff-todo.md with no remaining items removes it
 # and stages the removal, rather than leaving behind a file that reads as
-# "nothing pending" while still present. Shares checkpoint_is_empty_body with
-# checkpoint.sh (tests/checkpoint.bats), so the two writers cannot drift.
+# "nothing pending" while still present. Shares is_empty_body with
+# checkpoint.py (tests/test_checkpoint.py) via _checkpoint_lib.py's
+# --is-empty-body CLI, so the two writers cannot drift.
 @test "write-stage (handoff-todo.md emptied): removed and the removal staged" {
     git_tmp="$BATS_TEST_TMPDIR/git-empty"
     mkdir -p "$git_tmp/.claude"
@@ -942,6 +1025,38 @@ run_stop_drive() {
     echo "$output" | jq -e '.systemMessage | test("/compact keep the parser work")' >/dev/null
 }
 
+@test "stop-drive (kind restart: confirming source too, rewrites to pending)" {
+    seed_drive "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
+    echo "$output" | jq -e '.systemMessage | test("/exit")' >/dev/null
+}
+
+# The checkpoint composed only the session id (it cannot see this process's
+# own argv); stop-drive.sh fills in the rest right before the line would be
+# typed or pasted. The not-in-tmux path prints the paste text synchronously,
+# so it is the direct seam to assert the composed line against — no detached
+# process or timing involved.
+@test "stop-drive (kind restart, not in tmux: pastes the full resume command)" {
+    printf 'claude\0--plugin-dir\0/foo\0' > "$BATS_TEST_TMPDIR/cmdline"
+    seed_drive "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
+    run_stop_drive "$tmp" \
+        "HANDOFF_TEST_CMDLINE_PATH=$BATS_TEST_TMPDIR/cmdline env -u TMUX -u TMUX_PANE"
+    [ "$status" -eq 0 ]
+    ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
+    echo "$ctx" | grep -q '^/exit$'
+    echo "$ctx" | grep -q -- '--plugin-dir /foo --resume sess-hook-test$'
+}
+
+@test "stop-drive (kind restart: clears a stale exited marker before proceeding)" {
+    : > "$tmp/.claude/autodrive.exited"
+    seed_drive "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
+    run_stop_drive "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive.exited" ]
+}
+
 # `rename` has no loader, so nothing would ever clear a pending armed for it.
 @test "stop-drive (kind rename: deletes the sentinel outright)" {
     seed_drive "$tmp" "rename" "/rename Driven Transitions"
@@ -1014,6 +1129,60 @@ run_stop_drive() {
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
     [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
+}
+
+# --- session-end (SessionEnd: confirm /exit for a restart in flight) ---
+
+run_session_end() {
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, hook_event_name:\"SessionEnd\", reason:\"other\"}" \
+        | bash scripts/session-end.sh
+    ' _ "$1"
+}
+
+@test "session-end (no autodrive: silent no-op)" {
+    run_session_end "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$tmp/.claude/autodrive.exited" ]
+}
+
+@test "session-end (armed, not pending yet: silent, nothing written)" {
+    seed_drive "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
+    run_session_end "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$tmp/.claude/autodrive.exited" ]
+}
+
+@test "session-end (pending of a different kind: left alone, not written)" {
+    seed_pending "$tmp" "compact" "/compact" "continue with task 3"
+    run_session_end "$tmp"
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ ! -e "$tmp/.claude/autodrive.exited" ]
+}
+
+@test "session-end (pending restart: writes the exited marker)" {
+    seed_pending "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
+    run_session_end "$tmp"
+    [ "$status" -eq 0 ]
+    [ -e "$tmp/.claude/autodrive.exited" ]
+}
+
+@test "session-end (worktree cwd: writes the worktree's own marker)" {
+    wt="$(make_worktree wtE)"
+    seed_pending "$wt" "restart" "/exit" "claude --resume sess-hook-test"
+    run_session_end "$wt"
+    [ "$status" -eq 0 ]
+    [ -e "$wt/.claude/autodrive.exited" ]
+    [ ! -e "$tmp/.claude/autodrive.exited" ]
+}
+
+@test "hooks.json dispatches SessionEnd to session-end.sh" {
+    run jq -e '.hooks.SessionEnd[0].hooks[0].command | test("session-end.sh")' \
+        "$repo_root/hooks/hooks.json"
+    [ "$status" -eq 0 ]
 }
 
 # --- load-compact (SessionStart(compact): fire the continuation) ---
@@ -1129,6 +1298,90 @@ run_load_compact() {
     [ "$(head -n1 "$tmp/.claude/autodrive")" = "armed" ]
 }
 
+# --- load-restart (SessionStart(resume): fire the continuation, no frame) ---
+#
+# Unlike /clear or /compact, --resume restores the full prior conversation on
+# its own — there is nothing for a frame to hand a summariser's paraphrase
+# back to, so this loader never assembles or injects one. That is the whole
+# difference from load-compact.sh's shape below.
+
+run_load_restart() {
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, source:\"resume\", transcript_path:(\$cwd + \"/t.jsonl\")}" \
+        | '"$2"' bash scripts/load-restart.sh
+    ' _ "$1"
+}
+
+@test "load-restart (no pending: silent)" {
+    run_load_restart "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+}
+
+@test "load-restart (pending restart with continuation: consumes it, reports it)" {
+    seed_pending "$tmp" "restart" "/exit" "claude --resume sess-hook-test" "continue with task 3"
+    run_load_restart "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    echo "$output" | jq -e '.systemMessage | test("continue with task 3")' >/dev/null
+}
+
+@test "load-restart (pending restart, no continuation: consumed, reports resumed)" {
+    seed_pending "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
+    run_load_restart "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    echo "$output" | jq -e '.systemMessage | test("resumed")' >/dev/null
+}
+
+@test "load-restart (pending of kind compact: left for SessionStart(compact))" {
+    seed_pending "$tmp" "compact" "/compact" "continue with task 3"
+    run_load_restart "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "pending" ]
+    [ "$(sed -n 2p "$tmp/.claude/autodrive")" = "compact" ]
+}
+
+@test "load-restart (armed file: not consumed)" {
+    seed_drive "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
+    run_load_restart "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "" ]
+    [ "$(head -n1 "$tmp/.claude/autodrive")" = "armed" ]
+}
+
+@test "load-restart (not in tmux: emits continuation to paste, clears pending)" {
+    seed_pending "$tmp" "restart" "/exit" "claude --resume sess-hook-test" "continue with task 3"
+    run_load_restart "$tmp" 'env -u TMUX -u TMUX_PANE'
+    [ "$status" -eq 0 ]
+    [ ! -e "$tmp/.claude/autodrive" ]
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext | test("continue with task 3")' >/dev/null
+}
+
+@test "load-restart (worktree cwd: consumes the worktree pending file)" {
+    wt="$(make_worktree wtLR)"
+    seed_pending "$wt" "restart" "/exit" "claude --resume sess-hook-test"
+    run_load_restart "$wt" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$wt/.claude/autodrive" ]
+}
+
+# The differentiator from load-compact.sh: --resume already restores the full
+# conversation, so even with a task file present, no frame is assembled.
+@test "load-restart (task file present: still no frame injected)" {
+    seed_pending "$tmp" "restart" "/exit" "claude --resume sess-hook-test" "continue with task 3"
+    printf '%s\n' "## Now" "- rewire the parser" > "$tmp/.claude/handoff-task.md"
+    run_load_restart "$tmp" 'TMUX=fake TMUX_PANE="%0"'
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e 'has("hookSpecificOutput") | not' >/dev/null
+}
+
+@test "hooks.json dispatches SessionStart(resume) to load-restart.sh" {
+    run jq -e '[.hooks.SessionStart[] | select(.matcher == "resume") | .hooks[0].command | test("load-restart.sh")] | any' \
+        "$repo_root/hooks/hooks.json"
+    [ "$status" -eq 0 ]
+}
+
 # --- session-pointer (SessionStart, every source: publish the resolved root) ---
 #
 # handoff-checkpoint runs in the agent's Bash, where CLAUDE_PROJECT_DIR is
@@ -1148,27 +1401,22 @@ run_session_pointer() {
     ' _ "$cwd" "$sid" "$src"
 }
 
-@test "session-pointer (writes the resolved root, keyed by session id)" {
+# scripts/inject-checkpoint-root.sh (PreToolUse(Bash)) resolves the root fresh
+# on every matching call and injects it straight into the command now, instead
+# of this hook sampling and publishing it once at SessionStart.
+# SessionStart(resume) fires with the RESUMING process's cwd, before the
+# harness moves the session into its own project dir — the one moment a sample
+# taken here would stamp the wrong repo onto it. Mutation-checked: the first
+# assertion cannot go red before the write is removed, so it is verified by
+# reintroducing the old write and watching this alone go red. See
+# plans/2026-08-05-checkpoint-root-via-updatedinput.md.
+@test "session-pointer (no longer writes a root pointer; still clears the context marker)" {
+    mkdir -p "$HANDOFF_POINTER_DIR"
+    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
-    [ "$(cat "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID")" = "$tmp" ]
-}
-
-@test "session-pointer (worktree cwd: publishes the worktree root)" {
-    wt="$(make_worktree wtPTR)"
-    run_session_pointer "$wt"
-    [ "$status" -eq 0 ]
-    [ "$(cat "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID")" = "$wt" ]
-}
-
-# The drift case, and the reason the file exists: cwd is in another repo, and
-# the published root is still the launch repo — what every reader of the
-# handoff files resolves, and what the checkpoint must write to.
-@test "session-pointer (drifted cwd: publishes the launch root, not cwd)" {
-    mkdir -p "$other/.git"
-    run_session_pointer "$other"
-    [ "$status" -eq 0 ]
-    [ "$(cat "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID")" = "$tmp" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID" ]
+    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
 }
 
 @test "session-pointer (creates the pointer directory)" {
@@ -1209,7 +1457,6 @@ run_session_pointer() {
     run_session_pointer "$tmp" ""
     [ "$status" -eq 0 ]
     [ "$output" = "" ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-root-" ]
     [ ! -d "$HANDOFF_POINTER_DIR" ]
 }
 

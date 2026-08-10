@@ -17,9 +17,12 @@ Three skills sit on that seam — one per boundary, plus the rename:
 Each one either prepares and stops — writing the task file and leaving you
 to type the command — or carries the transition out for you, typing the
 command and a one-line prompt that resumes the work on the far side. Which
-one you get is decided by what you ask for. `/handoff:autoname` is the
-third skill: the rename alone, for a session worth a title while the main
-thread stays live.
+one you get is decided by what you ask for. `/handoff:autoname` is a third
+skill: the rename alone, for a session worth a title while the main
+thread stays live. `/handoff:restart` is a fourth: exit and relaunch with
+`--resume`, for when a plugin upgrade, a `hooks.json` edit, or any other
+config only a fresh process picks up needs adopting — the conversation
+carries over whole, so unlike `/clear` it costs no context at all.
 
 Both write the same file; a `SessionStart` hook injects it back, verbatim,
 into whatever comes next.
@@ -217,6 +220,8 @@ current project is modified.
   that the agent follows when you ask for a handoff.
 - [`skills/precompact/SKILL.md`](skills/precompact/SKILL.md) — the
   compact-boundary protocol.
+- [`skills/restart/SKILL.md`](skills/restart/SKILL.md) — exit and relaunch
+  with `--resume`, for config a live session cannot adopt.
 
 ## License
 

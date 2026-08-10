@@ -1,7 +1,8 @@
 # Spec — the checkpoint takes its root from the command, not a pointer
 
-Status: approved in principle, not started. Queued behind the state machine's
-pass 2 (transitions become modes).
+Status: implemented 2026-08-10, including `bin/handoff-approved` (not in
+scope of the original plan — see
+`docs/changelog/2026-08-10-checkpoint-root-via-updatedinput.md`).
 
 ## The defect
 

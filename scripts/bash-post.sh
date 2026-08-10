@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PostToolUse(Bash) hook: consumes .claude/checkpoint-manifest, which
-# handoff-checkpoint (scripts/checkpoint.sh) leaves behind because its own
+# handoff-checkpoint (scripts/checkpoint.py) leaves behind because its own
 # invocation runs in the agent's sandboxed Bash, where NFR1 forbids git staging
 # (a sandboxed `git add` can strand .git/index.lock).
 #

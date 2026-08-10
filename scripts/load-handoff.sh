@@ -49,7 +49,7 @@ if [[ "$hook_source" == "clear" && -f "$drive" ]]; then
                 # to the agent; this hook owns the path it records at.
                 export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_DRIVE_FAILED"
                 export HANDOFF_TRANSCRIPT="$hook_transcript"
-                handoff_spawn_detached drive-when-idle.sh "$TMUX_PANE" "${after[@]}"
+                handoff_spawn_detached drive_when_idle.py "$TMUX_PANE" "${after[@]}"
                 notes+=("cleared — will resume with \"${after[0]}\" once the prompt is idle (tmux pane $TMUX_PANE)")
             else
                 extra="The session was cleared, but the continuation prompt could not be typed (not in tmux). Present this line to the user in a fenced code block so they can paste it:

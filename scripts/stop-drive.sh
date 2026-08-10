@@ -56,6 +56,18 @@ fi
 before=( ${DRIVE_BEFORE[@]+"${DRIVE_BEFORE[@]}"} )
 after=( ${DRIVE_AFTER[@]+"${DRIVE_AFTER[@]}"} )
 
+# The checkpoint composed `claude --resume <sid>` from the session id alone —
+# it has no view of this process's own argv. Fill in the rest here, the one
+# place with access to the exiting process's own command line, and clear any
+# exited-marker a previous, only-partly-successful restart left behind: a
+# stale copy would let submit_exited report success without /exit having run
+# this time.
+if [[ "$DRIVE_KIND" == "restart" ]]; then
+    rm -f "$cwd/$HANDOFF_REL_DRIVE_EXITED"
+    sid="${before[1]#claude --resume }"
+    before[1]="$(handoff_resume_command "" "$sid")"
+fi
+
 # FR-G: an empty sequence arms nothing and spawns nothing. The pending state
 # alone is the whole effect — it is the loader's signal that this compaction
 # was expected, and therefore that the frame belongs in it.
@@ -89,7 +101,10 @@ export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_DRIVE_FAILED"
 # /rename confirms by a custom-title entry in this session's transcript.
 export HANDOFF_PENDING_FILE="$drive"
 export HANDOFF_TRANSCRIPT="$hook_transcript"
-handoff_spawn_detached drive-when-idle.sh "$PANE" "${before[@]}"
+# restart's /exit line confirms by this file appearing instead — SessionEnd's
+# marker, the opposite polarity of HANDOFF_FAIL_FILE/HANDOFF_PENDING_FILE.
+export HANDOFF_EXIT_FILE="$cwd/$HANDOFF_REL_DRIVE_EXITED"
+handoff_spawn_detached drive_when_idle.py "$PANE" "${before[@]}"
 
 jq -nc --arg p "$PANE" --arg l "${before[0]}" \
     '{systemMessage: ("handoff: will run " + $l + " once the prompt is idle (tmux pane " + $p + ").")}'

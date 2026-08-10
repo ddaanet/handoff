@@ -89,7 +89,7 @@ export HANDOFF_FAIL_FILE="$cwd/$HANDOFF_REL_DRIVE_FAILED"
 # no spinner yet. Every hook payload carries transcript_path.
 HANDOFF_TRANSCRIPT="$(jq -r '.transcript_path // ""' <<<"$input")"
 export HANDOFF_TRANSCRIPT
-handoff_spawn_detached drive-when-idle.sh "$PANE" "${after[@]}"
+handoff_spawn_detached drive_when_idle.py "$PANE" "${after[@]}"
 
 jq -nc --arg n "${after[0]}" --arg p "$PANE" --argjson c "$(frame_ctx "")" \
     '{systemMessage: ("handoff: compacted — will resume with \"" + $n + "\" once the prompt is idle (tmux pane " + $p + ").")} + $c'

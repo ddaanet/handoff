@@ -1,5 +1,8 @@
 ## Brief: split the scripts by language along the hot/cold line
 
+Status: implemented 2026-08-10 — see
+`docs/changelog/2026-08-10-python-split.md`.
+
 2026-07-31 — target repo: `handoff`
 
 The shell scripts total 1696 lines and some have outgrown bash. This is not a

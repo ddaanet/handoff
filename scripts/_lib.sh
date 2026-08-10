@@ -27,26 +27,27 @@ HANDOFF_REL_DRIVE=".claude/autodrive"
 # reported by report-watcher-failure.sh at the next UserPromptSubmit.
 # shellcheck disable=SC2034
 HANDOFF_REL_DRIVE_FAILED=".claude/autodrive.failed"
+# Where SessionEnd records that the process has actually exited, for a
+# restart transition's /exit line — the opposite polarity of
+# HANDOFF_REL_DRIVE_FAILED (created, never disappears, and only ever once per
+# attempt: stop-drive.sh clears any stale copy before spawning the walker).
+# shellcheck disable=SC2034
+HANDOFF_REL_DRIVE_EXITED=".claude/autodrive.exited"
 
-# Where this session's resolved root is published (session-pointer.sh) for the
-# agent's own Bash to read back (handoff-checkpoint), and where the drift
-# report records the last destination it announced. Not the project's .claude/:
-# the checkpoint cannot address a path under the root, since resolving that
-# root is the very thing it cannot do. A literal directory rather than $TMPDIR
-# for the same reason — the producer is a hook and the consumer is the agent's
-# sandboxed Bash, and the two share no environment but the session id.
+# Where the drift report records the last destination it announced, and the
+# context-threshold marker lives. A literal directory rather than $TMPDIR: it
+# used to also be where session-pointer.sh published this session's resolved
+# root for the agent's own sandboxed Bash to read back, and the two shared no
+# environment but the session id — see
+# plans/2026-08-05-checkpoint-root-via-updatedinput.md. That duty moved to
+# scripts/inject-checkpoint-root.sh (PreToolUse(Bash) env injection), but the
+# other two files are still session-keyed the same way, so the literal path
+# stays.
 HANDOFF_POINTER_DIR="${HANDOFF_POINTER_DIR:-/tmp/claude}"
-
-# Path of the root pointer for session id $1.
-handoff_pointer_path() {
-    printf '%s/handoff-root-%s\n' "$HANDOFF_POINTER_DIR" "$1"
-}
 
 # Path of the context-threshold marker for session id $1. Written when the
 # nudge fires and removed by session-pointer.sh at the next SessionStart: the
-# nudge fires once per climb, and the boundary is what re-arms it. A helper
-# rather than an inline path (as the drift marker is) because two scripts
-# address it — the same reason handoff_pointer_path exists.
+# nudge fires once per climb, and the boundary is what re-arms it.
 handoff_context_path() {
     printf '%s/handoff-context-%s\n' "$HANDOFF_POINTER_DIR" "$1"
 }
@@ -156,6 +157,7 @@ _handoff_drive_prose() {
 #   compact  /compact [directive]         [+ continuation prose]
 #   compact  (kind line alone: a transition is expected, nothing is typed)
 #   clear    /rename <title>, /clear      [+ continuation prose]
+#   restart  /exit, claude --resume <sid...>   [+ continuation prose]
 #
 # The continuation is optional on both driven kinds: typing the transition and
 # submitting a prompt into what it opens are separate decisions, and the payload
@@ -221,7 +223,7 @@ handoff_drive_read() {
     esac
 
     if [ "$n" -eq 1 ]; then
-        DRIVE_ERR="line 2 must be the transition kind — rename, compact or clear"
+        DRIVE_ERR="line 2 must be the transition kind — rename, compact, clear or restart"
         return 1
     fi
     DRIVE_KIND="${lines[1]}"
@@ -254,8 +256,18 @@ handoff_drive_read() {
                 DRIVE_AFTER=("${lines[4]}")
             fi
             ;;
+        restart)
+            _handoff_drive_expect "$n" 4 5 || return 1
+            _handoff_drive_command "${lines[2]}" 3 "/exit" none || return 1
+            _handoff_drive_command "${lines[3]}" 4 "claude --resume" arg || return 1
+            DRIVE_BEFORE=("${lines[2]}" "${lines[3]}")
+            if [ "$n" -eq 5 ]; then
+                _handoff_drive_prose "${lines[4]}" 5 || return 1
+                DRIVE_AFTER=("${lines[4]}")
+            fi
+            ;;
         *)
-            DRIVE_ERR="line 2 must be the transition kind — rename, compact or clear — not \`$DRIVE_KIND\`"
+            DRIVE_ERR="line 2 must be the transition kind — rename, compact, clear or restart — not \`$DRIVE_KIND\`"
             return 1
             ;;
     esac
@@ -267,7 +279,7 @@ handoff_drive_read() {
 # of leaving it pending for nobody to clear.
 handoff_drive_has_source() {
     case "$1" in
-        compact|clear) return 0 ;;
+        compact|clear|restart) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -399,16 +411,61 @@ handoff_match_target() {
 # outlives the hook turn. setsid fully detaches it into its own session but is
 # Linux-only — macOS ships no setsid(1) — so fall back to nohup (POSIX, ignores
 # SIGHUP). An exported HANDOFF_FAIL_FILE propagates to the child; exporting it
-# stays with the caller, which owns the path.
+# stays with the caller, which owns the path. The watcher itself
+# (drive_when_idle.py) is Python; the extension picks the interpreter, so this
+# helper stays generic over either.
 handoff_spawn_detached() {
-    local watcher
+    local watcher interpreter
     watcher="$(dirname "${BASH_SOURCE[0]}")/$1"; shift
+    case "$watcher" in
+        *.py) interpreter=python3 ;;
+        *) interpreter=bash ;;
+    esac
     if command -v setsid >/dev/null 2>&1; then
-        setsid bash "$watcher" "$@" >/dev/null 2>&1 &
+        setsid "$interpreter" "$watcher" "$@" >/dev/null 2>&1 &
     else
-        nohup bash "$watcher" "$@" >/dev/null 2>&1 &
+        nohup "$interpreter" "$watcher" "$@" >/dev/null 2>&1 &
     fi
     disown 2>/dev/null || true
+}
+
+# The original launch command, argv[0] plus every flag, re-quoted for replay
+# with `--resume <sid>` appended — a restart's checkpoint-composed sentinel
+# line only carries the session id (the checkpoint has no view of the
+# process's own argv), so stop-drive.sh calls this to fill in the rest right
+# before spawning the walker.
+#
+# Reads the parent's cmdline: hooks.json spawns each hook directly off the
+# `claude` process, so at Stop time $PPID (or an explicit override) IS that
+# process. Linux: /proc/<pid>/cmdline is NUL-separated, so a value with
+# embedded spaces (a --plugin-dir path, say) survives as one argument rather
+# than being split. There is no /proc on macOS; the `ps` fallback receives one
+# already space-joined line and cannot tell an embedded space from an argument
+# boundary — a known, accepted gap (this dev box is Linux; see CLAUDE.md).
+#
+# HANDOFF_TEST_CMDLINE_PATH substitutes a fixture file for /proc/<pid>/cmdline
+# in tests, since /proc itself cannot be faked.
+handoff_resume_command() {
+    local pid="${1:-$PPID}" sid="$2" src
+    src="${HANDOFF_TEST_CMDLINE_PATH:-/proc/$pid/cmdline}"
+    local -a argv=()
+    if [[ -r "$src" ]]; then
+        local part
+        while IFS= read -r -d '' part; do argv+=("$part"); done < "$src"
+    elif command -v ps >/dev/null 2>&1; then
+        local line
+        line="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+        if [[ -n "$line" ]]; then
+            # shellcheck disable=SC2206  # accepted word-splitting, see above
+            argv=($line)
+        fi
+    fi
+    if (( ${#argv[@]} == 0 )); then
+        printf 'claude --resume %s\n' "$sid"
+        return 0
+    fi
+    printf '%q ' "${argv[@]}"
+    printf -- '--resume %q\n' "$sid"
 }
 
 # Emit a PreToolUse deny on stdout, then `exit 0` (not `return`) —

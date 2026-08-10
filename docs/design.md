@@ -144,7 +144,7 @@ commit/push status. The working set comes from the harness's own
 
 Both wrap-up skills decide their content and then make exactly one Bash
 call: `handoff-checkpoint`, a PATH-resident shim (`bin/`) over
-`scripts/checkpoint.sh`, taking the whole wrap-up as a schema-validated
+`scripts/checkpoint.py`, taking the whole wrap-up as a schema-validated
 JSON payload on stdin — `skill`, `commit`, the boundary's transition field,
 `continue`, `rename` at the clear boundary, and `task` / `todo` in the
 harness's own tool-call shape: `file_path` + `content` for a
@@ -153,10 +153,20 @@ an Edit. The task file is authored whole at every boundary, so it takes no
 Edit form and the schema refuses one. A violation exits non-zero naming the
 offending field.
 
-It gets its root from the pointer `SessionStart` published, keyed by
-`CLAUDE_CODE_SESSION_ID`, and refuses when there is none — a live session
-always has one, so its absence is abnormal, and the old fallback to `$PWD`
-was silently wrong whenever the session cwd had drifted.
+It gets its root from `HANDOFF_ROOT`, injected into the command's
+environment by a `PreToolUse(Bash)` hook (`inject-checkpoint-root.sh`) that
+matches any command containing `handoff-checkpoint` or `handoff-approved`,
+resolves the root fresh from the payload `cwd`, and rewrites the command to
+`export HANDOFF_ROOT=<quoted>; <original>` via `updatedInput` — `export …;`
+rather than a bare `VAR=…` prefix, so the value survives a batched command.
+The checkpoint refuses when it is unset or not a directory, naming the
+unrecognised-invocation cause. Resolving on every call, at the moment the
+value is used, replaces an earlier session-keyed pointer file sampled once at
+`SessionStart`: `SessionStart(resume)` fires with the *resuming* process's
+cwd, before the harness moves the session into its own project dir, so a
+sample taken there could stamp the wrong repo onto a pointer read later in
+the same session. See
+[`docs/changelog/2026-08-10-checkpoint-root-via-updatedinput.md`](changelog/2026-08-10-checkpoint-root-via-updatedinput.md).
 
 The checkpoint applies the writes, removes any file whose resulting body is
 empty, composes `.claude/autodrive` from the transition fields, leaves
@@ -169,8 +179,16 @@ the manifest instead — `git add -f` for every listed path, deletions
 included, plus the rename watcher spawn.
 
 `file present ⟹ content pending` is an invariant two writers enforce
-(`checkpoint.sh` and `write-stage.sh`, sharing `checkpoint_is_empty_body`),
-not an instruction the agent has to remember.
+(`checkpoint.py` and `write-stage.sh`, the latter through a
+`_checkpoint_lib.py --is-empty-body` subprocess spawn so the two cannot
+disagree about what counts as empty), not an instruction the agent has to
+remember. `checkpoint.py` and `_checkpoint_lib.py` (with `drive_when_idle.py`
+and `_watcher_lib.py` below) are a 2026-08-10 Python port of what was
+`checkpoint.sh` + `_checkpoint-lib.sh`: both did bash's worst work —
+structured data, not text streams — and both run once per boundary, never on
+a hot path, so the interpreter-startup tax lands where it is cheapest to pay.
+The six event hooks that fire on every tool call stay bash. See
+[`docs/changelog/2026-08-10-python-split.md`](changelog/2026-08-10-python-split.md).
 
 ### The three skills
 
@@ -180,6 +198,15 @@ One skill per boundary, plus the rename:
 |---|---|---|
 | compaction | `/handoff:precompact` | `compact`: `false` \| `true` \| `"<directive>"` |
 | clear | `/handoff:handoff` | `clear`: `false` \| `true` |
+
+`/handoff:restart` is a fourth, separate skill rather than a third row in
+this table — it shares the driven-transition machinery below (a `kind` in
+the same sentinel, the same walker) but not the boundary shape: no commit
+awareness, no task/todo drafting, no prepare-only reading, because nothing
+inside a live session can adopt an upgraded plugin, hook, MCP server, or
+`settings.json` — those resolve once, at process startup, so exit-and-relaunch
+is the only remedy and it is always typed, never merely prepared. See
+"Driving the TUI" below for the kind itself.
 
 The judgment is per-boundary, not per-drive-mode: commit awareness, memory
 capture, the task/todo drafting rules and the file-vs-prompt seam are
@@ -225,6 +252,16 @@ larger half of both descriptions, since that is the reading a bare
   memory directive is an instruction to make one. For `/btw` side
   conversations and any session worth a name while the main thread stays
   live.
+- **`/handoff:restart`** — exit and relaunch, neither boundary either. Its
+  whole payload is `{"skill": "restart", "continue": …}`: no title (a
+  restart renames nothing), no task/todo, no commit awareness, and every
+  boundary field is a schema error under it by the same key-presence rule
+  autoname uses. No directive is composed, for the same reason as autoname —
+  nothing here implies a memory write. Unlike autoname it does carry
+  `continue`, since a restart can still be handed a continuation prompt for
+  the far side.
+
+
 
 ### Driving the TUI
 
@@ -237,6 +274,21 @@ A **driven transition** is a sequence of lines to type, plus the
 | `compact` | `/compact [directive]` | continuation prose, if any | `compact` |
 | `clear` | `/rename <title>`, `/clear` | continuation prose, if any | `clear` |
 | `compact` (prepared) | — | — | `compact` |
+| `restart` | `/exit`, `claude --resume <sid…>` | continuation prose, if any | `resume` |
+
+`restart`'s shape mirrors `clear`'s exactly — two required before-lines, one
+optional after-line — but crosses a boundary neither other kind does: its
+second before-line is typed into a bare shell, not the Claude Code TUI, once
+`/exit` has actually torn the process down. `checkpoint.py` composes only
+`claude --resume <sid>` (the session id from `CLAUDE_CODE_SESSION_ID`; it has
+no view of the process's own argv), and `stop-drive.sh` fills in the rest —
+argv[0] plus every launch flag, read fresh from the exiting process's own
+`/proc/<pid>/cmdline` (macOS: `ps`, a known, accepted gap for a value
+containing a space) and re-quoted for replay — right before the walker would
+type or paste it, since that is the one place with access to that argv. A
+stale `.claude/autodrive.exited` left by an earlier, only-partly-successful
+restart is cleared at the same point, so it cannot let a later attempt's
+`/exit` confirmation false-positive.
 
 The after-line is optional on both driven kinds, because typing the
 transition and submitting a prompt into what it opens are separate
@@ -244,7 +296,7 @@ decisions.
 
 One sentinel, `.claude/autodrive`, whose first line is its **state** and
 second line the kind. The states are `held` → `armed` → `pending` → gone,
-and every one after the first is a hook's to write. `checkpoint.sh` is the
+and every one after the first is a hook's to write. `checkpoint.py` is the
 file's one writer — it composes the sentinel and reads its own output back
 through the parser, so composer and parser cannot drift, and a direct agent
 Write or Edit is denied at `PreToolUse`. The remaining lines are the **literal keystrokes**, so
@@ -261,7 +313,7 @@ call. So no line is ever typed from inside a live turn. `Stop`
 so it cannot re-arm one in flight. The transition's own `SessionStart`
 consumes that file — only in state `pending`, and only of its own kind — and
 spawns the after-line. One walker,
-`drive-when-idle.sh`, serves every case: wait for idle, type, confirm,
+`drive_when_idle.py`, serves every case: wait for idle, type, confirm,
 re-gate on idle, next line. A line that fails to confirm stops the sequence,
 which is what makes a `/rename` that never lands under kind `clear` cost a
 wrong title and nothing more.
@@ -269,12 +321,22 @@ wrong title and nothing more.
 Confirmation dispatches on the **command**, not the kind — which is what
 lets `/rename` appear in two kinds with two different fates, and carries the
 recognition check for free, since any line beginning `/` takes the
-type-read-back-Enter path. Three primitives: a `custom-title` transcript
-entry for `/rename`, the sentinel disappearing for `/compact` and `/clear`,
-a genuine user-prompt transcript entry for prose. The walker reads
-the pane only where the pane is the sole witness — gating *typing into* the
-composer (`is_typing`, `is_unknown_command`). Nothing that asks whether an
-action *took effect* looks at it.
+type-read-back-Enter path. Four primitives: a `custom-title` transcript
+entry for `/rename`, the sentinel disappearing for `/compact`, `/clear` and
+`claude --resume …` (`submit_consumed`, unchanged across all three — a
+resumed session's `SessionStart` is what does it either way), a genuine
+user-prompt transcript entry for prose, and `.claude/autodrive.exited`
+appearing for `/exit` — the one primitive with the opposite polarity, since
+`SessionEnd` can only ever create that marker, never remove one that
+predates the attempt. The walker reads the pane only where the pane is the
+sole witness — gating *typing into* the composer (`is_typing`,
+`is_unknown_command`). Nothing that asks whether an action *took effect*
+looks at it, and `claude --resume …` skips those composer checks entirely: it
+targets a bare shell once `/exit` is confirmed, where neither the `❯`
+composer glyph nor the "No commands match" text exist, and neither is a
+reliable signal of a shell's own readiness across every user's shell prompt.
+A fixed settle (`HANDOFF_WATCHER_SHELL_SETTLE`) stands in for the composer
+checks on that one line.
 
 A detached walker's exit status is read by nothing, so non-delivery is
 written to `.claude/autodrive.failed` and reported by
@@ -291,6 +353,22 @@ The prepare-only compact path arms the kind line alone. Nothing is typed,
 but the transition is *expected*, and that expectation is what
 `SessionStart(compact)` gates the frame's re-injection on — otherwise a
 hand-typed `/compact` re-injects nothing.
+
+`load-restart.sh` (`SessionStart(resume)`) never assembles or injects the
+task-frame the way `load-compact.sh` and `load-handoff.sh` do: `--resume`
+already restores the full prior conversation on its own, so there is nothing
+for a frame to hand a summariser's paraphrase back to. The only effect there
+is firing whatever continuation was typed after the resume — which is the
+whole reason a restart costs no context at all.
+
+A restart that fails partway has no live session to report into: if `/exit`
+itself never lands, the original session is still up and its own next
+`UserPromptSubmit` reports the non-delivery as usual; if `/exit` succeeds but
+the resume command then fails, that session is gone, and the report waits —
+`report-watcher-failure.sh`'s files are project-scoped, so whatever session
+next opens in that directory drains `.claude/autodrive.failed` at its own
+first `UserPromptSubmit`, however much later that is. A deferred report, not
+a lost one.
 
 ### Held: a transition an approval has not released
 
@@ -355,23 +433,28 @@ was live for the whole blip. One report per episode: a marker holds the
 destination last announced, and returning clears it.
 
 The agent's own Bash cannot do any of this — `CLAUDE_PROJECT_DIR` is unset
-there, and a `$PWD` fallback is wrong in exactly the drift case. So
-`SessionStart` publishes the resolved root, on a wildcard matcher
-(`session-pointer.sh`, the only hook that reaches `resume`), as one line at
-`/tmp/claude/handoff-root-<session_id>` — a literal path both sides can
-address blind, since the two share no environment but the session id, and
-the checkpoint cannot read a file under the root it is trying to find.
+there, and a `$PWD` fallback is wrong in exactly the drift case. So a
+`PreToolUse(Bash)` hook (`inject-checkpoint-root.sh`) resolves the root the
+same way, at the moment a `handoff-checkpoint` or `handoff-approved`
+invocation is about to run, and injects it as `HANDOFF_ROOT` into that one
+command via `updatedInput`. An earlier design published the root once per
+session instead, at `SessionStart`, to a session-keyed pointer file the
+checkpoint's Bash could address blind. That sample was taken at the one
+moment the cwd does not yet belong to the session —
+`SessionStart(resume)` fires with the *resuming* process's cwd, before the
+harness moves the session into its own project dir — so it could stamp a
+stale or wrong repo onto a pointer a live session then read for its whole
+remaining lifetime. Resolving per call has no such moment. See
+[`docs/changelog/2026-08-10-checkpoint-root-via-updatedinput.md`](changelog/2026-08-10-checkpoint-root-via-updatedinput.md).
 
-That pointer and the drift marker beside it are the plugin's only state
-outside a project, and neither has an owner that outlives the session. So
-the producer sweeps: right after publishing, `session-pointer.sh` deletes
-files older than seven days, scoped by name to the two it writes and by
-`-maxdepth 1` to the level it writes them at — the directory is shared and
-holds files this plugin never wrote. A `SessionEnd` hook would clean up
-only the ends that fire one, which is the opposite of the set that strands
-a file. The trade is that a session open seven days without any
-`SessionStart` loses its pointer, and finds out when the checkpoint refuses
-and names the restart that republishes one.
+The drift marker is the plugin's remaining state outside a project, and it
+has no owner that outlives the session. `session-pointer.sh` sweeps it (and
+whatever stale root-pointer files the retired mechanism already left on
+disk) on every `SessionStart`, deleting files older than seven days, scoped
+by name to what this plugin writes and by `-maxdepth 1` to the level it
+writes them at — the directory is shared and holds files this plugin never
+wrote. A `SessionEnd` hook would clean up only the ends that fire one, which
+is the opposite of the set that strands a file.
 
 `handoff_match_target()` is the shared preamble of every path-scoped hook:
 one jq parse, basename fast-path, root resolution, and resolved-path
@@ -396,7 +479,7 @@ value is the file holding the approval wording the directive quotes, so the
 wording has one owner instead of a copy per consumer. Never gitlore
 internals.
 
-`checkpoint_ledger_path` is the one-row registry of foreign workflow-owned
+`ledger_path` is the one-row registry of foreign workflow-owned
 progress ledgers (currently superpowers SDD). It detects **liveness**, not
 presence: the current layout glob plus an identity first line, most-recent
 mtime among several, fail open. Both the nudge and the todo-file boundary
