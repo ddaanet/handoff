@@ -34,23 +34,14 @@ HANDOFF_REL_DRIVE_FAILED=".claude/autodrive.failed"
 # shellcheck disable=SC2034
 HANDOFF_REL_DRIVE_EXITED=".claude/autodrive.exited"
 
-# Where the drift report records the last destination it announced, and the
-# context-threshold marker lives. A literal directory rather than $TMPDIR: it
-# used to also be where session-pointer.sh published this session's resolved
-# root for the agent's own sandboxed Bash to read back, and the two shared no
-# environment but the session id — see
+# Where the drift report records the last destination it announced. A literal
+# directory rather than $TMPDIR: it used to also be where session-pointer.sh
+# published this session's resolved root for the agent's own sandboxed Bash to
+# read back, and the two shared no environment but the session id — see
 # plans/2026-08-05-checkpoint-root-via-updatedinput.md. That duty moved to
 # scripts/inject-checkpoint-root.sh (PreToolUse(Bash) env injection), but the
-# other two files are still session-keyed the same way, so the literal path
-# stays.
+# drift marker is still session-keyed the same way, so the literal path stays.
 HANDOFF_POINTER_DIR="${HANDOFF_POINTER_DIR:-/tmp/claude}"
-
-# Path of the context-threshold marker for session id $1. Written when the
-# nudge fires and removed by session-pointer.sh at the next SessionStart: the
-# nudge fires once per climb, and the boundary is what re-arms it.
-handoff_context_path() {
-    printf '%s/handoff-context-%s\n' "$HANDOFF_POINTER_DIR" "$1"
-}
 
 # Assemble the injectable frame from the task file ($1) and the optional todo
 # remainder ($2): a timestamp header plus each file inlined verbatim, in that

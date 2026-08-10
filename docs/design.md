@@ -689,31 +689,17 @@ sentinel only in the turn after the answer, or it would compact or clear
 away the conversation the answer applies to. Any rebalancing of the gitlore
 seam must preserve both halves.
 
-**The size threshold is a context-quality policy, not a race.** Non-Haiku
-windows are 1M and `autoCompactEnabled` is expected off, so a growing prompt
-hits no wall and no boundary the harness enters on its own. The nudge fires
-because attention and cost say 150k is enough, and because the plugin can
-cross that boundary carrying the task frame and a memory flush. It is a nudge
-and not a halt: a halt produces no final assistant text, discards in-flight
-work, and still leaves the boundary unprepared. It fires once per climb, and
-the re-arm is a `SessionStart` — the harness's own signal that the context was
-rebuilt — rather than a later measurement falling back under the threshold,
-which is the inference this design refuses everywhere else.
+**A context-size nudge was tried and dropped.** `PostToolBatch` fired once a
+session's prompt crossed a fixed threshold, injecting a directive naming
+`/handoff:precompact`. Dropped rather than fixed: it fired too early on a
+prompt that was already large for legitimate reasons, and once right after a
+driven compaction against a context the boundary had just shrunk. Sometimes
+followed, sometimes ignored — the net was more trouble than the nudge earned.
 [Nudge the boundary at a context-size
-threshold](changelog/2026-08-01-context-threshold-trigger.md)
-
-**The newest sample on disk is one API call stale, and a compaction is where
-that matters.** `PostToolBatch` fires before the assistant entry carrying the
-current call's `usage` is flushed, so the measurement is always the previous
-call's — a rounding error while the prompt grows, an inversion across a
-compaction, where that sample measures the discarded context and is the largest
-of the session. So the measurement is scoped to samples newer than the last
-`isCompactSummary` entry, keying on the flag rather than on content as every
-transcript reader here does. A boundary with nothing newer measures nothing:
-between a compaction and its first API call there is no number to report, and
-the once-per-climb marker cannot cover the gap, `SessionStart(compact)` having
-just cleared it to re-arm the nudge. [A compaction invalidates every sample
-above it](changelog/2026-08-09-samples-are-scoped-to-the-compaction.md)
+threshold](changelog/2026-08-01-context-threshold-trigger.md),
+[A compaction invalidates every sample above
+it](changelog/2026-08-09-samples-are-scoped-to-the-compaction.md), and
+[the removal](changelog/2026-08-10-drop-context-threshold-nudge.md).
 
 ## Rejected alternatives
 

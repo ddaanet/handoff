@@ -1,5 +1,12 @@
 # 2026-08-01 — Nudge the boundary at a context-size threshold
 
+> **Superseded 2026-08-10** (see [Drop the context-size
+> nudge](2026-08-10-drop-context-threshold-nudge.md)): the nudge fired too
+> early on legitimately large contexts and was inconsistently acted on. The
+> whole mechanism this entry describes — `context-threshold.sh`, its
+> `hooks.json` wiring, and the marker `session-pointer.sh` re-armed — is
+> removed, not tuned. What follows is the record of what was built and why.
+
 A turn that runs long reaches no boundary. `Stop` and `UserPromptSubmit` fire
 only at turn boundaries, which is precisely what a runaway turn escapes — the
 agent goes busy, drives the prompt past 200k across a dozen tool batches, and

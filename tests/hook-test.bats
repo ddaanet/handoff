@@ -1382,23 +1382,21 @@ run_load_restart() {
     [ "$status" -eq 0 ]
 }
 
-# --- session-pointer (SessionStart, every source: publish the resolved root) ---
+# --- session-pointer (SessionStart, every source: sweep stale pointer files) ---
 #
-# handoff-checkpoint runs in the agent's Bash, where CLAUDE_PROJECT_DIR is
-# unset and $PWD is wherever the session cwd has drifted to — so it cannot
-# resolve the root itself, and cannot read a file at the root either, since
-# addressing that path is the very thing it cannot do. This hook publishes the
-# root at a session-keyed path both sides can address blind.
+# Used to also publish this session's resolved root here, at a session-keyed
+# path handoff-checkpoint (running in the agent's own Bash, where
+# CLAUDE_PROJECT_DIR is unset) could address blind. Replaced by
+# scripts/inject-checkpoint-root.sh (PreToolUse(Bash)), which resolves the
+# root fresh on every matching call instead.
 
 run_session_pointer() {
-    # ${2-…}, not ${2:-…}: the no-session-id case passes an empty argument
-    # deliberately, and the colon form would substitute the default for it.
-    local cwd="$1" sid="${2-$SESSION_ID}" src="${3:-startup}"
+    local cwd="$1"
     run bash -c '
-        jq -nc --arg cwd "$1" --arg sid "$2" --arg src "$3" \
-          "{cwd:\$cwd, session_id:\$sid, source:\$src, hook_event_name:\"SessionStart\"}" \
+        jq -nc --arg cwd "$1" --arg sid "$2" \
+          "{cwd:\$cwd, session_id:\$sid, source:\"startup\", hook_event_name:\"SessionStart\"}" \
         | bash scripts/session-pointer.sh
-    ' _ "$cwd" "$sid" "$src"
+    ' _ "$cwd" "$SESSION_ID"
 }
 
 # scripts/inject-checkpoint-root.sh (PreToolUse(Bash)) resolves the root fresh
@@ -1410,13 +1408,10 @@ run_session_pointer() {
 # assertion cannot go red before the write is removed, so it is verified by
 # reintroducing the old write and watching this alone go red. See
 # plans/2026-08-05-checkpoint-root-via-updatedinput.md.
-@test "session-pointer (no longer writes a root pointer; still clears the context marker)" {
-    mkdir -p "$HANDOFF_POINTER_DIR"
-    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
+@test "session-pointer (no longer writes a root pointer)" {
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
     [ ! -e "$HANDOFF_POINTER_DIR/handoff-root-$SESSION_ID" ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
 }
 
 @test "session-pointer (creates the pointer directory)" {
@@ -1424,40 +1419,6 @@ run_session_pointer() {
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
     [ -d "$HANDOFF_POINTER_DIR" ]
-}
-
-# The context-threshold nudge fires once per climb and this is the re-arm. A
-# SessionStart means the context was rebuilt: compact (auto-compaction
-# included), clear, or a resume that restored it whole and may still be over.
-@test "session-pointer (clears this session's context marker)" {
-    mkdir -p "$HANDOFF_POINTER_DIR"
-    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
-    run_session_pointer "$tmp" "$SESSION_ID" compact
-    [ "$status" -eq 0 ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-@test "session-pointer (clears the context marker on resume too)" {
-    mkdir -p "$HANDOFF_POINTER_DIR"
-    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
-    run_session_pointer "$tmp" "$SESSION_ID" resume
-    [ "$status" -eq 0 ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-@test "session-pointer (leaves another session's context marker alone)" {
-    mkdir -p "$HANDOFF_POINTER_DIR"
-    touch "$HANDOFF_POINTER_DIR/handoff-context-other"
-    run_session_pointer "$tmp"
-    [ "$status" -eq 0 ]
-    [ -e "$HANDOFF_POINTER_DIR/handoff-context-other" ]
-}
-
-@test "session-pointer (no session id: silent no-op)" {
-    run_session_pointer "$tmp" ""
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-    [ ! -d "$HANDOFF_POINTER_DIR" ]
 }
 
 # Nothing else removes these. The pointer outlives the session that published
@@ -1468,33 +1429,29 @@ run_session_pointer() {
 @test "session-pointer (sweeps its own long-stale files)" {
     mkdir -p "$HANDOFF_POINTER_DIR"
     touch -t 202001010000 "$HANDOFF_POINTER_DIR/handoff-root-ancient" \
-        "$HANDOFF_POINTER_DIR/handoff-drift-ancient" \
-        "$HANDOFF_POINTER_DIR/handoff-context-ancient"
+        "$HANDOFF_POINTER_DIR/handoff-drift-ancient"
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
     [ ! -e "$HANDOFF_POINTER_DIR/handoff-root-ancient" ]
     [ ! -e "$HANDOFF_POINTER_DIR/handoff-drift-ancient" ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-ancient" ]
 }
 
 @test "session-pointer (keeps another live session's files)" {
     mkdir -p "$HANDOFF_POINTER_DIR"
     touch "$HANDOFF_POINTER_DIR/handoff-root-other" \
-        "$HANDOFF_POINTER_DIR/handoff-drift-other" \
-        "$HANDOFF_POINTER_DIR/handoff-context-live"
+        "$HANDOFF_POINTER_DIR/handoff-drift-other"
     run_session_pointer "$tmp"
     [ "$status" -eq 0 ]
     [ -e "$HANDOFF_POINTER_DIR/handoff-root-other" ]
     [ -e "$HANDOFF_POINTER_DIR/handoff-drift-other" ]
-    [ -e "$HANDOFF_POINTER_DIR/handoff-context-live" ]
 }
 
 # The load-bearing negative: the directory is shared and holds files this
-# plugin never wrote, some of them weeks old. The sweep is scoped to the three
+# plugin never wrote, some of them weeks old. The sweep is scoped to the two
 # names it publishes, at the one level it publishes them.
 #
-# The handoff-prefixed file pins the narrower claim — the three names, not the
-# prefix. Collapsing the three -name clauses into one `handoff-*` is the
+# The handoff-prefixed file pins the narrower claim — the two names, not the
+# prefix. Collapsing the two -name clauses into one `handoff-*` is the
 # plausible refactor, and every other row here is blind to it: it would claim
 # any later handoff- file in this shared directory whose lifetime is not seven
 # days. A new published name must be added here as deliberately as to the
@@ -1509,193 +1466,6 @@ run_session_pointer() {
     [ -e "$HANDOFF_POINTER_DIR/somebody-elses-file" ]
     [ -e "$HANDOFF_POINTER_DIR/handoff-unpublished-ancient" ]
     [ -e "$HANDOFF_POINTER_DIR/sub/handoff-root-nested" ]
-}
-
-# --- context-threshold (PostToolBatch: nudge once the prompt crosses a size) ---
-#
-# A turn that runs long has no boundary at which anything can notice: Stop and
-# UserPromptSubmit fire only at turn boundaries, which is what a runaway turn
-# escapes. PostToolBatch fires once per assistant message — one API call, one
-# usage sample — and its additionalContext reaches the model on the next call
-# of the same turn.
-
-# One assistant entry: $1 message id, $2 input, $3 cache_creation, $4 cache_read.
-usage_entry() {
-    jq -nc --arg id "$1" --argjson i "$2" --argjson cc "$3" --argjson cr "$4" \
-        '{type:"assistant", message:{id:$id, usage:{
-            input_tokens:$i, cache_creation_input_tokens:$cc,
-            cache_read_input_tokens:$cr}}}'
-}
-
-# The compaction boundary the harness writes into the transcript. Flags, never
-# content: isCompactSummary is what marks the entry whose arrival means every
-# sample above it measures a context that no longer exists.
-compact_boundary() {
-    printf '%s\n' '{"type":"user","isCompactSummary":true,"message":{"content":"summary"}}'
-}
-
-run_context_threshold() {
-    local tp="$1" sid="${2-$SESSION_ID}" aid="${3-}"
-    run bash -c '
-        jq -nc --arg tp "$1" --arg sid "$2" --arg aid "$3" \
-          "{transcript_path:\$tp, session_id:\$sid,
-            hook_event_name:\"PostToolBatch\"}
-           + (if \$aid == \"\" then {} else {agent_id:\$aid} end)" \
-        | bash scripts/context-threshold.sh
-    ' _ "$tp" "$sid" "$aid"
-}
-
-# The positive both load-bearing negatives are paired against. Mutate either
-# guard and this row must stay green while its negative goes red — otherwise
-# the negative was passing for the wrong reason.
-@test "context-threshold (over threshold: nudges and writes the marker)" {
-    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"/handoff:precompact"* ]]
-    # Naming the skill is not enough: it prepares by default, and what the
-    # crossing calls for is the compaction actually happening. The ask is what
-    # the skill reads the transition decision off.
-    [[ "$output" == *"carry the compaction out"* ]]
-    [[ "$output" == *"170000"* ]]
-    [ -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-# Load-bearing negative 1. A subagent has no boundary to prepare and nothing
-# that survives one, and its own usage lives in another file entirely — so the
-# number here is the parent's, and stale.
-@test "context-threshold (subagent: silent, no marker)" {
-    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl" "$SESSION_ID" "agent-42"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-# Load-bearing negative 2. Still over threshold, because the boundary has not
-# happened yet; re-injecting every batch would burn the context the nudge
-# exists to conserve.
-@test "context-threshold (marker present: silent, no second nudge)" {
-    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
-    mkdir -p "$HANDOFF_POINTER_DIR"
-    touch "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-# `fromjson? // empty` filters lines that do not parse, not lines that parse to
-# something other than an object. `.isCompactSummary` and `.message.usage` both
-# index whatever came through, and indexing a scalar is a jq error, not a null —
-# it kills the whole program, and under `set -euo pipefail` the hook with it, on
-# every tool batch for as long as that line sits in the tail window.
-@test "context-threshold (a valid-JSON non-object line: skipped, still measures)" {
-    { printf '%s\n' '42' '"a bare string"' '[1,2,3]'
-      usage_entry m1 100000 30000 40000; } > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"170000"* ]]
-    [ -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-@test "context-threshold (under threshold: silent, no marker)" {
-    usage_entry m1 10000 2000 3000 > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-# One API response emits several JSONL entries sharing a message id, each
-# repeating the same usage. Summing across them would read 180000 here and
-# nudge; taking the last reads 60000 and stays silent.
-@test "context-threshold (repeated message id: counted once, not summed)" {
-    { usage_entry m1 60000 0 0; usage_entry m1 60000 0 0
-      usage_entry m1 60000 0 0; } > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-# Load-bearing negative 3, and the live incident of 2026-08-09: a 197354 nudge
-# against a real context of 87253. The sample above a boundary measures the
-# context the compaction discarded, and SessionStart(compact) has just cleared
-# the marker that would otherwise absorb a second nudge.
-@test "context-threshold (compaction boundary, no newer sample: silent)" {
-    { usage_entry m1 100000 30000 40000; compact_boundary; } > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-# A large pre-compaction sample, then a real post-compaction one well under
-# threshold. Silence here must come from measuring the newer sample, not from
-# the boundary suppressing the hook — which the row below separates it from.
-@test "context-threshold (compaction boundary, newer sample under: silent)" {
-    { usage_entry m1 100000 30000 40000; compact_boundary
-      usage_entry m2 10000 2000 3000; } > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-    [ ! -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-# Paired with the two above: a post-compaction context climbs past the
-# threshold again, and the number reported must be that climb's.
-@test "context-threshold (compaction boundary, newer sample over: nudges)" {
-    { usage_entry m1 500000 0 0; compact_boundary
-      usage_entry m2 100000 30000 40000; } > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"/handoff:precompact"* ]]
-    [[ "$output" == *"170000"* ]]
-    [[ "$output" != *"500000"* ]]
-    [ -e "$HANDOFF_POINTER_DIR/handoff-context-$SESSION_ID" ]
-}
-
-@test "context-threshold (no usage entry in the window: silent)" {
-    printf '%s\n' '{"type":"user","message":{"content":"hi"}}' > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-# tail -c lands mid-line. The partial head must be dropped, not fatal.
-@test "context-threshold (partial first line: dropped, still measures)" {
-    { printf '%s\n' '{"type":"assistant","message":{"id":"trunc","usa'
-      usage_entry m2 100000 30000 40000; } > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"/handoff:precompact"* ]]
-}
-
-@test "context-threshold (threshold override honoured)" {
-    usage_entry m1 1000 500 500 > "$tmp/t.jsonl"
-    HANDOFF_CONTEXT_THRESHOLD=1500 run_context_threshold "$tmp/t.jsonl"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"/handoff:precompact"* ]]
-}
-
-@test "context-threshold (no transcript file: silent)" {
-    run_context_threshold "$tmp/absent.jsonl"
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-@test "context-threshold (no session id: silent)" {
-    usage_entry m1 100000 30000 40000 > "$tmp/t.jsonl"
-    run_context_threshold "$tmp/t.jsonl" ""
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
-}
-
-# The invocation path, not just the code: a script the manifest never names
-# runs at no point, and every row above would still pass.
-@test "context-threshold (hooks.json dispatches PostToolBatch to it)" {
-    cmd="$(jq -r '.hooks.PostToolBatch[0].hooks[0].command' hooks/hooks.json)"
-    [[ "$cmd" == *"scripts/context-threshold.sh"* ]]
-    [ -f "scripts/context-threshold.sh" ]
 }
 
 # --- report-watcher-failure (UserPromptSubmit: surface a non-delivery) ---

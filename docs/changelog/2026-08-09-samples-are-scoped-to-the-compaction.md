@@ -1,5 +1,10 @@
 # 2026-08-09 — A compaction invalidates every sample above it
 
+> **Superseded 2026-08-10** (see [Drop the context-size
+> nudge](2026-08-10-drop-context-threshold-nudge.md)): the nudge this entry
+> fixes a defect in was removed outright, not tuned further. What follows is
+> the record of what was found and fixed, at the time.
+
 Found by dogfooding, the day the transition work's third pass landed. The tool
 batch immediately after a driven compaction nudged at 197354 tokens, against a
 real context of 87253.
