@@ -1,0 +1,38 @@
+#!/usr/bin/env sh
+# gitlore launcher shim. Injects --settings '{"autoMemoryDirectory":…}' so CC's
+# native auto-memory lands in the gitlore submodule. Identical in both placements;
+# see docs/design.md "Memory Redirect Launcher" (D10).
+
+# real claude = next `claude` on PATH after stripping my own dir
+unset CDPATH   # else `cd` may echo the target, corrupting the capture below
+self=$(cd "$(dirname "$0")" && pwd)
+# explicit `-` operand: BSD paste has no implicit stdin, unlike GNU
+newpath=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$self" | paste -sd: -)
+real=$(PATH="$newpath" command -v claude) || { echo "gitlore: real claude not found" >&2; exit 127; }
+
+# already injected upstream? pass through (composability, anti-double-inject, anti-recursion)
+[ -n "$GITLORE_LAUNCHED" ] && exec "$real" "$@"
+
+# Opt-in: load the plugin from the checkout you are standing in rather than the
+# marketplace cache (which lags the repo at the same version string). Default off
+# so a plugin repo does not silently shadow the installed plugin; set the env var
+# in your rc if you develop plugins. Applies to every exec path below.
+if [ -n "$GITLORE_AUTO_CLAUDE_PLUGIN_DIR" ] && [ -f .claude-plugin/plugin.json ]; then
+  set -- --plugin-dir . "$@"
+fi
+
+# in a gitlore-enabled repo? cheap git checks first, so jq only runs for actual gitlore repos
+# Redirects kept deliberately in this file: the shim wraps EVERY `claude`
+# invocation, including ones outside any repo or in a non-gitlore repo. Those
+# failures are the common case, each already has its answer (passthrough below),
+# and their messages would print on every unrelated launch.
+root=$(git rev-parse --show-toplevel 2>/dev/null)
+mempath=$(git config --file "$root/.gitmodules" submodule.gitlore-memory.path)
+# no gitlore submodule → passthrough
+if [ -z "$root" ] || [ -z "$mempath" ]; then exec "$real" "$@"; fi
+[ "$(jq -r '.gitlore.enabled // false' "$root/.claude/settings.json" 2>/dev/null)" = true ] \
+  || exec "$real" "$@"                                            # submodule present but disabled → passthrough
+
+json=$(jq -nc --arg p "$root/$mempath" '{autoMemoryDirectory:$p}')
+export GITLORE_LAUNCHED=1
+exec "$real" --settings "$json" "$@"

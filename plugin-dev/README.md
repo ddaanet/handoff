@@ -115,6 +115,11 @@ of a tag.
 - Plugin manifest holds the **last released** version. `just release`
   bumps from there. Manual edits are blocked by the version-guard hook
   and the release recipe's own pre-flight check.
+- A plugin that has never been released has nothing to bump from, so
+  its **first** `just release` — with no bump argument — publishes the
+  version `plugin.json` already holds. Set that version before the
+  first release; passing a bump there is refused. Afterwards the
+  last-released rule above applies as normal.
 - Default branch is auto-detected from `origin/HEAD`; recipes don't
   hardcode `main`.
 - The version-guard hook fires on Write/Edit events targeting

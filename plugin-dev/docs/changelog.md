@@ -8,6 +8,8 @@ overturned, it is rewritten in place and the reversal gets an entry here.
 
 Newest first.
 
+- [2026-08-11 — First release publishes the manifest version](changelog/2026-08-11-first-release-manifest-verbatim.md) — a never-released plugin has no version to bump from, so `just release` ships the version `plugin.json` already holds (v0.5.3)
+- [2026-08-11 — `update-plugin-dev` submodule collision](changelog/2026-08-11-subtree-submodule-collision.md) — a consumer's own `memory` submodule at the same path broke `git subtree pull`'s on-demand submodule fetch (v0.5.2)
 - [2026-07-29 — `resume-release`](changelog/2026-07-29-resume-release.md) — the release tail became an idempotent block both `release` and a recovery path run (v0.5.0)
 - [2026-07-27 — `check-version.sh`](changelog/2026-07-27-check-version.md) — detects a release that tagged and pushed but never bumped the marketplace (v0.4.1, v0.4.2)
 - [2026-07-23 — `prerelease` gate](changelog/2026-07-23-prerelease-gate.md) — `release` binds to a consumer-defined gate; breaking, every consumer adds a recipe (v0.4.0)

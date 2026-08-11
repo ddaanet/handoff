@@ -5,6 +5,13 @@
 # Usage: bash tests/release-test.sh   (run from repo root)
 set -euo pipefail
 
+# When run as this repo's own pre-commit hook, the enclosing `git commit`
+# leaks GIT_DIR/GIT_INDEX_FILE/etc. into this process's environment. Every
+# git command below targets a synthetic fixture repo via `-C`, never this
+# repo, so it's always safe to drop them here.
+# shellcheck disable=SC2046  # word-splitting is the point: a var-name list
+unset $(git rev-parse --local-env-vars)
+
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
@@ -124,6 +131,59 @@ JSON
 market_version() {
     jq -r '.plugins[] | select(.name=="fixture") | .version' \
         "$marketplace/.claude-plugin/marketplace.json"
+}
+
+mount_resting_memory_submodule() {
+    # $1=parent repo path. Mounts a `memory` git submodule and commits the
+    # mount, then advances the submodule's checked-out HEAD by one commit
+    # without folding the moved gitlink into a parent commit — gitlore's
+    # ordinary resting state between commits (see release.sh's
+    # common_preflight comment on the memory pathspec exclusion).
+    local parent="$1" sub_origin sub_seed
+    sub_origin="$parent-memory-origin.git"
+    sub_seed=$(mktemp -d)
+    git init -q --bare -b main "$sub_origin"
+    git init -q -b main "$sub_seed"
+    git -C "$sub_seed" config user.email test@example.com
+    git -C "$sub_seed" config user.name "Toolkit Test"
+    git -C "$sub_seed" config commit.gpgsign false
+    printf 'seed\n' > "$sub_seed/MEMORY.md"
+    git -C "$sub_seed" add -A
+    git -C "$sub_seed" commit -qm seed
+    git -C "$sub_seed" remote add origin "$sub_origin"
+    git -C "$sub_seed" push -q -u origin main
+    rm -rf "$sub_seed"
+
+    env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always \
+        git -C "$parent" submodule add -q "$sub_origin" memory
+    git -C "$parent" commit -qm "mount memory submodule"
+
+    printf 'advance\n' >> "$parent/memory/MEMORY.md"
+    git -C "$parent/memory" add -A
+    git -C "$parent/memory" -c user.email=test@example.com -c user.name="Toolkit Test" \
+        -c commit.gpgsign=false commit -qm advance
+    # Deliberately no parent commit here.
+}
+
+make_virgin() {
+    # $1=manifest version. Strips the fixture's release history so the plugin
+    # has never been released: no v* tags locally or on origin, and the manifest
+    # seeded at $1. Paired with new_sandbox "" (no marketplace entry) this is
+    # the state a plugin scaffolded by the external plugin-dev marketplace
+    # plugin arrives in; paired with new_sandbox "1.2.3" it isolates the
+    # no-tags half of the conjunct.
+    git -C "$plugin" tag -d v1.2.3 >/dev/null
+    git -C "$plugin" push -q origin :refs/tags/v1.2.3
+    jq --arg v "$1" '.version = $v' "$plugin/.claude-plugin/plugin.json" \
+        > "$plugin/.claude-plugin/plugin.json.tmp"
+    mv "$plugin/.claude-plugin/plugin.json.tmp" "$plugin/.claude-plugin/plugin.json"
+    git -C "$plugin" add -A
+    # Seeding the version the fixture already carries stages nothing, and a
+    # no-op `git commit` is a hard error under set -e.
+    if ! git -C "$plugin" diff --cached --quiet; then
+        git -C "$plugin" commit -qm "scaffold at $1"
+    fi
+    git -C "$plugin" push -q origin main
 }
 
 echo "=== release: happy path ==="
@@ -303,6 +363,53 @@ assert_eq "$(git -C "$plugin" rev-parse --verify -q refs/tags/v1.2.4 >/dev/null 
     "no" "unknown bump word created no tag"
 assert_eq "$(cat "$GH_LOG")" "" "unknown bump word must not call gh"
 
+echo "=== release: refuses when the marketplace directory isn't writable ==="
+new_sandbox "1.2.3"
+chmod 555 "$marketplace/.claude-plugin"
+run_in "$plugin" bash plugin-dev/release.sh patch
+chmod 755 "$marketplace/.claude-plugin"
+assert_eq "$rc" "1" "read-only marketplace dir exit code"
+assert_contains "$out" "$marketplace/.claude-plugin is not writable" "read-only marketplace dir message names the path"
+assert_contains "$out" "dangerouslyDisableSandbox" "read-only marketplace dir message names the sandbox escape"
+assert_contains "$out" "/add-dir $marketplace" "read-only marketplace dir message names the add-dir escape"
+assert_eq "$(jq -r .version "$plugin/.claude-plugin/plugin.json")" "1.2.3" "read-only marketplace dir left manifest untouched"
+assert_eq "$(git -C "$plugin" rev-parse --verify -q refs/tags/v1.2.4 >/dev/null && echo yes || echo no)" \
+    "no" "read-only marketplace dir created no tag"
+assert_eq "$(cat "$GH_LOG")" "" "read-only marketplace dir must not call gh"
+
+echo "=== resume: succeeds on a no-op marketplace bump even when its directory isn't writable ==="
+new_sandbox "1.2.3"
+run_in "$plugin" bash plugin-dev/release.sh patch
+assert_eq "$rc" "0" "setup release exit code"
+chmod 555 "$marketplace/.claude-plugin"
+run_in "$plugin" bash plugin-dev/release.sh --resume
+chmod 755 "$marketplace/.claude-plugin"
+assert_eq "$rc" "0" "no-op resume exit code despite read-only marketplace dir"
+assert_contains "$out" "already complete (nothing to do)" "no-op resume summary despite read-only marketplace dir"
+
+echo "=== resume: still refuses when a real marketplace write is needed and the directory isn't writable ==="
+new_sandbox "1.2.3"
+# Plugin push rejected: manifest+tag land locally, but the marketplace is
+# never touched (still 1.2.3) — a real write is needed to catch it up.
+cat > "$plugin/.git/hooks/pre-push" <<'HOOK'
+#!/bin/sh
+echo "pre-push: refusing" >&2
+exit 1
+HOOK
+chmod +x "$plugin/.git/hooks/pre-push"
+run_in "$plugin" bash plugin-dev/release.sh patch
+assert_eq "$rc" "1" "setup interrupted-release exit code"
+assert_eq "$(market_version)" "1.2.3" "setup marketplace still stale"
+rm -f "$plugin/.git/hooks/pre-push"
+chmod 555 "$marketplace/.claude-plugin"
+run_in "$plugin" bash plugin-dev/release.sh --resume
+chmod 755 "$marketplace/.claude-plugin"
+assert_eq "$rc" "1" "real-write resume exit code"
+assert_contains "$out" "$marketplace/.claude-plugin is not writable" "real-write resume message names the path"
+assert_eq "$(git -C "$plugin" ls-remote origin refs/tags/v1.2.4 | wc -l | tr -d ' ')" \
+    "1" "real-write resume still pushed the plugin tag before failing at the marketplace"
+assert_eq "$(market_version)" "1.2.3" "real-write resume left the marketplace untouched"
+
 echo "=== release: major bump end-to-end ==="
 new_sandbox "1.2.3"
 run_in "$plugin" bash plugin-dev/release.sh major
@@ -318,6 +425,89 @@ assert_eq "$rc" "0" "zero-argument exit code"
 assert_contains "$out" "Release v1.2.4 complete" "zero-argument summary"
 assert_eq "$(jq -r .version "$plugin/.claude-plugin/plugin.json")" "1.2.4" "zero-argument manifest version"
 assert_eq "$(market_version)" "1.2.4" "zero-argument marketplace bumped"
+
+echo "=== release: proceeds with a resting memory submodule in the plugin root ==="
+new_sandbox "1.2.3"
+mount_resting_memory_submodule "$plugin"
+run_in "$plugin" bash plugin-dev/release.sh patch
+assert_eq "$rc" "0" "resting-memory release exit code"
+assert_contains "$out" "Release v1.2.4 complete" "resting-memory release summary"
+assert_eq "$(market_version)" "1.2.4" "resting-memory release bumped the marketplace"
+
+echo "=== release: still refuses a genuinely dirty non-memory path in the plugin root ==="
+new_sandbox "1.2.3"
+mount_resting_memory_submodule "$plugin"
+jq '.description = "dirty"' "$plugin/.claude-plugin/plugin.json" > "$plugin/.claude-plugin/plugin.json.tmp"
+mv "$plugin/.claude-plugin/plugin.json.tmp" "$plugin/.claude-plugin/plugin.json"
+run_in "$plugin" bash plugin-dev/release.sh patch
+assert_eq "$rc" "1" "dirty-plugin-root release exit code"
+assert_contains "$out" "uncommitted changes" "dirty-plugin-root release message"
+assert_eq "$(cat "$GH_LOG")" "" "dirty-plugin-root release must not call gh"
+
+echo "=== release: proceeds with a resting memory submodule in the marketplace repo ==="
+new_sandbox "1.2.3"
+mount_resting_memory_submodule "$marketplace"
+run_in "$plugin" bash plugin-dev/release.sh patch
+assert_eq "$rc" "0" "resting-memory marketplace release exit code"
+assert_contains "$out" "Release v1.2.4 complete" "resting-memory marketplace release summary"
+assert_eq "$(market_version)" "1.2.4" "resting-memory marketplace release bumped the marketplace"
+
+echo "=== release: still refuses a genuinely dirty non-memory path in the marketplace repo ==="
+new_sandbox "1.2.3"
+mount_resting_memory_submodule "$marketplace"
+jq '.plugins[0].description = "dirty"' "$marketplace/.claude-plugin/marketplace.json" > "$marketplace/.claude-plugin/marketplace.json.tmp"
+mv "$marketplace/.claude-plugin/marketplace.json.tmp" "$marketplace/.claude-plugin/marketplace.json"
+run_in "$plugin" bash plugin-dev/release.sh patch
+assert_eq "$rc" "1" "dirty-marketplace release exit code"
+assert_contains "$out" "$MARKETPLACE_DIR has uncommitted changes" "dirty-marketplace release message"
+assert_eq "$(cat "$GH_LOG")" "" "dirty-marketplace release must not call gh"
+
+echo "=== release: a first release publishes the manifest version verbatim ==="
+new_sandbox ""            # no marketplace entry
+make_virgin "0.1.0"       # no v* tags, manifest seeded by an external scaffold
+head_before="$(git -C "$plugin" rev-parse HEAD)"
+run_in "$plugin" bash plugin-dev/release.sh
+assert_eq "$rc" "0" "first-release exit code"
+assert_contains "$out" "Release v0.1.0 complete" "first-release summary"
+assert_eq "$(jq -r .version "$plugin/.claude-plugin/plugin.json")" "0.1.0" "first-release manifest untouched"
+# Nothing to bump means nothing to commit: the tag lands on the commit that was
+# already HEAD, not on a synthetic "release: 0.1.0" commit above it.
+assert_eq "$(git -C "$plugin" rev-parse HEAD)" "$head_before" "first-release makes no commit"
+assert_eq "$(git -C "$plugin" rev-parse -q --verify 'refs/tags/v0.1.0^{commit}')" \
+    "$head_before" "first-release tags HEAD"
+assert_eq "$(git -C "$plugin" ls-remote origin refs/tags/v0.1.0 | wc -l | tr -d ' ')" \
+    "1" "first-release tag pushed to origin"
+assert_contains "$(cat "$GH_LOG")" "release create v0.1.0" "first-release gh release created"
+assert_eq "$(market_version)" "0.1.0" "first-release marketplace entry created at the manifest version"
+
+echo "=== release: a first release refuses an explicit bump ==="
+for word in patch minor major; do
+    new_sandbox ""
+    make_virgin "0.1.0"
+    run_in "$plugin" bash plugin-dev/release.sh "$word"
+    assert_eq "$rc" "1" "first-release '$word' exit code"
+    assert_contains "$out" "never been released" "first-release '$word' explains why"
+    assert_contains "$out" "0.1.0" "first-release '$word' names the version it would publish"
+    assert_eq "$(git -C "$plugin" tag --list 'v*')" "" "first-release '$word' creates no tag"
+    assert_eq "$(cat "$GH_LOG")" "" "first-release '$word' must not call gh"
+    assert_eq "$(market_version)" "" "first-release '$word' must not touch the marketplace"
+done
+
+echo "=== release: a marketplace entry with no tags is not a first release ==="
+new_sandbox "1.2.3"       # entry exists — this plugin HAS been published
+make_virgin "1.2.3"       # ...but its tags are gone
+run_in "$plugin" bash plugin-dev/release.sh patch
+assert_eq "$rc" "0" "lost-tags exit code"
+assert_contains "$out" "Release v1.2.4 complete" "lost-tags bumps forward instead of republishing"
+assert_eq "$(jq -r .version "$plugin/.claude-plugin/plugin.json")" "1.2.4" "lost-tags manifest bumped"
+assert_eq "$(market_version)" "1.2.4" "lost-tags marketplace bumped"
+
+echo "=== release: tags with no marketplace entry is not a first release ==="
+new_sandbox ""            # no entry...
+run_in "$plugin" bash plugin-dev/release.sh patch   # ...but the fixture's v1.2.3 tag stands
+assert_eq "$rc" "0" "tagged-unpublished exit code"
+assert_contains "$out" "Release v1.2.4 complete" "tagged-unpublished bumps forward"
+assert_eq "$(market_version)" "1.2.4" "tagged-unpublished marketplace entry created at the bumped version"
 
 if (( failures > 0 )); then
     printf '\n%d failure(s)\n' "$failures" >&2

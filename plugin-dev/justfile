@@ -6,10 +6,11 @@ _default:
 # Run all syntax + style checks on the toolkit's own scripts.
 precommit: whitespace
     shellcheck install.sh version-guard.sh check-version.sh release.sh
-    bash -n tests/hook-test.sh tests/release-test.sh
+    bash -n tests/hook-test.sh tests/release-test.sh tests/update-plugin-dev-test.sh
     just _import-check
     bash tests/hook-test.sh
     bash tests/release-test.sh
+    bash tests/update-plugin-dev-test.sh
     @echo ok
 
 # Checks that run before a release. Add slow or paid checks here.
