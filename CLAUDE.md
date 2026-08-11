@@ -618,7 +618,11 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
     `precommit`. Two companions: `resume-release` completes a release that
     died partway (pushes whatever is missing, no-op when everything landed,
     no gate), and `check-version` reports whether `plugin.json` and the
-    marketplace entry agree.
+    marketplace entry agree. When acknowledging a `release X.Y.Z` request,
+    name both push targets up front — e.g. "bumps `handoff` (tag + GH
+    release) and `claude-plugins` (marketplace entry)" — since auto-mode's
+    permission harness reads only the current message and won't otherwise
+    connect a `claude-plugins` push to a "release handoff" request.
   - `version-guard.sh` — PreToolUse(Write|Edit) hook wired in
     `.claude/settings.json` that refuses agent edits that change
     `plugin.json`'s `.version` (release recipe is the only path).
