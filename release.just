@@ -20,7 +20,17 @@
 # names a recipe that doesn't exist, so a plugin that hasn't defined it finds
 # out immediately, not at release time.
 #
-# `.claude-plugin/plugin.json` must exist with a semver `.version` field.
+# `.claude-plugin/plugin.json` must exist with a semver `.version` field. It
+# holds the LAST released version and `just release <bump>` bumps forward from
+# it — except on a plugin that has never been released, where there is no
+# previous version to bump from and `just release` (no argument) publishes the
+# version the manifest already holds. That is what makes a first release work
+# straight out of a scaffold, whatever version the scaffold seeded. Passing an
+# explicit bump on a first release is refused rather than silently ignored.
+#
+# The `patch` default lives in release.sh, not in the recipe signature: the
+# recipe passes its argument through even when empty, so release.sh can tell an
+# explicit `patch` from no argument at all.
 #
 # Required env (typically set via .envrc):
 #   MARKETPLACE_DIR — path to the `claude-plugins` marketplace repo. The
@@ -44,8 +54,8 @@
 toolkit_url := "git@github.com:ddaanet/claude-plugin-dev.git"
 toolkit_prefix := "plugin-dev"
 
-# Bump plugin.json, commit, tag, push, GitHub release, bump marketplace.
-release bump='patch': prerelease
+# Bump plugin.json (patch by default), commit, tag, push, GitHub release, bump marketplace.
+release bump='': prerelease
     bash "{{toolkit_prefix}}/release.sh" "{{bump}}"
 
 # Complete a release that landed only partially. Idempotent, no gate.
@@ -66,7 +76,14 @@ update-plugin-dev ref:
       v*) ;;
       main|master|HEAD) echo "warning: pulling a branch ref ({{ref}}) — prefer a tag (vX.Y.Z) for reproducibility" >&2 ;;
     esac
-    git subtree pull --prefix="{{toolkit_prefix}}" "{{toolkit_url}}" "{{ref}}" --squash
+    # A consumer that also mounts a gitlore `memory` submodule at top level
+    # collides here: `subtree pull` fetches this repo's raw, unprefixed
+    # history first (this repo mounts its own `memory` submodule at that same
+    # path), and fetch.recurseSubmodules=on-demand then tries to resolve that
+    # gitlink using the CONSUMER's registered `memory` submodule URL instead
+    # of this repo's, and fails with "not our ref". Scoped to this one fetch
+    # only -- a no-op for consumers without a `memory` submodule.
+    git -c fetch.recurseSubmodules=no subtree pull --prefix="{{toolkit_prefix}}" "{{toolkit_url}}" "{{ref}}" --squash
     # Verify VERSION matches the requested tag (catches half-applied
     # subtree pulls). VERSION first appeared in v0.2.0; older refs
     # lack it, so the check is best-effort.

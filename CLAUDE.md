@@ -112,3 +112,5 @@ Tags only; never expect consumers to track `main`. See docs/design.md
   like `edify` are deliberately out of scope; their release shape is
   different enough that wrapping them would obscure the main path.
   See docs/design.md "Limitations".
+
+@memory/ddaanet/shared-claude.md
