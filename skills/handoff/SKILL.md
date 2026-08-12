@@ -76,12 +76,13 @@ First, decide all of the following:
   Case, no surrounding quotes, no trailing punctuation) for the work done
   this session.
 - **Task snapshot** — whether there's an active task with specific next
-  steps, unmade decisions, or non-obvious context worth preserving; if so,
-  draft the content using the template below.
-- **Remaining items** — whether a task list with open items is in play; if
-  so, draft the remainder using the todo template below. A `/clear` does not
-  paraphrase that list the way a compaction would — it discards it, so disk
-  is the only place it survives.
+  steps or non-obvious context worth preserving; if so, draft the content
+  using the template below.
+- **Todo content** — whether there are open decisions still to make, or a
+  task list with open items in play; if so, draft the todo content using
+  the template below (open decisions first, then remaining items). A
+  `/clear` does not paraphrase either the way a compaction would — it
+  discards them, so disk is the only place they survive.
 
 Then run `handoff-checkpoint` (Bash), piping the whole wrap-up as JSON on
 stdin via a heredoc:
@@ -149,33 +150,34 @@ carries. Threads, not steps — a list of steps is a task list, and that
 goes in `handoff-todo.md`. Not a recap. Not git bookkeeping: whether work
 is committed/pushed is reconstructable from `git status` at load time, so
 never write it here.>
-
-## Open decisions
-
-- <Unmade choice, phrased as a decision still to make, with enough
-  context to decide.>
-
-<Drop the section if there are no open decisions. No filler.>
 ```
 
-This file is the durable side of the seam: anything that must survive
-**verbatim** — identifiers, commit ranges, file paths a decision hinges
-on, the exact shape of an open question — belongs here, because this is
-what gets re-injected intact. Prose that a summary would preserve just as
-well does not need to be here.
+This file is the current-task half of the seam: a snapshot of what was in
+progress, nothing else. Anything still unsettled — even a detail that must
+survive verbatim — belongs in the todo file instead: it is the file the
+agent keeps open all session, so a decision that resolves or changes shape
+mid-session is corrected there rather than waiting for the next checkpoint.
 
 Task file rules:
 
 - No `#` heading — the read-time hook prepends one when it assembles
   the frame next session.
-- No file paths or code unless a decision hinges on them. The working
-  set is reconstructable from `git status` at load time.
+- No file paths or code beyond what's needed to say what's in progress.
+  The working set is reconstructable from `git status` at load time.
 - No location other than `./.claude/handoff-task.md` — the hook reads
   this exact path.
 
 **Todo file template** (`./.claude/handoff-todo.md`):
 
 ```markdown
+## Open decisions
+
+- <Unmade choice, phrased as a decision still to make, with enough
+  context to decide — identifiers, commit ranges, file paths, the exact
+  shape of the question, whatever must survive verbatim.>
+
+<Drop the section if there are no open decisions. No filler.>
+
 ## Remaining
 
 - <Open item, one line, phrased as work still to do.>
@@ -183,13 +185,17 @@ Task file rules:
 
 Todo file rules:
 
-- **Open items only.** A finished item is dropped, never checked off.
-  What landed is reconstructable from `git log`; a done item still listed
-  reads as outstanding and gets redone.
-- No `#` heading and no other sections — same shape as the task file.
+- **Open items only, in both sections.** A finished item is dropped,
+  never checked off, and a resolved decision is dropped too. What
+  landed is reconstructable from `git log`; anything still listed reads
+  as outstanding and gets redone.
+- No `#` heading — the read-time hook prepends one when it assembles the
+  frame, same as the task file.
+- `## Open decisions` is dropped whenever none remain — no filler section.
 - No location other than `./.claude/handoff-todo.md`.
-- It is a remainder, not a plan of record — but it is versioned like the
-  task file, so write it as something that reads well in history.
+- It is a remainder plus the open questions blocking it, not a plan of
+  record — but it is versioned like the task file, so write it as
+  something that reads well in history.
 
 ## The seam: files vs. continuation prompt
 
@@ -197,9 +203,12 @@ Both files are re-injected verbatim on the far side of the transition. The
 continuation prompt is one line typed into a composer. So they carry
 different things:
 
-- **Task file** — everything that must survive exactly: in-flight threads,
-  open questions, identifiers, commit ranges, paths a decision hinges on.
-- **Todo file** — the open items of an active task list, and only those.
+- **Task file** — current task state alone: in-flight threads, what needs
+  to resume.
+- **Todo file** — the open items of an active task list, plus open
+  decisions: identifiers, commit ranges, paths a decision hinges on, the
+  exact shape of an open question — everything that must survive verbatim
+  for a choice still to be made.
 - **Prompt** — a handle to that context plus the next concrete action.
   Nothing else.
 
@@ -230,7 +239,8 @@ newline would submit it early.
 - A task list in `## Current task`. Steps go to `handoff-todo.md`; the
   task file says what is in progress, not the checklist to get there.
 - Completion state in `handoff-todo.md` — `- [x]` lines, "done:" prefixes,
-  a struck-through item. The file holds the remainder and nothing else.
+  a resolved decision left in place, a struck-through item. The file
+  holds only what's still open — decisions and remainder alike.
 - Durable lessons in `## Open decisions`. Those go to feedback memory.
 - Extra sections in either file. Both templates are fixed.
 - Commit/push status anywhere in either file ("work is uncommitted",

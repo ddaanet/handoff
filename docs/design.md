@@ -129,12 +129,15 @@ side. Both are git-tracked (force-added by a hook; both are listed in
 assembled in memory by `handoff_frame()` in `scripts/_lib.sh` and shared by
 the two loaders so the two transitions cannot drift.
 
-- **`handoff-task.md`** — `## Current task`, and `## Open decisions` when
-  any remain. Written **only** by the checkpoint; a direct agent Write or
-  Edit is denied by `write-guard.sh`. A snapshot of a moment.
-- **`handoff-todo.md`** — `## Remaining`, open items only. A scratch list
-  the agent edits directly all session; the wrap-up only folds in the final
-  remainder. A ledger, not a snapshot.
+- **`handoff-task.md`** — `## Current task` alone. Written **only** by the
+  checkpoint; a direct agent Write or Edit is denied by `write-guard.sh`. A
+  snapshot of a moment.
+- **`handoff-todo.md`** — `## Open decisions` when any remain, plus
+  `## Remaining`, open items only. A scratch list the agent edits directly
+  all session; the wrap-up only folds in the final remainder. A ledger, not
+  a snapshot — open decisions live here rather than in the task file
+  because they get revisited and resolved mid-session, same as any other
+  open item.
 
 The frame carries no session id, no transcript, no file list, and no
 commit/push status. The working set comes from the harness's own

@@ -46,13 +46,14 @@ itself, and the prompt that resumes the work on the far side.
 2. If durable learnings surfaced this session, capture them in auto-memory
    now. Skip if nothing durable surfaced — do not force.
 
-3. Decide the task snapshot and, when a task list with open items is in
-   play, the todo remainder — one `## Current task` section and, when any
-   remain, `## Open decisions`, for the task file; one `## Remaining`
-   section, open items only, for the todo file. That list lives in the
-   context the compaction is about to paraphrase; deciding it now is what
-   spares your post-compaction self from inferring which items are still
-   open — an inference that fails silently by redoing finished work.
+3. Decide the task snapshot and, when open decisions or a task list with
+   open items are in play, the todo content — one `## Current task`
+   section for the task file; `## Open decisions`, when any remain, plus
+   `## Remaining`, open items only, for the todo file. Both lists live in
+   the context the compaction is about to paraphrase; deciding them now is
+   what spares your post-compaction self from inferring which are still
+   open — an inference that fails silently by redoing finished work or
+   re-litigating a settled decision.
 
    The `handoff` skill holds the full templates, the rules behind them, and
    the seam between what belongs in a file and what belongs in a prompt, in

@@ -119,6 +119,11 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   edit, or any other frozen-at-startup config that only a relaunch adopts —
   `--resume` carries the conversation over whole, so this costs no context.
   See `docs/changelog/2026-08-10-restart-transition-kind.md`.
+- `skills/pending/SKILL.md` — the `/handoff:pending` skill. Reports the
+  task frame's `## Current task`, `## Open decisions` and `## Remaining`
+  as already sitting in context — no tool calls, no `handoff-checkpoint`
+  call, nothing written. Mirrors the onekeys `p` shorthand's expansion so
+  the same report is reachable without that plugin installed.
 - `hooks/hooks.json` — declares eleven hooks.
   `SessionStart` (every source, wildcard matcher): sweep this plugin's stale
   files at `$HANDOFF_POINTER_DIR` via `session-pointer.sh`.

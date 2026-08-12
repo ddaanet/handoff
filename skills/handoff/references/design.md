@@ -31,25 +31,29 @@ That leaves two fields only the agent can fill:
 - **Current task** — a one-sentence pointer to what was in progress
 - **Open decisions** — unmade choices still blocking progress
 
-These are the irreducible residual. They live in `handoff-task.md`
-(agent-authored from the template in `SKILL.md`). A
-`PostToolUse(Write|Edit)` hook stages it — and the todo remainder below on
-the same terms, since a trail whose decomposition is untracked records only
-half of what was in flight. Next session, a
+These are the irreducible residual. **Current task** lives alone in
+`handoff-task.md` — a snapshot of a moment, agent-authored from the
+template in `SKILL.md` and written only by `handoff-checkpoint`, staged via
+its manifest. **Open decisions** lives in `handoff-todo.md`, alongside the
+**remainder** below: both are open questions the agent keeps revisiting
+over a session, so both belong in the scratch list it edits directly all
+session (FR4) rather than in the checkpoint-only snapshot — a decision
+that resolves or changes shape mid-session is corrected there on the spot,
+not carried stale to the next checkpoint. Next session, a
 `SessionStart(startup|clear)` hook assembles the frame in memory — a
-timestamp header plus the inlined task content — and injects it into
-context. No generated file, no `@`-ref or project-CLAUDE.md setup
+timestamp header plus the inlined task and todo content — and injects it
+into context. No generated file, no `@`-ref or project-CLAUDE.md setup
 required.
 
-A third field joins them when the session is working a task list: the
-**remainder** of that list, in `handoff-todo.md`, inlined into the same
-frame. It looks derivable — and its *finished* half is, from `git log`,
-so that half is dropped. The open half is not: reconstructing it after a
+Both the remainder of a task list and an open decision look derivable —
+and the *finished* half of the former is, from `git log`, so that half is
+dropped. The open half of either is not: reconstructing it after a
 compaction means the model inferring, from a paraphrase, which items are
-still outstanding, and that inference fails silently by redoing work.
-Reconstructable-by-harness (`git status`, files touched) is free and
-correct; reconstructable-only-by-inference is neither. The undone half of
-a task list is a decomposition, which is judgment.
+still outstanding or which choice is still unmade, and that inference
+fails silently, by redoing finished work or re-litigating a settled
+decision. Reconstructable-by-harness (`git status`, files touched) is free
+and correct; reconstructable-only-by-inference is neither. The undone half
+of a task list, like an unmade decision, is judgment — not state.
 
 ## Why no verbatim transcript or file list
 
