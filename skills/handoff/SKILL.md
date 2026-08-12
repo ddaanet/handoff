@@ -20,12 +20,17 @@ file — this skill's job is deciding what goes in them.
 
 ## Protocol
 
+**Make zero tool calls before invoking `handoff-checkpoint`.** Steps 1 and 3
+both decide from the conversation already in context — the deciding agent
+already holds everything it needs. A Read, Bash, or Grep call here
+duplicates work `handoff-checkpoint` does internally, and risks acting on
+state that is stale by the time it writes.
+
 ### Step 1: Decide what this call is for
 
-Three answers, from the request and the state of the work, without making
-any tool calls. None of them has a default: a default is the answer given
-by an agent that never considered the question, and considering it is the
-whole contribution.
+Three answers, from the request and the state of the work. None of them has
+a default: a default is the answer given by an agent that never considered
+the question, and considering it is the whole contribution.
 
 **Is the transition typed?** `clear: true` when the user asked for the
 reset to be carried out — "clear and continue", "continue in a new
@@ -65,7 +70,7 @@ auto-memory now. Skip if nothing durable surfaced — do not force.
 
 ### Step 3: Decide, then checkpoint
 
-First, decide all of the following without making any tool calls:
+First, decide all of the following:
 
 - **Session title** — a concise, specific title (≤ ~50 characters, Title
   Case, no surrounding quotes, no trailing punctuation) for the work done
@@ -216,6 +221,10 @@ newline would submit it early.
 
 ## Anti-patterns
 
+- Reading `handoff-task.md`, `handoff-todo.md`, or any other file "to
+  check" before deciding what to write in Step 1 or Step 3. The decision
+  comes from the conversation already in context — re-reading duplicates
+  what `handoff-checkpoint` does internally.
 - Padding "Current task" to look thorough. Length should track how many
   threads are genuinely in flight, not effort.
 - A task list in `## Current task`. Steps go to `handoff-todo.md`; the

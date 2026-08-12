@@ -9,7 +9,7 @@ file per change, dated, indexed by [`changelog.md`](changelog.md). Those files a
 edited after the fact — they say what was true and what was believed when
 they were written, which is what makes them worth keeping.
 
-Last updated: 2026-08-08.
+Last updated: 2026-08-11.
 
 ## Problem
 
@@ -117,7 +117,7 @@ git / memory.
 
 ## Architecture
 
-Three skills, one write path, ten hooks, and two files that cross a
+Four skills, one write path, eleven hooks, and two files that cross a
 boundary.
 
 ### The seam
@@ -190,9 +190,9 @@ a hot path, so the interpreter-startup tax lands where it is cheapest to pay.
 The six event hooks that fire on every tool call stay bash. See
 [`docs/changelog/2026-08-10-python-split.md`](changelog/2026-08-10-python-split.md).
 
-### The three skills
+### The four skills
 
-One skill per boundary, plus the rename:
+One skill per boundary, plus the rename and the restart:
 
 | boundary | skill | transition field |
 |---|---|---|
@@ -700,6 +700,19 @@ threshold](changelog/2026-08-01-context-threshold-trigger.md),
 [A compaction invalidates every sample above
 it](changelog/2026-08-09-samples-are-scoped-to-the-compaction.md), and
 [the removal](changelog/2026-08-10-drop-context-threshold-nudge.md).
+
+**Deciding makes zero tool calls.** `handoff`'s Step 1 and Step 3 both decide
+from the conversation already in context — the agent already holds
+everything it needs, and a Read/Bash/Grep call there duplicates work
+`handoff-checkpoint` does internally while risking action on state gone
+stale by write time. A live session read the rule seconds beforehand and
+still `cat`-ed both task files "to check": a general verify-before-acting
+habit overrode an instruction that read as descriptive rather than binding.
+The rule is now one standing prohibition ahead of both steps, phrased as an
+imperative on the next action, with the reason stated inline and a matching
+`## Anti-patterns` entry.
+[Deciding makes zero tool calls, stated
+once](changelog/2026-08-11-decide-with-zero-tool-calls.md)
 
 ## Rejected alternatives
 
