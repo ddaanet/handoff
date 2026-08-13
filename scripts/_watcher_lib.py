@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Shared machinery for drive_when_idle.py, the one detached watcher.
 
-Pure predicates over captured tmux pane text, the pane-polling scaffold (snap /
-wait_for_idle / the three submit confirmations, all pane-scoped) and the
-tunables, read from the environment at call time so tests can override them per-
-call rather than at import time. Port of _watcher-lib.sh — see
-docs/changelog/2026-08-10-python-split.md.
+Pure predicates over captured tmux pane text, the readers that feed them (snap,
+capture_full, cursor_position), the pane-polling scaffold (wait_for_idle and the
+four submit confirmations, all pane-scoped) and the tunables, read from the
+environment at call time so tests can override them per call rather than at
+import time.
+
+Port of _watcher-lib.sh — see docs/changelog/2026-08-10-python-split.md.
 """
 
 from __future__ import annotations
@@ -41,7 +43,8 @@ def is_busy(text: str) -> bool:
 
     The elapsed timer carries a unit per magnitude once it passes a minute —
     ``(37s ·`` becomes ``(8m 30s ·`` — so the seconds no longer abut the ``(``.
-    Every gap is ``\s``, never a literal space, for the reason in is_typing.
+    Every gap is ``\s``, never a literal space, for the reason in line_landed:
+    the TUI's own padding is not the ASCII one an author assumes.
     """
     return bool(
         re.search(r"\((?:[0-9]+[hm]\s)*[0-9]+s\s·|esc to interrupt", strip(text))
@@ -194,8 +197,8 @@ def cursor_position(pane: str) -> tuple[int, int]:
 def wait_for_idle(pane: str) -> None:
     """Wait until idle is stable for ~3 consecutive polls, up to TIMEOUT.
 
-    Falls through on timeout — the caller's is_typing check is the real gate
-    against typing over a live composer.
+    Falls through on timeout — the caller's composer_has_user_text check is the
+    real gate against typing over a live composer.
     """
     timeout = _env_float("HANDOFF_WATCHER_TIMEOUT", 30)
     poll = _env_float("HANDOFF_WATCHER_POLL", 0.1)

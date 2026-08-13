@@ -50,7 +50,8 @@ REAL_SLASH = _composer("/compact")
 REAL_PROSE = _composer("continue with the thing you were doing")
 
 # The slash-command popup renders ABOVE the composer and carries no ❯ of its
-# own, so is_typing's "last ❯ line" still lands on the composer.
+# own, so the "last ❯ row" both predicates anchor on still lands on the
+# composer.
 REAL_SLASH_WITH_POPUP = (
     "  /compact             Free up context by summarizing the conversation\n"
     "  /handoff:handoff     (handoff) Snapshot the in-progress task and st…\n"

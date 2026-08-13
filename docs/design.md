@@ -332,10 +332,10 @@ user-prompt transcript entry for prose, and `.claude/autodrive.exited`
 appearing for `/exit` — the one primitive with the opposite polarity, since
 `SessionEnd` can only ever create that marker, never remove one that
 predates the attempt. The walker reads the pane only where the pane is the
-sole witness — gating *typing into* the composer (`is_typing`,
-`is_unknown_command`). Nothing that asks whether an action *took effect*
-looks at it. The two that survive carry no opinion about the chrome around
-what they read: `line_landed` asks whether the composer holds the line just
+sole witness — gating *typing into* the composer (`composer_has_user_text`,
+`line_landed`, `is_unknown_command`). Nothing that asks whether an action
+*took effect* looks at it. Each carries no opinion about the chrome around
+what it reads: `line_landed` asks whether the composer holds the line just
 typed, rather than whether it holds anything — an idle composer is never
 empty, since the TUI paints a faint suggestion into it — and the pre-send bail
 keys on the **cursor**, the only signal that separates that suggestion from
@@ -349,6 +349,14 @@ predicate comes to be tested against its own premise, which is what let
 `is_typing` sit inverted against a U+00A0 composer gap while its suite stayed
 green. [Composer predicates match the real
 pane](changelog/2026-08-13-predicates-match-the-real-pane.md)
+Neither suite reaches the whole path: confirming a `/compact` needs a real
+compaction, so the submit primitives are proven only by driving a transition
+for real against the change that touched them. That dogfood is part of
+landing such a change, not a follow-up to it — until 2026-08-13 the Enter-and-
+confirm path had never once executed in production, because every driven line
+aborted at the composer check before reaching it, and its unit suite was green
+throughout. [The first driven transition to
+land](changelog/2026-08-13-first-driven-transition-lands.md)
 `claude --resume …` skips those composer checks entirely: it
 targets a bare shell once `/exit` is confirmed, where neither the `❯`
 composer glyph nor the "No commands match" text exist, and neither is a

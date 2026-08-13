@@ -454,7 +454,7 @@ def test_resume_line_bypasses_composer_checks_and_settles_first(
 ) -> None:
     """A `claude --resume` line targets a bare shell, not the TUI composer.
 
-    Pane text that would fail _drive_line's is_typing bail/delivery checks
+    Pane text that would fail _drive_line's composer bail/delivery checks
     (no ❯ at all — nothing recognizable as a shell prompt either) must not
     stop this line from being sent: the whole point of the shell-line path is
     that it does not read composer chrome.

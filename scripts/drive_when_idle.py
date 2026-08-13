@@ -47,8 +47,9 @@ def _send_literal(pane: str, line: str) -> None:
 def _drive_shell_line(pane: str, line: str, settle: float) -> None:
     """Type one line into a bare shell prompt, following a confirmed /exit.
 
-    _drive_line's checks assume the Claude Code TUI: is_typing reads the `❯`
-    composer and is_unknown_command reads its "No commands match" text — neither
+    _drive_line's checks assume the Claude Code TUI: composer_has_user_text and
+    line_landed read the `❯` composer, is_unknown_command its "No commands
+    match" text — neither
     exists once the process has exited to a shell, and neither is a reliable
     signal of a shell's own readiness across every user's shell prompt. So this
     line skips them entirely: a fixed settle after the confirmed /exit, then the

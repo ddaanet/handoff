@@ -288,25 +288,35 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   the transition's own `SessionStart` loader for the lines typed after it. One
   argument per line, and the lines are the literal keystrokes — it never learns
   which command belongs to which kind. Per line: `wait_for_idle`, bail if
-  `is_typing`, `send-keys -l`, then a `VERIFY_DELAY` gap that is the
-  recognition read-back for a `/` line and the paste-window settle for prose,
-  then confirm by the command's own primitive. A line that fails to confirm
+  `composer_has_user_text`, `send-keys -l`, then a `VERIFY_DELAY` gap that is
+  the recognition read-back for a `/` line and the paste-window settle for
+  prose, then `wait_for_landing` before confirming by the command's own
+  primitive. A line that fails to confirm
   ends the sequence, so a `/rename` that never lands under kind `clear` costs a
   wrong title and nothing more. The re-gate at the top of each iteration is
   FR-H: confirming a line can take `CONSUME_TIMEOUT` (300s) and the pane is
   live throughout.
   A `claude --resume …` line (`restart`'s second command) is dispatched to
-  `_drive_shell_line` instead, bypassing `wait_for_idle`/`is_typing`
-  entirely: it targets a bare shell once `/exit` is confirmed, where neither
+  `_drive_shell_line` instead, bypassing `wait_for_idle` and the composer
+  checks entirely: it targets a bare shell once `/exit` is confirmed, where neither
   exists nor would reliably signal readiness across every user's shell
   prompt. A fixed `HANDOFF_WATCHER_SHELL_SETTLE` stands in, then the same
   `submit_consumed` confirmation as `/compact`/`/clear`.
 - `scripts/_watcher_lib.py` — imported helper module for the walker,
   ported from `_watcher-lib.sh`. Defines `is_busy`
-  (spinner present), `is_typing` (prompt has content) and `is_unknown_command`
+  (spinner present), `line_landed` (the composer holds *this* line),
+  `composer_has_user_text` (cursor past the derived start column, so the TUI's
+  own faint placeholder does not read as a person mid-prompt) and
+  `is_unknown_command`
   over captured tmux pane text — pure predicates, tested directly in
-  `tests/test_watcher_lib.py`. Also the shared scaffold: the `HANDOFF_WATCHER_*`
-  tunables, `snap` (visible-pane capture — never scrollback), `wait_for_idle`
+  `tests/test_watcher_lib.py` against fixtures that are **captures**, never
+  hand-written, and re-checked against a live TUI by `just tui-conformance`
+  (see `docs/changelog/2026-08-13-predicates-match-the-real-pane.md`). Also the
+  shared scaffold: the `HANDOFF_WATCHER_*`
+  tunables, `snap` (visible-pane capture — never scrollback), `capture_full` +
+  `cursor_position` (untruncated frame and cursor, which must index the same
+  frame), `wait_for_landing` (poll for delivery — a single read at
+  `VERIFY_DELAY` races a composer that has not repainted), `wait_for_idle`
   (stable-idle poll loop), and the four confirmation primitives, none of which
   reads the pane. `_submit_until` is their shared body: Enter, three fast
   retries at `VERIFY_DELAY` (the first Enter can be absorbed into the paste
@@ -697,8 +707,14 @@ resolver with **pytest**. pytest runs off a uv-managed venv that
 invocation; `uv.lock` is committed, `.venv/` is gitignored). See
 [[feedback-uv-direnv-venv]].
 
-Manual probing of the walker/watcher against a *live* Claude Code TUI (not
-the bats tmux stub) means driving a real tmux session — this is the one
+Checking the pane predicates against a *live* Claude Code TUI is automated:
+`just tui-conformance` (pytest `live` marker, deselected from `just
+precommit`). Run it whenever a predicate or its fixtures change. Reach for a
+hand-driven session only for what it deliberately does not cover — anything
+needing a submitted turn, since it submits nothing.
+
+Manual probing of the walker/watcher against a live TUI means driving a real
+tmux session — this is the one
 project where that comes up. Never do it on the default socket
 (`/tmp/tmux-$UID/default`): that's the user's own live terminal, and a
 `new-session` there can collide with whatever they're doing in it. Ask first,
@@ -830,12 +846,21 @@ outright regardless of path.
   The walker and the pane predicates that used to be `tests/watcher-test.bats`
   ported whole to pytest with the 2026-08-10 split (see
   `docs/changelog/2026-08-10-python-split.md`), never trimmed:
-  `tests/test_watcher_lib.py` (24 tests) covers the pure predicates
-  (`is_busy`, `is_typing`, `is_unknown_command`), `transcript_prompt_count`,
+  `tests/test_watcher_lib.py` (45 tests) covers the pure predicates
+  (`is_busy`, `line_landed`, `composer_has_user_text`, `composer_start_column`,
+  `is_unknown_command`), `transcript_prompt_count`,
   `transcript_title_count`, and the `watcher_fail` recording, plus that the
   four confirmation primitives (`submit_exited` since 2026-08-10) return
-  rather than raise on a non-delivery.
-  `tests/test_drive_when_idle.py` (23 tests) drives `drive_when_idle.py`
+  rather than raise on a non-delivery. Its fixtures are **captures** from a
+  live TUI, spelled with an explicit `\N{NO-BREAK SPACE}` for the composer
+  gap — a hand-written one is how a predicate comes to be tested against its
+  own premise, which is the whole defect of 2026-08-13.
+  `tests/test_tui_conformance.py` (10 tests, `live` marker, deselected from
+  `just precommit` and run by `just tui-conformance`) is the other half: it
+  boots a real TUI on a private tmux socket and asserts those captures still
+  describe it. It submits nothing, so it costs no tokens, and it cannot run
+  sandboxed.
+  `tests/test_drive_when_idle.py` (24 tests) drives `drive_when_idle.py`
   end-to-end via subprocess against the tmux stub (`tests/conftest.py`'s
   `TmuxStub` fixture, replacing the bats `make_stub`/`on_enter` helpers):
   the recognition read-back, the unrecognized-command clear, the
