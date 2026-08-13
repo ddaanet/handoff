@@ -29,11 +29,13 @@ from _watcher_lib import (
     composer_has_user_text,
     cursor_position,
     is_unknown_command,
+    pane_foreground,
     snap,
     submit_consumed,
     submit_exited,
     submit_prompted,
     submit_titled,
+    wait_for_foreground_change,
     wait_for_idle,
     wait_for_landing,
     watcher_fail,
@@ -44,19 +46,29 @@ def _send_literal(pane: str, line: str) -> None:
     subprocess.run(["tmux", "send-keys", "-t", pane, "-l", line], check=False)
 
 
-def _drive_shell_line(pane: str, line: str, settle: float) -> None:
+def _drive_shell_line(pane: str, line: str, baseline: str, settle: float) -> None:
     """Type one line into a bare shell prompt, following a confirmed /exit.
 
     _drive_line's checks assume the Claude Code TUI: composer_has_user_text and
     line_landed read the `❯` composer, is_unknown_command its "No commands
-    match" text — neither
-    exists once the process has exited to a shell, and neither is a reliable
-    signal of a shell's own readiness across every user's shell prompt. So this
-    line skips them entirely: a fixed settle after the confirmed /exit, then the
-    same Enter-retry-then-poll _submit_until already uses for the other
-    primitives (via submit_consumed, unchanged — the resumed session's
-    SessionStart is still what confirms it).
+    match" text — none of which exists once the process has exited to a shell.
+    So this line skips them and gates on the pane's foreground command instead:
+    /exit confirming means SessionEnd fired, not that the terminal is accepting
+    input again. Then the same Enter-retry-then-poll _submit_until already uses
+    for the other primitives (via submit_consumed, unchanged — the resumed
+    session's SessionStart is still what confirms it).
+
+    The settle after the gate is a bounded residual, not the wait itself — the
+    shell still redraws its prompt after it regains the foreground, and that
+    part is not separately observable.
     """
+    timeout = _env_float("HANDOFF_WATCHER_EXIT_TIMEOUT", 30.0)
+    if not wait_for_foreground_change(pane, baseline, timeout):
+        watcher_fail(
+            f"`{line}` was never typed: the pane's foreground was still "
+            f"`{baseline}` after {timeout}s, so Claude Code had not released "
+            f"the terminal"
+        )
     time.sleep(settle)
     _send_literal(pane, line)
     if not submit_consumed(pane):
@@ -164,11 +176,14 @@ def main(argv: list[str]) -> int:
     pane = argv[1]
     lines = argv[2:]
     verify_delay = _env_float("HANDOFF_WATCHER_VERIFY_DELAY", 0.5)
-    shell_settle = _env_float("HANDOFF_WATCHER_SHELL_SETTLE", 1.0)
+    shell_settle = _env_float("HANDOFF_WATCHER_SHELL_SETTLE", 0.25)
+    # Sampled before any line is typed, while Claude Code is certainly still
+    # the foreground process — after /exit there is nothing left to compare.
+    baseline = pane_foreground(pane)
 
     for line in lines:
         if line.startswith("claude --resume "):
-            _drive_shell_line(pane, line, shell_settle)
+            _drive_shell_line(pane, line, baseline, shell_settle)
         else:
             _drive_line(pane, line, verify_delay)
     return 0

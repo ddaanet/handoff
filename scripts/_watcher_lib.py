@@ -215,6 +215,44 @@ def wait_for_idle(pane: str) -> None:
         time.sleep(poll)
 
 
+def wait_for_foreground_change(pane: str, baseline: str, timeout: float) -> bool:
+    """Wait until the pane's foreground command is no longer ``baseline``.
+
+    Claude Code stops consuming input well before it releases the terminal,
+    and a keystroke sent inside that window is dropped leaving no trace: the
+    pane looks untouched and the line simply never appears. The foreground
+    command reverting from Claude Code to the pane's own shell is the
+    observable end of that window, which a fixed sleep can only guess at.
+
+    Two consecutive readings, so a transient during teardown does not release
+    the gate early. Returns False on timeout rather than raising — the walker
+    owns failure for the whole sequence.
+    """
+    poll = _env_float("HANDOFF_WATCHER_FOREGROUND_POLL", 0.1)
+    deadline = time.monotonic() + timeout
+    seen = 0
+    while time.monotonic() < deadline:
+        if pane_foreground(pane) != baseline:
+            seen += 1
+            if seen >= 2:
+                return True
+        else:
+            seen = 0
+        time.sleep(poll)
+    return False
+
+
+def pane_foreground(pane: str) -> str:
+    """Read what tmux reports as the pane's foreground process."""
+    result = subprocess.run(
+        ["tmux", "display-message", "-p", "-t", pane, "#{pane_current_command}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip()
+
+
 def _submit_until(pane: str, check: Callable[[], bool]) -> bool:
     """Enter, then wait for ``check()`` to pass.
 

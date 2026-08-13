@@ -449,7 +449,7 @@ def test_exit_line_reported_when_nothing_confirms_it(
     assert "session" in fail_file.read_text().lower()
 
 
-def test_resume_line_bypasses_composer_checks_and_settles_first(
+def test_resume_line_bypasses_composer_checks(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:
     """A `claude --resume` line targets a bare shell, not the TUI composer.
@@ -464,7 +464,9 @@ def test_resume_line_bypasses_composer_checks_and_settles_first(
     pending = tmp_path / "autodrive"
     pending.write_text("")
 
-    start = time.monotonic()
+    # The foreground answers as the TUI once — the baseline main samples —
+    # then as the shell, which is what opens the gate.
+    tmux_stub.foreground_changes_to("some-shell")
 
     def consume_soon() -> None:
         time.sleep(0.2)
@@ -474,14 +476,15 @@ def test_resume_line_bypasses_composer_checks_and_settles_first(
     result = walk(
         tmux_stub,
         "claude --resume sess-42",
-        env={"HANDOFF_PENDING_FILE": str(pending)},
+        env={
+            "HANDOFF_PENDING_FILE": str(pending),
+            "HANDOFF_WATCHER_FOREGROUND_POLL": "0.01",
+        },
         consume=2,
     )
-    elapsed = time.monotonic() - start
 
     assert result.returncode == 0
     assert "-l|claude --resume sess-42|" in tmux_stub.sent_text()
-    assert elapsed >= 1  # HANDOFF_WATCHER_SHELL_SETTLE default, unset here
 
 
 def test_resume_line_settle_is_configurable(
@@ -490,6 +493,8 @@ def test_resume_line_settle_is_configurable(
     (tmux_stub.stubdir / "pane_after_l.txt").write_text("some-shell$ \n")
     pending = tmp_path / "autodrive"
     pending.write_text("")
+
+    tmux_stub.foreground_changes_to("some-shell")
 
     def consume_soon() -> None:
         time.sleep(0.05)
@@ -502,6 +507,7 @@ def test_resume_line_settle_is_configurable(
         "claude --resume sess-42",
         env={
             "HANDOFF_PENDING_FILE": str(pending),
+            "HANDOFF_WATCHER_FOREGROUND_POLL": "0.01",
             "HANDOFF_WATCHER_SHELL_SETTLE": "0.05",
         },
         consume=2,
@@ -511,6 +517,40 @@ def test_resume_line_settle_is_configurable(
     assert elapsed < 1
 
 
+def test_resume_line_is_not_typed_while_claude_still_holds_the_pane(
+    tmux_stub: TmuxStub, tmp_path: Path
+) -> None:
+    """The relaunch waits for Claude Code to release the terminal.
+
+    /exit confirming means SessionEnd fired, not that the terminal is accepting
+    input again. A keystroke sent inside that window is dropped leaving no
+    trace, so a gate that gave up and typed anyway would reproduce the defect
+    silently — this fails loudly instead, and the fail file is the only channel
+    back from a detached walker.
+    """
+    (tmux_stub.stubdir / "pane_after_l.txt").write_text("some-shell$ \n")
+    tmux_stub.set_foreground("claude")
+    fail_file = tmp_path / "autodrive.failed"
+
+    start = time.monotonic()
+    result = walk(
+        tmux_stub,
+        "claude --resume sess-42",
+        env={
+            "HANDOFF_FAIL_FILE": str(fail_file),
+            "HANDOFF_WATCHER_EXIT_TIMEOUT": "0.5",
+            "HANDOFF_WATCHER_FOREGROUND_POLL": "0.01",
+            "HANDOFF_WATCHER_SHELL_SETTLE": "0.01",
+        },
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.returncode != 0
+    assert "-l|claude --resume sess-42|" not in tmux_stub.sent_text()
+    assert elapsed >= 0.5  # it waited the whole timeout rather than typing
+    assert "claude" in fail_file.read_text()
+
+
 def test_restart_sequence_exit_then_resume_in_order(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:
@@ -518,7 +558,13 @@ def test_restart_sequence_exit_then_resume_in_order(
     exit_file = tmp_path / "autodrive.exited"
     pending = tmp_path / "autodrive"
     pending.write_text("")
-    tmux_stub.on_enter(f"touch '{exit_file}'; rm -f '{pending}'")
+    # Claude Code releasing the terminal is what the relaunch waits on, and it
+    # happens after /exit — so the flip is staged on Enter, not at setup, or
+    # the baseline sampled before the first line would already be the shell.
+    foreground = tmux_stub.foreground
+    tmux_stub.on_enter(
+        f"touch '{exit_file}'; rm -f '{pending}'; echo some-shell > '{foreground}'"
+    )
     result = walk(
         tmux_stub,
         "/exit",

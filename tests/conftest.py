@@ -20,7 +20,16 @@ case "$sub" in
     elif [ -f "{stubdir}/sent_enter" ]; then cat "{stubdir}/pane_after_enter.txt"
     else cat "{stubdir}/pane_idle.txt"; fi ;;
   display-message)
-    cat "{stubdir}/cursor.txt" ;;
+    case "$*" in
+      *pane_current_command*)
+        cat "{stubdir}/foreground.txt"
+        # Staged by foreground_flips_back_to: take effect from the NEXT
+        # reading, so exactly one answer differs.
+        if [ -f "{stubdir}/foreground_next.txt" ]; then
+          mv "{stubdir}/foreground_next.txt" "{stubdir}/foreground.txt"
+        fi ;;
+      *) cat "{stubdir}/cursor.txt" ;;
+    esac ;;
   send-keys)
     printf '%s|' "$@" >> "{sent}"; printf '\\n' >> "{sent}"
     case "$*" in
@@ -56,6 +65,10 @@ class TmuxStub:
         # moves the cursor. `compose(x)` stages a user mid-prompt instead.
         self.cursor = stubdir / "cursor.txt"
         self.cursor.write_text("2,1")
+        # The pane's foreground command. Defaults to the TUI, which is what it
+        # reads as for every test that never exits it.
+        self.foreground = stubdir / "foreground.txt"
+        self.foreground.write_text("claude\n")
         tmux = stubdir / "tmux"
         tmux.write_text(_TMUX_STUB.format(stubdir=stubdir, sent=self.sent))
         tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
@@ -68,6 +81,19 @@ class TmuxStub:
     def compose(self, cursor_x: int, cursor_y: int = 1) -> None:
         """Stage a user mid-prompt: the cursor sitting past the start column."""
         self.cursor.write_text(f"{cursor_x},{cursor_y}")
+
+    def set_foreground(self, command: str) -> None:
+        """Stage what tmux reports as the pane's foreground process."""
+        self.foreground.write_text(f"{command}\n")
+
+    def foreground_changes_to(self, command: str) -> None:
+        """Answer the current foreground exactly once more, then ``command``.
+
+        Deterministic where a timer is not: the walker samples its baseline
+        from the pane before typing anything, and a thread flipping the file
+        races that first read.
+        """
+        (self.stubdir / "foreground_next.txt").write_text(f"{command}\n")
 
     def sent_text(self) -> str:
         return self.sent.read_text()

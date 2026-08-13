@@ -362,3 +362,48 @@ def test_submit_exited_unset_env_var_tolerated(
     monkeypatch.delenv("HANDOFF_EXIT_FILE", raising=False)
 
     assert wl.submit_exited("%9") is True
+
+
+def test_pane_foreground_reads_the_tmux_format(
+    tmux_stub: TmuxStub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", tmux_stub.path_env())
+    tmux_stub.set_foreground("fish")
+
+    assert wl.pane_foreground("%9") == "fish"
+
+
+def test_wait_for_foreground_change_times_out_while_claude_holds_the_pane(
+    tmux_stub: TmuxStub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", tmux_stub.path_env())
+    monkeypatch.setenv("HANDOFF_WATCHER_FOREGROUND_POLL", "0.01")
+    tmux_stub.set_foreground("claude")
+
+    assert wl.wait_for_foreground_change("%9", "claude", 0.2) is False
+
+
+def test_wait_for_foreground_change_fires_once_the_shell_is_back(
+    tmux_stub: TmuxStub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", tmux_stub.path_env())
+    monkeypatch.setenv("HANDOFF_WATCHER_FOREGROUND_POLL", "0.01")
+    tmux_stub.set_foreground("fish")
+
+    assert wl.wait_for_foreground_change("%9", "claude", 2.0) is True
+
+
+def test_wait_for_foreground_change_needs_two_consecutive_readings(
+    tmux_stub: TmuxStub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single differing reading during teardown must not open the gate.
+
+    The stub flips back to `claude` the first time it is asked, so exactly one
+    reading differs. Without the consecutive-reading rule that one is enough.
+    """
+    monkeypatch.setenv("PATH", tmux_stub.path_env())
+    monkeypatch.setenv("HANDOFF_WATCHER_FOREGROUND_POLL", "0.01")
+    tmux_stub.set_foreground("fish")
+    tmux_stub.foreground_changes_to("claude")
+
+    assert wl.wait_for_foreground_change("%9", "claude", 0.2) is False

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -88,6 +89,13 @@ def _type(sock: str, pane: str, line: str) -> str:
 def _clear(sock: str, pane: str) -> None:
     _tmux(sock, "send-keys", "-t", pane, "C-u")
     time.sleep(0.7)
+
+
+def _foreground(sock: str, pane: str) -> str:
+    """Read the pane's foreground command the way the walker's gate does."""
+    return _tmux(
+        sock, "display-message", "-p", "-t", pane, "#{pane_current_command}"
+    ).strip()
 
 
 def _cursor(sock: str, pane: str) -> tuple[int, int]:
@@ -289,3 +297,111 @@ def test_is_unknown_command_still_matches_the_rejection_text(
         f"{window}s recognition window, so the check gives up before the "
         "rejection is painted and the command goes through to Enter"
     )
+
+
+@pytest.fixture
+def shell_hosted_pane() -> Iterator[tuple[str, str, int]]:
+    """Boot a TUI *inside a shell*; yield (sock, pane, claude_pid).
+
+    ``live_pane`` runs ``claude`` as the pane command itself, which can only
+    ever answer half of the question below: with no shell underneath, there is
+    nothing for the foreground to revert to. A real user's pane hosts the TUI
+    in their shell, and that is the arrangement the restart gate reads.
+    """
+    for tool in ("tmux", "claude", "script", "ps"):
+        if not shutil.which(tool):
+            pytest.skip(f"{tool} not on PATH — conformance probe needs a real TUI")
+
+    sock = f"handoff-foreground-{os.getpid()}"
+    conf = Path(tempfile.gettempdir()) / f"{sock}.conf"
+    conf.write_text("set -g focus-events on\nset -g status off\n", encoding="utf-8")
+
+    client: subprocess.Popen[bytes] | None = None
+    try:
+        _tmux(
+            sock, "-f", str(conf), "new-session", "-d",
+            "-x", "200", "-y", "50", "-c", str(PROBE_CWD), "/bin/sh",
+        )  # fmt: skip
+        pane = _tmux(sock, "list-panes", "-t", "0", "-F", "#{pane_id}").split("\n")[0]
+        if not pane:
+            pytest.fail("tmux reported no pane — the probe server never started")
+
+        client = subprocess.Popen(
+            [
+                "script",
+                "-q",
+                "-c",
+                f"stty rows 50 cols 200; tmux -L {sock} attach -t 0",
+                "/dev/null",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(1)
+        _tmux(sock, "send-keys", "-t", pane, "-l", "claude")
+        _tmux(sock, "send-keys", "-t", pane, "Enter")
+
+        deadline = time.monotonic() + BOOT_TIMEOUT
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            if "❯" in _capture(sock, pane):
+                break
+        else:
+            pytest.fail(f"the TUI never booted within {BOOT_TIMEOUT}s")
+
+        time.sleep(SETTLE)
+        shell_pid = _tmux(sock, "display-message", "-p", "-t", pane, "#{pane_pid}")
+        children = subprocess.run(
+            ["ps", "-o", "pid=", "--ppid", shell_pid.strip()],
+            capture_output=True, text=True, check=False,
+        )  # fmt: skip
+        pids = [int(p) for p in children.stdout.split()]
+        if not pids:
+            pytest.skip("could not identify the claude child of the pane's shell")
+        yield sock, pane, pids[0]
+    finally:
+        if client is not None:
+            client.kill()
+        _tmux(sock, "kill-server")
+        conf.unlink(missing_ok=True)
+
+
+def test_foreground_command_distinguishes_the_tui_from_the_shell(
+    shell_hosted_pane: tuple[str, str, int],
+) -> None:
+    """The premise wait_for_foreground_change is built on.
+
+    The stub answers ``#{pane_current_command}`` with whatever a test staged,
+    so every offline test of that gate passes on an assumption: that tmux
+    reports one thing while Claude Code holds the terminal and another once it
+    lets go. If those two readings were equal the gate could never fire and
+    every driven restart would fail closed, and no offline suite could tell —
+    the stub is the thing asserting the premise.
+
+    Observed 2026-08-13 on tmux 3.5a: ``claude`` while running, ``sh`` 0.75s
+    after release. This is a format string's behaviour, not a documented
+    contract, which is why it is pinned against a real server rather than
+    assumed.
+
+    The release is triggered with a signal rather than ``/exit``: what the gate
+    polls is the foreground reverting, and ``submit_exited`` already owns
+    whether ``/exit`` itself lands.
+    """
+    sock, pane, claude_pid = shell_hosted_pane
+
+    assert _foreground(sock, pane) == "claude"
+
+    os.kill(claude_pid, signal.SIGTERM)
+    deadline = time.monotonic() + 10.0
+    released = _foreground(sock, pane)
+    while time.monotonic() < deadline and released == "claude":
+        time.sleep(0.25)
+        released = _foreground(sock, pane)
+
+    assert released != "claude", (
+        "the pane's foreground still reads `claude` 10s after the process was "
+        "terminated, so wait_for_foreground_change can never fire and every "
+        "driven restart fails closed. The #{pane_pid} alternative recorded in "
+        "docs/design.md's rejected alternatives is the fallback."
+    )
+    assert released == "sh"
