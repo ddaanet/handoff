@@ -294,7 +294,18 @@ no view of the process's own argv), and `stop-drive.sh` fills in the rest —
 argv[0] plus every launch flag, read fresh from the exiting process's own
 `/proc/<pid>/cmdline` (macOS: `ps`, a known, accepted gap for a value
 containing a space) and re-quoted for replay — right before the walker would
-type or paste it, since that is the one place with access to that argv. A
+type or paste it, since that is the one place with access to that argv.
+
+Finding that process is a bounded walk up the parent chain, matching
+argv[0]'s basename against `claude`. The hook runs as `claude` →
+`/bin/sh -c "bash …"` → the script, and whether that wrapper survives is the
+shell's exec-optimisation choice, so its distance from the hook is not fixed.
+A walk that finds nothing falls back to a bare `claude --resume <sid>`,
+relaunching without the flags rather than replaying an argv that is not a
+launch line.
+[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+
+A
 stale `.claude/autodrive.exited` left by an earlier, only-partly-successful
 restart is cleared at the same point, so it cannot let a later attempt's
 `/exit` confirmation false-positive.
@@ -367,8 +378,14 @@ land](changelog/2026-08-13-first-driven-transition-lands.md)
 targets a bare shell once `/exit` is confirmed, where neither the `❯`
 composer glyph nor the "No commands match" text exist, and neither is a
 reliable signal of a shell's own readiness across every user's shell prompt.
-A fixed settle (`HANDOFF_WATCHER_SHELL_SETTLE`) stands in for the composer
-checks on that one line.
+What stands in is the pane's own foreground command. Claude Code stops
+consuming input well before it releases the terminal, and a keystroke sent
+inside that window is dropped leaving no trace, so the line waits until
+`#{pane_current_command}` reads as something other than the baseline sampled
+before the sequence began. `HANDOFF_WATCHER_SHELL_SETTLE` survives that gate
+as a bounded residual: the shell still redraws its prompt once it has the
+foreground back, and that part is not separately observable.
+[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
 
 A detached walker's exit status is read by nothing, so non-delivery is
 written to `.claude/autodrive.failed` and reported by
@@ -746,6 +763,15 @@ imperative on the next action, with the reason stated inline and a matching
 [Deciding makes zero tool calls, stated
 once](changelog/2026-08-11-decide-with-zero-tool-calls.md)
 
+**The `claude` process is found, never assumed.** Both halves of a driven
+restart need it — the argv to replay, and the moment it has let go of the
+terminal. `$PPID` inside a hook is the `/bin/sh -c` wrapper Claude Code
+spawns, whose argv is the hook command line, so replaying it relaunched the
+hook with `--resume` appended and carried an unexpanded
+`${CLAUDE_PLUGIN_ROOT}` that a fresh login shell resolved to nothing. One
+bounded parent-chain walk answers both questions.
+[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+
 ## Rejected alternatives
 
 **Loading via an `@.claude/handoff.md` reference** — the reference is
@@ -861,6 +887,22 @@ signal of intent. Also rejected: **prepare-only with a driven continuation**
 and appealing, but a skill that types one of the two lines has no sentence
 that describes it.
 [Driven transitions](changelog/2026-07-29-driven-transitions.md)
+
+**Taking the hook script's grandparent as `claude`** — the `/bin/sh -c`
+wrapper survives or is exec-optimised away at the shell's discretion, so a
+fixed depth is the same brittleness under a different constant.
+[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+
+**Deriving the pid from tmux's `#{pane_pid}`** — exact, and indifferent to
+what the process is named, but `handoff_resume_command` runs before the tmux
+check in `stop-drive.sh` and must also serve the not-in-tmux paste path,
+where there is no pane to ask.
+[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+
+**Lengthening `HANDOFF_WATCHER_SHELL_SETTLE`** — tuning a constant against
+an unbounded shutdown. The failure returns under load, and it is silent: the
+pane looks untouched.
+[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
 
 ## Non-goals
 

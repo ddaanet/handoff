@@ -253,9 +253,22 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   flags, so this reads them fresh from `/proc/<pid>/cmdline` (Linux; NUL-
   separated, so a value with an embedded space survives as one argument) or
   falls back to `ps -o command=` (macOS, no `/proc`; a known, accepted gap for
-  that same case) and re-quotes each for replay.
-  `HANDOFF_TEST_CMDLINE_PATH` substitutes a fixture file for the `/proc` path
-  in tests, since `/proc` itself cannot be faked.
+  that same case) and re-quotes each for replay. Which pid comes from
+  `handoff_claude_pid()`, a bounded parent-chain walk (via
+  `handoff_proc_argv0()`/`handoff_proc_ppid()`, both rc 0 so a plain
+  substitution under `set -e` cannot take a hook down) matching argv[0]'s
+  basename against `claude` — the argument is where the walk *starts*,
+  defaulting to `$PPID`, which is the `/bin/sh -c` wrapper Claude Code spawns
+  and whose argv is the hook command line, not a launch line. Whether that
+  wrapper survives is the shell's exec-optimisation choice, so the depth is
+  not fixed; the `depth < 10` bound is the whole termination guarantee, since
+  a chain read from a table nothing here controls can cycle at any length. A
+  walk that finds nothing falls back to a bare `claude --resume <sid>`.
+  `HANDOFF_TEST_PROC_ROOT` substitutes a fake process *tree* (one directory
+  per pid holding `cmdline` and `status`) for `/proc` in tests, since `/proc`
+  itself cannot be faked — a *tree* because the retired single-file seam
+  substituted for the very expression that was wrong, which is how the
+  wrong-pid defect stayed green.
   `handoff_drive_arm()` rewrites line 1 into a new state, preserving every line
   below it — so it never has to know the kind's shape, which is what lets one
   helper serve `stop-drive.sh` and, in the next pass, `handoff-approved`. The
@@ -300,8 +313,15 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `_drive_shell_line` instead, bypassing `wait_for_idle` and the composer
   checks entirely: it targets a bare shell once `/exit` is confirmed, where neither
   exists nor would reliably signal readiness across every user's shell
-  prompt. A fixed `HANDOFF_WATCHER_SHELL_SETTLE` stands in, then the same
-  `submit_consumed` confirmation as `/compact`/`/clear`.
+  prompt. What stands in is `wait_for_foreground_change` against a baseline
+  `main` samples before typing anything — `/exit` confirming means
+  `SessionEnd` fired, not that the terminal is accepting input again, and a
+  keystroke sent inside that window is dropped leaving no trace. A timed-out
+  gate calls `watcher_fail` rather than typing anyway, since typing into a
+  terminal known not to be listening is the defect itself.
+  `HANDOFF_WATCHER_SHELL_SETTLE` survives it as a bounded residual (the
+  shell's own prompt redraw, not separately observable), default 0.25. Then
+  the same `submit_consumed` confirmation as `/compact`/`/clear`.
 - `scripts/_watcher_lib.py` — imported helper module for the walker,
   ported from `_watcher-lib.sh`. Defines `is_busy`
   (spinner present), `line_landed` (the composer holds *this* line),
@@ -317,7 +337,11 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `cursor_position` (untruncated frame and cursor, which must index the same
   frame), `wait_for_landing` (poll for delivery — a single read at
   `VERIFY_DELAY` races a composer that has not repainted), `wait_for_idle`
-  (stable-idle poll loop), and the four confirmation primitives, none of which
+  (stable-idle poll loop), `pane_foreground` + `wait_for_foreground_change`
+  (`#{pane_current_command}`, and the poll that waits for it to stop reading
+  as the baseline — two consecutive differing readings, so a teardown
+  transient does not open the gate early; the restart path's only reader),
+  and the four confirmation primitives, none of which
   reads the pane. `_submit_until` is their shared body: Enter, three fast
   retries at `VERIFY_DELAY` (the first Enter can be absorbed into the paste
   window as a line break), then a long poll without resending, since a
@@ -833,11 +857,16 @@ outright regardless of path.
   The `restart` kind adds its own rows to `tests/hook-test.bats`: the shape
   matrix (`clear`'s shape, `/exit`/`claude --resume` in the two command
   slots), `handoff_resume_command` (argv replay with `--resume` appended, an
-  embedded-space argument surviving whole via a NUL-separated fixture file
-  substituting for `/proc/<pid>/cmdline` — `/proc` itself cannot be faked —
-  and the no-source-readable fallback), `stop-drive.sh`'s argv composition and
+  embedded-space argument surviving whole, the walk reaching past the
+  `/bin/sh -c` hook wrapper and past several intermediate levels, the
+  no-claude-ancestor and no-source-readable fallbacks, and a cyclic chain
+  terminating — that last one asserted under a `timeout`, since without the
+  bound it hangs rather than fails; all against a fake process tree at
+  `HANDOFF_TEST_PROC_ROOT`, `/proc` itself not being fakeable), `stop-drive.sh`'s argv composition and
   stale-exited-marker clearing (asserted through the not-in-tmux paste path,
-  a synchronous seam, rather than by waiting on the detached walker), the new
+  a synchronous seam, rather than by waiting on the detached walker — and the
+  one row covering the `$PPID` default, so its fake tree is built inside the
+  invoking shell, keyed on that shell's own `$$`), the new
   `session-end.sh` hook (silent absent a pending `restart`, writes the marker
   when one is pending, worktree-scoped), and the new `load-restart.sh` hook
   mirrored against `load-compact.sh`'s own matrix but with one added negative
@@ -846,21 +875,31 @@ outright regardless of path.
   The walker and the pane predicates that used to be `tests/watcher-test.bats`
   ported whole to pytest with the 2026-08-10 split (see
   `docs/changelog/2026-08-10-python-split.md`), never trimmed:
-  `tests/test_watcher_lib.py` (45 tests) covers the pure predicates
+  `tests/test_watcher_lib.py` (49 tests) covers the pure predicates
   (`is_busy`, `line_landed`, `composer_has_user_text`, `composer_start_column`,
   `is_unknown_command`), `transcript_prompt_count`,
-  `transcript_title_count`, and the `watcher_fail` recording, plus that the
+  `transcript_title_count`, `pane_foreground` +
+  `wait_for_foreground_change` (opening, timing out, and refusing to open on
+  a single transient reading — that last one mutation-checked by relaxing
+  `seen >= 2`), and the `watcher_fail` recording, plus that the
   four confirmation primitives (`submit_exited` since 2026-08-10) return
   rather than raise on a non-delivery. Its fixtures are **captures** from a
   live TUI, spelled with an explicit `\N{NO-BREAK SPACE}` for the composer
   gap — a hand-written one is how a predicate comes to be tested against its
   own premise, which is the whole defect of 2026-08-13.
-  `tests/test_tui_conformance.py` (10 tests, `live` marker, deselected from
+  `tests/test_tui_conformance.py` (11 tests, `live` marker, deselected from
   `just precommit` and run by `just tui-conformance`) is the other half: it
   boots a real TUI on a private tmux socket and asserts those captures still
   describe it. It submits nothing, so it costs no tokens, and it cannot run
-  sandboxed.
-  `tests/test_drive_when_idle.py` (24 tests) drives `drive_when_idle.py`
+  sandboxed. Its eleventh row pins the premise `wait_for_foreground_change`
+  rests on, which no offline suite can reach — the stub answers
+  `#{pane_current_command}` with whatever a test staged, so it *is* the thing
+  asserting the premise. Observed 2026-08-13 on tmux 3.5a: `claude` while
+  running, `sh` 0.75s after release. It needs its own fixture, since
+  `live_pane` runs `claude` as the pane command itself and so has no shell
+  for the foreground to revert to, and it triggers the release with a signal
+  — the gate polls the reverting, and `submit_exited` owns `/exit` itself.
+  `tests/test_drive_when_idle.py` (25 tests) drives `drive_when_idle.py`
   end-to-end via subprocess against the tmux stub (`tests/conftest.py`'s
   `TmuxStub` fixture, replacing the bats `make_stub`/`on_enter` helpers):
   the recognition read-back, the unrecognized-command clear, the
@@ -870,7 +909,13 @@ outright regardless of path.
   confirming and failing, the shell line proceeding against pane text that
   would fail `_drive_line`'s composer checks (demonstrating the bypass is
   real, not just untested), its settle being configurable, and the full
-  `/exit`-then-`claude --resume` sequence running in order. Two rows there
+  `/exit`-then-`claude --resume` sequence running in order. A sixth row
+  (2026-08-13) covers the foreground gate: a pane Claude Code never releases
+  is never typed into, and the walker fails loudly instead — mutation-checked
+  by deleting the gate, which reds that row alone. Every shell-line row
+  stages its flip through `TmuxStub.foreground_changes_to` (one more reading
+  of the current value, then the new one) rather than a thread, which races
+  `main`'s baseline read. Three rows there
   are load-bearing and mutation-checked: the FR-H re-idle gate, asserted on
   the *delay* between two literal sends rather than on suppression
   (`wait_for_idle` falls through on timeout by design, so a busy pane is
