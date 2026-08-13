@@ -7,7 +7,7 @@ complement to Claude Code's auto-memory: memory holds durable facts
 *ephemeral task frame* memory avoids — what you were doing right now,
 what decisions are still open.
 
-Three skills sit on that seam — one per boundary, plus the rename:
+Two skills sit on that seam, one per boundary:
 
 | | skill |
 |---|---|
@@ -23,6 +23,9 @@ thread stays live. `/handoff:restart` is a fourth: exit and relaunch with
 `--resume`, for when a plugin upgrade, a `hooks.json` edit, or any other
 config only a fresh process picks up needs adopting — the conversation
 carries over whole, so unlike `/clear` it costs no context at all.
+`/handoff:pending` is a fifth: it reports the task frame already sitting in
+context — current task, open decisions, remaining items — reading nothing
+and writing nothing.
 
 Both write the same file; a `SessionStart` hook injects it back, verbatim,
 into whatever comes next.
@@ -122,7 +125,7 @@ Use a compact-boundary skill when the work continues past a long session,
 and a clear-boundary one when the thread itself should restart. Compacting
 right before `/clear` throws away what the compaction just paid for.
 
-The agent updates auto-memory with any durable learnings, then in a single turn decides the task snapshot (if anything is outstanding), the todo remainder (if a task list is in flight), and a session title, and pipes all three to one `handoff-checkpoint` call as a JSON payload. The checkpoint writes or edits `.claude/handoff-task.md` and `.claude/handoff-todo.md`, and `.claude/autodrive` when a rename is wanted, leaving a manifest behind — an empty task or todo body removes the file rather than leaving a stale one, so content decides absence, not a wipe on activation. A `PostToolUse(Bash)` hook consumes that manifest and stages every listed path for commit (deletions included). Anything to be typed waits for the turn to end: a `Stop` hook arms it and spawns one watcher, which types each line via tmux `send-keys` once the prompt goes idle, confirms each against the harness rather than the screen, and moves on to the next. A guard denies any direct agent Write or Edit to `.claude/handoff-task.md` — it is written by the checkpoint only. `.claude/handoff-todo.md` stays open for the agent to edit directly all session; a `PostToolUse(Write|Edit)` hook stages those edits on the spot. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently. `SessionStart` also publishes the session's root at `/tmp/claude/handoff-root-<session id>`, which is how `handoff-checkpoint` finds it from the agent's own shell — the same hook sweeps its own week-old leavings there, and nothing else — and if the session's working directory ever leaves the repo it was launched in, the next prompt says so, once per episode.
+The agent updates auto-memory with any durable learnings, then in a single turn decides the task snapshot (if anything is outstanding), the todo remainder (if a task list is in flight), and a session title, and pipes all three to one `handoff-checkpoint` call as a JSON payload. The checkpoint writes or edits `.claude/handoff-task.md` and `.claude/handoff-todo.md`, and `.claude/autodrive` when a rename is wanted, leaving a manifest behind — an empty task or todo body removes the file rather than leaving a stale one, so content decides absence, not a wipe on activation. A `PostToolUse(Bash)` hook consumes that manifest and stages every listed path for commit (deletions included). Anything to be typed waits for the turn to end: a `Stop` hook arms it and spawns one watcher, which types each line via tmux `send-keys` once the prompt goes idle, confirms each against the harness rather than the screen, and moves on to the next. A guard denies any direct agent Write or Edit to `.claude/handoff-task.md` — it is written by the checkpoint only. `.claude/handoff-todo.md` stays open for the agent to edit directly all session; a `PostToolUse(Write|Edit)` hook stages those edits on the spot. After `/clear` (or in a fresh session), the `SessionStart` hook assembles and injects the handoff frame into the new agent's context automatically. Auto-memory restores independently. The agent's own shell cannot see the project root, so a `PreToolUse(Bash)` hook resolves it and injects it into each `handoff-checkpoint` call as it runs, rather than sampling it once at session start. And if the session's working directory ever leaves the repo it was launched in, the next prompt says so, once per episode.
 
 In a gitlore-managed repository, handoff also offers to commit your memory:
 when the memory submodule has uncommitted changes, it drafts a commit message
@@ -185,7 +188,8 @@ directly.
 - `handoff-todo.md` — agent-written remainder of an in-flight task list;
   staged for git automatically, same as the task file (track this).
 - `autodrive` — transient file describing the transition to carry out:
-  first line its state, second the kind (`rename`, `compact` or `clear`),
+  first line its state, second the kind (`rename`, `compact`, `clear` or
+  `restart`),
   then the lines to type. Written by the checkpoint and by nothing else — a
   direct agent write is denied. It starts out `held` when it would type into
   a pane still holding an unanswered memory question, and your approval
@@ -195,6 +199,8 @@ directly.
   prompt, one transition.
 - `autodrive.failed` — written only when a line could not be delivered, and
   consumed when you are told about it at your next prompt.
+- `autodrive.exited` — written only during a restart, when the session ends,
+  so the relaunch knows the `/exit` it typed actually took.
 
 Both `handoff-task.md` and `handoff-todo.md` are removed when the checkpoint
 sees an empty body (the "finalize" case): invoke the skill again with

@@ -211,6 +211,12 @@ inside a live session can adopt an upgraded plugin, hook, MCP server, or
 is the only remedy and it is always typed, never merely prepared. See
 "Driving the TUI" below for the kind itself.
 
+`/handoff:pending` is a fifth skill with no design surface at all: it reports
+the `## Current task`, `## Open decisions` and `## Remaining` sections of the
+frame already injected into context, making no tool call and writing no file.
+It appears nowhere else in this document because there is nothing else to say
+about it.
+
 The judgment is per-boundary, not per-drive-mode: commit awareness, memory
 capture, the task/todo drafting rules and the file-vs-prompt seam are
 identical whether or not the agent types the command afterwards. So whether
