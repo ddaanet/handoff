@@ -334,7 +334,22 @@ appearing for `/exit` — the one primitive with the opposite polarity, since
 predates the attempt. The walker reads the pane only where the pane is the
 sole witness — gating *typing into* the composer (`is_typing`,
 `is_unknown_command`). Nothing that asks whether an action *took effect*
-looks at it, and `claude --resume …` skips those composer checks entirely: it
+looks at it. The two that survive carry no opinion about the chrome around
+what they read: `line_landed` asks whether the composer holds the line just
+typed, rather than whether it holds anything — an idle composer is never
+empty, since the TUI paints a faint suggestion into it — and the pre-send bail
+keys on the **cursor**, the only signal that separates that suggestion from
+something a person typed, with the composer's start column derived from the
+captured line rather than pinned to today's layout. Both poll rather than
+sampling once: the pane does not always repaint within `VERIFY_DELAY`, and
+read once, a late repaint is indistinguishable from a swallowed keystroke.
+Their fixtures are captures from a live TUI, and `just tui-conformance`
+asserts those captures still match one — a hand-written fixture is how a
+predicate comes to be tested against its own premise, which is what let
+`is_typing` sit inverted against a U+00A0 composer gap while its suite stayed
+green. [Composer predicates match the real
+pane](changelog/2026-08-13-predicates-match-the-real-pane.md)
+`claude --resume …` skips those composer checks entirely: it
 targets a bare shell once `/exit` is confirmed, where neither the `❯`
 composer glyph nor the "No commands match" text exist, and neither is a
 reliable signal of a shell's own readiness across every user's shell prompt.

@@ -22,7 +22,20 @@ dev = [
 # so `import worktree_root` resolves without a conftest hack.
 pythonpath = ["scripts"]
 testpaths = ["tests"]
-addopts = ["--strict-markers", "--strict-config", "--import-mode=importlib"]
+# `-m "not live"` deselects the TUI conformance probe: it needs a real claude
+# and a real tmux server, so it cannot run in the gate (nor inside the agent's
+# sandbox). `just tui-conformance` passes `-m live` on the command line, which
+# wins over this one. See tests/test_tui_conformance.py.
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--import-mode=importlib",
+    "-m",
+    "not live",
+]
+markers = [
+    "live: drives a real Claude Code TUI in tmux; excluded from `just precommit`",
+]
 
 [tool.docformatter]
 recursive = true

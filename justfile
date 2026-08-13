@@ -56,3 +56,9 @@ hook-test:
 # Run the Python unit tests (pytest) — worktree_root.py, checkpoint.py, drive_when_idle.py
 py-test:
     pytest
+
+# Check the frozen pane fixtures against a live TUI. Not in `precommit`: needs a
+# real claude + tmux server (so it cannot run sandboxed), takes ~40s. Submits
+# nothing, so it costs no tokens. `-rs` so a skip is never mistaken for a pass.
+tui-conformance:
+    pytest -m live -v -rs

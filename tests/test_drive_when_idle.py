@@ -36,6 +36,8 @@ def walk(
         "HANDOFF_WATCHER_VERIFY_DELAY": "0.01",
         "HANDOFF_WATCHER_CONSUME_POLL": "0.05",
         "HANDOFF_WATCHER_CONSUME_TIMEOUT": str(consume),
+        "HANDOFF_WATCHER_RECOGNITION_DELAY": "0.05",
+        "HANDOFF_WATCHER_LANDING_DELAY": "0.5",
     }
     if env:
         full_env.update(env)
@@ -52,7 +54,7 @@ def test_slash_line_typed_then_recognition_read_back_then_entered(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:
     (tmux_stub.stubdir / "pane_after_l.txt").write_text(
-        "/compact  Compact the conversation\n❯ /compact\n"
+        "/compact  Compact the conversation\n❯ /compact keep the parser work\n"
     )
     result = walk(
         tmux_stub,
@@ -91,12 +93,55 @@ def test_unrecognized_command_cleared_with_ctrl_u_never_entered(
     assert len(fail_file.read_text().splitlines()) == 1
 
 
+def test_a_composer_that_repaints_late_is_waited_for_not_failed(
+    tmux_stub: TmuxStub, tmp_path: Path
+) -> None:
+    """The pane does not always paint within VERIFY_DELAY.
+
+    Read once, a late repaint is indistinguishable from a swallowed keystroke
+    and the walker aborts a line it typed successfully. Mutation check: revert
+    wait_for_landing to a single read and this row alone goes red.
+    """
+    pane_file = tmux_stub.stubdir / "pane_after_l.txt"
+    pane_file.write_text("──── x ──\n❯ \n")
+
+    def repaint_late() -> None:
+        # Anchored to the send, not to wall-clock from here: interpreter
+        # startup is ~0.4s and would swallow a fixed delay, leaving even a
+        # single read landing after the repaint — a green that proves nothing.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and "-l|" not in tmux_stub.sent_text():
+            time.sleep(0.01)
+        time.sleep(0.4)
+        pane_file.write_text("──── x ──\n❯ continue the parser work\n")
+
+    threading.Thread(target=repaint_late, daemon=True).start()
+    tr = tmp_path / "t.jsonl"
+    tr.write_text("")
+    submitted = {
+        "type": "user",
+        "message": {"role": "user", "content": "continue the parser work"},
+    }
+    tmux_stub.on_enter(f"printf '{json.dumps(submitted)}\\n' >> '{tr}'")
+    result = walk(
+        tmux_stub,
+        "continue the parser work",
+        env={"HANDOFF_WATCHER_LANDING_DELAY": "3", "HANDOFF_TRANSCRIPT": str(tr)},
+    )
+    assert result.returncode == 0
+    assert "-l|continue the parser work|" in tmux_stub.sent_text()
+
+
 def test_nothing_sent_while_user_is_composing(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:
     (tmux_stub.stubdir / "pane_idle.txt").write_text(
         "──── x ──\n❯ half-typed thought\n"
     )
+    # The cursor, not the text, is what says a person typed it: the TUI paints
+    # its own suggestion into an idle composer and leaves the cursor at the
+    # start column.
+    tmux_stub.compose(len("❯ half-typed thought"))
     fail_file = tmp_path / "autodrive.failed"
     result = walk(
         tmux_stub,
@@ -205,7 +250,7 @@ def test_compact_line_confirms_by_pending_file_consumed(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:
     (tmux_stub.stubdir / "pane_after_l.txt").write_text(
-        "/compact  Compact the conversation\n❯ /compact\n"
+        "/compact  Compact the conversation\n❯ /compact keep the parser work\n"
     )
     pending = tmp_path / "autodrive"
     pending.write_text("")
@@ -230,7 +275,7 @@ def test_compact_line_reported_when_nothing_consumes_it(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:
     (tmux_stub.stubdir / "pane_after_l.txt").write_text(
-        "/compact  Compact the conversation\n❯ /compact\n"
+        "/compact  Compact the conversation\n❯ /compact keep the parser work\n"
     )
     pending = tmp_path / "autodrive"
     pending.write_text("")

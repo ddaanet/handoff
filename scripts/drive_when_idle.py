@@ -25,7 +25,9 @@ import time
 
 from _watcher_lib import (
     _env_float,
-    is_typing,
+    capture_full,
+    composer_has_user_text,
+    cursor_position,
     is_unknown_command,
     snap,
     submit_consumed,
@@ -33,6 +35,7 @@ from _watcher_lib import (
     submit_prompted,
     submit_titled,
     wait_for_idle,
+    wait_for_landing,
     watcher_fail,
 )
 
@@ -73,7 +76,7 @@ def _drive_line(pane: str, line: str, verify_delay: float) -> None:
 
     # Load-bearing, not defensive: send-keys concatenates onto
     # half-typed user text. A bail is a non-delivery like any other.
-    if is_typing(snap(pane)):
+    if composer_has_user_text(capture_full(pane), *cursor_position(pane)):
         watcher_fail(f"the user was composing a prompt, so `{line}` was never typed")
 
     # Send literally so nothing in the line is read as tmux key names;
@@ -86,20 +89,44 @@ def _drive_line(pane: str, line: str, verify_delay: float) -> None:
     time.sleep(verify_delay)
 
     # A dead pane or a pane in copy mode swallows the literal send: the
-    # composer looks untouched.
-    if not is_typing(snap(pane)):
+    # composer looks untouched. Polled, not read once — see wait_for_landing.
+    if not wait_for_landing(pane, line):
         watcher_fail(
             f"`{line}` did not land in the composer — a dead pane or copy "
             "mode may have swallowed it"
         )
 
-    if line.startswith("/") and is_unknown_command(snap(pane)):
+    if line.startswith("/") and _was_rejected(pane):
         # Clear the composer and leave the pane as we found it. Never
         # Enter on a command the TUI has already said it cannot run.
         subprocess.run(["tmux", "send-keys", "-t", pane, "C-u"], check=False)
         watcher_fail(f"the TUI did not recognize `{line}`, so it was cleared unrun")
 
     _confirm_line(pane, line)
+
+
+def _was_rejected(pane: str) -> bool:
+    """Poll for the TUI's "No commands match", which lands after VERIFY_DELAY.
+
+    The single read this replaced sampled at VERIFY_DELAY, before the pane had
+    painted anything, and passed every unknown command straight to Enter.
+
+    The paint is not prompt and not stable: measured at ~1s and ~2s on
+    consecutive runs of the same probe, so the window is sized from the slower
+    observation with margin rather than from a figure that looked typical. A
+    *recognized* command waits the window out in full — that latency is the
+    price of the check being real, and it is paid once per slash line.
+
+    Residual: a machine slower than the margin still misses the rejection and
+    Enters the command. `just tui-conformance` asserts against this exact
+    tunable, so a drift past it fails there rather than in a transition.
+    """
+    deadline = time.monotonic() + _env_float("HANDOFF_WATCHER_RECOGNITION_DELAY", 3.0)
+    while time.monotonic() < deadline:
+        if is_unknown_command(snap(pane)):
+            return True
+        time.sleep(_env_float("HANDOFF_WATCHER_POLL", 0.1))
+    return False
 
 
 def _confirm_line(pane: str, line: str) -> None:
