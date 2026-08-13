@@ -426,20 +426,86 @@ handoff_spawn_detached() {
 # process's own argv), so stop-drive.sh calls this to fill in the rest right
 # before spawning the walker.
 #
-# Reads the parent's cmdline: hooks.json spawns each hook directly off the
-# `claude` process, so at Stop time $PPID (or an explicit override) IS that
-# process. Linux: /proc/<pid>/cmdline is NUL-separated, so a value with
-# embedded spaces (a --plugin-dir path, say) survives as one argument rather
-# than being split. There is no /proc on macOS; the `ps` fallback receives one
-# already space-joined line and cannot tell an embedded space from an argument
-# boundary — a known, accepted gap (this dev box is Linux; see CLAUDE.md).
+# The process table to read. Overridable so tests can build a fake tree: /proc
+# cannot be faked, and the pid SELECTION below is what a single-file seam
+# silently substituted for, which is how the wrong-pid defect stayed green.
+handoff_proc_root() {
+    printf '%s\n' "${HANDOFF_TEST_PROC_ROOT:-/proc}"
+}
+
+# argv[0] of $1, or empty. `read` reports EOF-without-delimiter as non-zero,
+# which is the normal case for a single-field read, so its status is not
+# evidence of failure here. Always rc 0: callers assign it in a plain
+# substitution, which under `set -e` would otherwise take the hook down.
+handoff_proc_argv0() {
+    local src argv0=""
+    src="$(handoff_proc_root)/$1/cmdline"
+    if [[ -r "$src" ]]; then
+        IFS= read -r -d '' argv0 < "$src" || true
+        printf '%s\n' "$argv0"
+        return 0
+    fi
+    command -v ps >/dev/null 2>&1 || return 0
+    ps -o command= -p "$1" 2>/dev/null | awk 'NR==1 {print $1}' || true
+}
+
+# The parent pid of $1, or empty. /proc/<pid>/status rather than …/stat: that
+# file's second field is the executable name in parentheses and may itself
+# contain spaces and parens, which is the classic way a field-index parse of
+# it goes wrong. Always rc 0, for the reason above.
+handoff_proc_ppid() {
+    local src
+    src="$(handoff_proc_root)/$1/status"
+    if [[ -r "$src" ]]; then
+        awk '/^PPid:/ {print $2; exit}' "$src" || true
+        return 0
+    fi
+    command -v ps >/dev/null 2>&1 || return 0
+    ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ' || true
+}
+
+# The ancestor of $1 that is Claude Code itself, or rc 1 when the walk finds
+# none. Claude Code runs a hook as `claude` -> `/bin/sh -c "bash …"` -> the
+# script, so $PPID is the wrapper, whose argv is the hook command line and not
+# a launch line anyone can replay. Whether that wrapper survives is the
+# shell's exec-optimisation choice, so the depth is not fixed: walk it.
 #
-# HANDOFF_TEST_CMDLINE_PATH substitutes a fixture file for /proc/<pid>/cmdline
-# in tests, since /proc itself cannot be faked.
+# The depth bound is the whole termination guarantee. A parent chain read from
+# a table nothing here controls can cycle — of any length, so a self-parent
+# check would cover one special case and leave the rest — and this runs
+# detached from any turn, where a spin has nothing to interrupt it.
+handoff_claude_pid() {
+    local pid="$1" depth=0 argv0
+    while [[ -n "$pid" && "$pid" != 0 ]] && (( depth < 10 )); do
+        argv0="$(handoff_proc_argv0 "$pid")"
+        if [[ "${argv0##*/}" == "claude" ]]; then
+            printf '%s\n' "$pid"
+            return 0
+        fi
+        pid="$(handoff_proc_ppid "$pid")"
+        depth=$(( depth + 1 ))
+    done
+    return 1
+}
+
+# Reads the argv of the ancestor the walk above identifies as `claude`, not of
+# $PPID — $1 is where the walk STARTS, defaulting to $PPID. When no such
+# ancestor is found, the bare `claude --resume <sid>` relaunches without the
+# original flags rather than replaying an argv that is not a launch line.
+# Linux: /proc/<pid>/cmdline is NUL-separated, so a value with embedded spaces
+# (a --plugin-dir path, say) survives as one argument rather than being split.
+# There is no /proc on macOS; the `ps` fallback receives one already
+# space-joined line and cannot tell an embedded space from an argument
+# boundary — a known, accepted gap (this dev box is Linux; see CLAUDE.md).
 handoff_resume_command() {
-    local pid="${1:-$PPID}" sid="$2" src
-    src="${HANDOFF_TEST_CMDLINE_PATH:-/proc/$pid/cmdline}"
+    local start="${1:-$PPID}" sid="$2" pid src
+    pid="$(handoff_claude_pid "$start")" || pid=""
     local -a argv=()
+    if [[ -z "$pid" ]]; then
+        printf 'claude --resume %s\n' "$sid"
+        return 0
+    fi
+    src="$(handoff_proc_root)/$pid/cmdline"
     if [[ -r "$src" ]]; then
         local part
         while IFS= read -r -d '' part; do argv+=("$part"); done < "$src"
