@@ -1,3 +1,0 @@
-[submodule "gitlore-memory"]
-	path = memory
-	url = git@github.com:ddaanet/claude-plugin-dev-memory.git

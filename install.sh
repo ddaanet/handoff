@@ -7,7 +7,13 @@
 #     git clone --depth 1 -b vX.Y.Z \
 #         git@github.com:ddaanet/claude-plugin-dev.git /tmp/cpd
 #     cd /path/to/plugin
-#     bash /tmp/cpd/install.sh vX.Y.Z
+#     bash /tmp/cpd/toolkit/install.sh dist-vX.Y.Z
+#
+# Clone the SOURCE tag (vX.Y.Z) to get the script; vendor the DIST tag
+# (dist-vX.Y.Z), whose root tree is only the consumer-facing files. A
+# subtree add of the source tag would copy this repo's whole working
+# environment into the plugin -- see docs/design.md "Consumers vendor a
+# split dist ref".
 #
 # The script will:
 #   1. git subtree add the toolkit at plugin-dev/ (skipped if present)
@@ -21,7 +27,8 @@
 # Idempotent: re-running with everything already in place is a no-op.
 set -euo pipefail
 
-TOOLKIT_URL="git@github.com:ddaanet/claude-plugin-dev.git"
+# Env-overridable so tests can point it at a local fixture repo.
+TOOLKIT_URL="${TOOLKIT_URL:-git@github.com:ddaanet/claude-plugin-dev.git}"
 TOOLKIT_PREFIX="plugin-dev"
 
 ref="${1:-}"
@@ -50,13 +57,24 @@ fi
 if [ ! -d "$TOOLKIT_PREFIX" ]; then
     if [ -z "$ref" ]; then
         echo "error: $TOOLKIT_PREFIX/ not found and no ref given." >&2
-        echo "usage: bash install.sh vX.Y.Z   (pass a tag to vendor on first install)" >&2
+        echo "usage: bash install.sh dist-vX.Y.Z   (pass a dist tag to vendor on first install)" >&2
         exit 1
     fi
+    # Only a dist tag is vendorable. Every other ref -- source tag, branch,
+    # sha -- resolves to the toolkit's root tree, which is its own working
+    # environment: a `memory` gitlink, .claude/, CLAUDE.md, its own justfile.
+    # Vendoring one copies all of that into this plugin and is invisible until
+    # someone runs `git submodule status`, so it is refused, not warned about.
     case "$ref" in
-      v*) ;;
-      main|master|HEAD)
-          echo "warning: pulling a branch ref ($ref) — prefer a tag (vX.Y.Z) for reproducibility" >&2
+      dist-v*) ;;
+      v*)
+          echo "error: '$ref' is a source tag — vendor the dist tag instead: dist-$ref" >&2
+          exit 1
+          ;;
+      *)
+          echo "error: '$ref' is not a dist tag — vendor dist-vX.Y.Z" >&2
+          echo "       only the dist lineage contains the consumer-facing files." >&2
+          exit 1
           ;;
     esac
     git diff --quiet HEAD || { echo "error: uncommitted changes — commit or stash before vendoring" >&2; exit 1; }
