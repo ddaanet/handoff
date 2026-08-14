@@ -38,6 +38,7 @@ from _watcher_lib import (
     submit_launched,
     submit_prompted,
     submit_titled,
+    wait_for_composer,
     wait_for_consumed,
     wait_for_foreground_change,
     wait_for_idle,
@@ -94,6 +95,14 @@ def _drive_line(pane: str, line: str, verify_delay: float) -> None:
 
     See the module docstring for the dispatch rules per command kind.
     """
+    # A pane driven right after a fresh process exec (restart's continuation)
+    # may have no composer at all yet — wait_for_idle's spinner-absence check
+    # is trivially true during boot, which is not the same as ready.
+    if not wait_for_composer(pane):
+        watcher_fail(
+            f"`{line}` was never typed: no composer appeared before boot timeout"
+        )
+
     # FR-H: every line re-gates. Confirming the previous one can take
     # minutes and the pane is live throughout, so idleness established
     # before it says nothing about now.

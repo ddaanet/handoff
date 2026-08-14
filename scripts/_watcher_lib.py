@@ -194,6 +194,31 @@ def cursor_position(pane: str) -> tuple[int, int]:
         return -1, -1
 
 
+def wait_for_composer(pane: str, timeout: float | None = None) -> bool:
+    """Poll until the composer glyph is on screen at all, up to ``timeout``.
+
+    A freshly exec'd process — the state `restart`'s continuation walker
+    always finds the pane in, since `SessionStart(resume)` fires at the very
+    start of a new process's boot — has no composer for the first several
+    seconds: SessionStart hooks, a --resume transcript replay, an
+    autoMemoryDirectory settings load all run before anything renders one.
+    wait_for_idle only reads the busy spinner's absence, which a boot screen
+    satisfies at once, so without this gate a line got typed into a screen
+    nothing was reading and lost for good — the fixed verify+landing budget
+    elapsed before the composer ever existed to hold it. A no-op mid-session,
+    where the composer the caller is about to type into is already there.
+    """
+    if timeout is None:
+        timeout = _env_float("HANDOFF_WATCHER_BOOT_TIMEOUT", 30.0)
+    poll = _env_float("HANDOFF_WATCHER_POLL", 0.1)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if PROMPT_GLYPH in strip(capture_full(pane)):
+            return True
+        time.sleep(poll)
+    return False
+
+
 def wait_for_idle(pane: str) -> None:
     """Wait until idle is stable for ~3 consecutive polls, up to TIMEOUT.
 

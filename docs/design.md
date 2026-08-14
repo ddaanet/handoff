@@ -466,6 +466,21 @@ confirm path had never once executed in production, because every driven line
 aborted at the composer check before reaching it, and its unit suite was green
 throughout. [The first driven transition to
 land](changelog/2026-08-13-first-driven-transition-lands.md)
+The first end-to-end restart dogfood, 2026-08-15, found the next thing only
+that path could show: `/exit` and the relaunch landed, but the continuation
+line — driven by a second, separate walker that `load-restart.sh` spawns at
+`SessionStart(resume)` — did not. `_drive_line`'s budget (near-instant
+`wait_for_idle`, a 0.5s verify sleep, a 3s landing poll) was sized for driving
+a TUI that is already running, true for `/compact`/`/clear`'s continuations
+since their `SessionStart` fires on a live process, but `restart`'s
+continuation is the one case that budget faces a process that has just exec'd
+and has no composer yet — measured at 3.9s for a bare launch of this plugin's
+own hook chain to render one. `wait_for_composer` polls for the `❯` glyph's
+mere presence, ahead of every other check in `_drive_line`, and is a no-op
+mid-session, where the composer is already there. [The continuation waits for
+the composer to
+exist](changelog/2026-08-15-continuation-waits-for-the-composer-to-exist.md)
+
 `claude --resume …` skips those composer checks entirely: it
 targets a bare shell once `/exit` is confirmed, where neither the `❯`
 composer glyph nor the "No commands match" text exist, and neither is a

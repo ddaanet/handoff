@@ -745,6 +745,55 @@ def test_restart_sequence_exit_then_resume_in_order(
     assert exit_line < resume_line
 
 
+def test_composer_boot_is_waited_for_not_typed_into_a_screen_with_none(
+    tmux_stub: TmuxStub, tmp_path: Path
+) -> None:
+    """A freshly exec'd process has no composer for the first stretch of boot.
+
+    Reproduces the 2026-08-14 driven-restart continuation failure: the walker
+    started against a pane that had just exec'd `claude --resume`, found no
+    busy chrome (there is none during boot) and typed immediately, before a
+    composer existed to receive it. Fixed code waits for the glyph itself,
+    not merely the spinner's absence, before typing.
+    """
+    booting = "╭─ Claude Code ─╮\n│  booting...    │\n╰────────────────╯\n"
+    ready = "──── x ──\n❯ \n"
+    idle = tmux_stub.stubdir / "pane_idle.txt"
+    after_l = tmux_stub.stubdir / "pane_after_l.txt"
+    idle.write_text(booting)
+    after_l.write_text(booting)
+
+    def boot_completes() -> None:
+        time.sleep(0.3)
+        idle.write_text(ready)
+        after_l.unlink()  # falls back to the stub's normal send-keys echo
+
+    threading.Thread(target=boot_completes, daemon=True).start()
+    tr = tmp_path / "t.jsonl"
+    tr.write_text("")
+    submitted = {
+        "type": "user",
+        "message": {"role": "user", "content": "continue with task 3"},
+    }
+    tmux_stub.on_enter(f"printf '{json.dumps(submitted)}\\n' >> '{tr}'")
+
+    start = time.monotonic()
+    result = walk(
+        tmux_stub,
+        "continue with task 3",
+        env={
+            "HANDOFF_TRANSCRIPT": str(tr),
+            "HANDOFF_WATCHER_LANDING_DELAY": "0.1",
+            "HANDOFF_WATCHER_BOOT_TIMEOUT": "2",
+        },
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.returncode == 0
+    assert elapsed >= 0.3
+    assert "-l|continue with task 3|" in tmux_stub.sent_text()
+
+
 def test_sequence_re_gates_on_idle_between_lines(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:

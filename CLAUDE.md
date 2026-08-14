@@ -292,7 +292,12 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   Spawned by `stop-drive.sh` for the lines typed before a transition, and by
   the transition's own `SessionStart` loader for the lines typed after it. One
   argument per line, and the lines are the literal keystrokes — it never learns
-  which command belongs to which kind. Per line: `wait_for_idle`, bail if
+  which command belongs to which kind. Per line: `wait_for_composer` (the
+  glyph's mere presence — a no-op mid-session, load-bearing only for
+  `restart`'s continuation, the one line a freshly-exec'd process's boot can
+  still be rendering when the walker starts; see
+  `docs/changelog/2026-08-15-continuation-waits-for-the-composer-to-exist.md`),
+  then `wait_for_idle`, bail if
   `composer_has_user_text`, `send-keys -l`, then a `VERIFY_DELAY` gap that is
   the recognition read-back for a `/` line and the paste-window settle for
   prose, then `wait_for_landing` before confirming by the command's own
@@ -333,7 +338,11 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   tunables, `snap` (visible-pane capture — never scrollback), `capture_full` +
   `cursor_position` (untruncated frame and cursor, which must index the same
   frame), `wait_for_landing` (poll for delivery — a single read at
-  `VERIFY_DELAY` races a composer that has not repainted), `wait_for_idle`
+  `VERIFY_DELAY` races a composer that has not repainted), `wait_for_composer`
+  (poll for the glyph's mere presence, ahead of every other check — a fresh
+  process's boot shows no busy chrome for `wait_for_idle` to catch, so without
+  this gate a line typed during boot lands in a screen nothing is reading
+  yet), `wait_for_idle`
   (stable-idle poll loop), `pane_foreground` + `wait_for_foreground_change`
   (`#{pane_current_command}`, and the poll that waits for it to stop reading
   as the baseline — two consecutive differing readings, so a teardown
@@ -895,7 +904,7 @@ outright regardless of path.
   `live_pane` runs `claude` as the pane command itself and so has no shell
   for the foreground to revert to, and it triggers the release with a signal
   — the gate polls the reverting, and `submit_exited` owns `/exit` itself.
-  `tests/test_drive_when_idle.py` (25 tests) drives `drive_when_idle.py`
+  `tests/test_drive_when_idle.py` (30 tests) drives `drive_when_idle.py`
   end-to-end via subprocess against the tmux stub (`tests/conftest.py`'s
   `TmuxStub` fixture, replacing the bats `make_stub`/`on_enter` helpers):
   the recognition read-back, the unrecognized-command clear, the
@@ -908,7 +917,11 @@ outright regardless of path.
   `/exit`-then-`claude --resume` sequence running in order. A sixth row
   (2026-08-13) covers the foreground gate: a pane Claude Code never releases
   is never typed into, and the walker fails loudly instead — mutation-checked
-  by deleting the gate, which reds that row alone. Every shell-line row
+  by deleting the gate, which reds that row alone. A seventh row (2026-08-15)
+  covers `wait_for_composer`: a pane with no glyph at all for 0.3s, then one
+  appears — reproduces the driven-restart continuation failure, red against
+  `_drive_line` without the gate (a 0.1s landing window elapses before the
+  composer exists), green with it in front. Every shell-line row
   stages its flip through `TmuxStub.foreground_changes_to` (one more reading
   of the current value, then the new one) rather than a thread, which races
   `main`'s baseline read. Three rows there
