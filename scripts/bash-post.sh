@@ -46,5 +46,15 @@ rm -f "$manifest"
 summary="handoff-checkpoint: staged ${#staged[@]}, deleted ${#deleted[@]}"
 agent_ctx="checkpoint manifest consumed — staged: ${staged[*]:-none}; deleted: ${deleted[*]:-none}."
 
+# Both paths are gitignored, so this add -f is the only staging they ever get —
+# there is no later step at either boundary or under either commit mode. An
+# agent composing an unrelated commit therefore meets them already in the index;
+# without this clause it reads that as a stray add and unstages the artifact the
+# boundary exists to produce. Suppressed when nothing was staged (a rename-only
+# call leaves an empty manifest), where it would describe nothing.
+if [ $(( ${#staged[@]} + ${#deleted[@]} )) -gt 0 ]; then
+    agent_ctx="$agent_ctx Leave them staged; whatever commit lands next carries them."
+fi
+
 jq -nc --arg s "$summary" --arg c "$agent_ctx" \
     '{systemMessage: $s, hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $c}}'

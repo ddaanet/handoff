@@ -265,6 +265,10 @@ handoff_payload() {
     git -C "$repo" status --porcelain .claude/handoff-task.md | grep -q '^D'
     git -C "$repo" status --porcelain .claude/handoff-todo.md | grep -q '^A'
     echo "$output" | jq -e '.systemMessage | test("staged 1, deleted 1")' >/dev/null
+    # Paired with the empty-manifest row below, which must NOT carry this: an
+    # agent meeting these already in the index otherwise reads a stray add.
+    echo "$output" \
+        | jq -e '.hookSpecificOutput.additionalContext | test("Leave them staged")' >/dev/null
 }
 
 # Staging is all this hook does. A sentinel the checkpoint wrote is armed at
@@ -284,6 +288,10 @@ handoff_payload() {
     [ ! -e "$repo/.claude/checkpoint-manifest" ]
     [ -f "$repo/.claude/autodrive" ]
     echo "$output" | jq -e '.systemMessage | test("staged 0, deleted 0")' >/dev/null
+    # The negative half of the pair above: nothing was staged, so a clause
+    # telling the agent to leave it staged would describe nothing.
+    echo "$output" \
+        | jq -e '.hookSpecificOutput.additionalContext | test("Leave them staged") | not' >/dev/null
 }
 
 @test "bash-post: worktree cwd -> resolves the worktree root, not the main tree" {
