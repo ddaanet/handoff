@@ -465,8 +465,10 @@ def test_resume_line_bypasses_composer_checks(
     pending.write_text("")
 
     # The foreground answers as the TUI once — the baseline main samples —
-    # then as the shell, which is what opens the gate.
+    # then as the shell, which is what opens the gate. Enter puts the relaunch
+    # in front, which is how the walker knows the line ran.
     tmux_stub.foreground_changes_to("some-shell")
+    tmux_stub.on_enter(f"echo claude > '{tmux_stub.foreground}'")
 
     def consume_soon() -> None:
         time.sleep(0.2)
@@ -487,6 +489,160 @@ def test_resume_line_bypasses_composer_checks(
     assert "-l|claude --resume sess-42|" in tmux_stub.sent_text()
 
 
+def test_resume_line_dispatches_on_the_command_not_the_literal_prefix(
+    tmux_stub: TmuxStub, tmp_path: Path
+) -> None:
+    """An absolute argv[0] and %q-quoted flags still take the shell path.
+
+    Nothing composes this shape any more — the relaunch is typed as `claude
+    --resume <sid>` and resolved through PATH. It is the shape that broke:
+    while stop-drive.sh replayed the exiting process's argv, argv[0] was the
+    resolved binary, a prefix test on `claude --resume ` missed, and the line
+    fell through to _drive_line, which typed it into a bare shell and then
+    waited for a TUI composer to hold it — so it was never Entered. This row
+    is what keeps the predicate a parse rather than a prefix test, which the
+    other rows would not notice losing.
+    """
+    line = (
+        r"/Users/david/.local/bin/claude "
+        r"--settings \{\"autoMemoryDirectory\":\"/tmp/m\"\} "
+        r"--plugin-dir /Users/david/code/handoff -r --resume sess-42"
+    )
+    for name in ("pane_idle.txt", "pane_after_l.txt", "pane_after_enter.txt"):
+        (tmux_stub.stubdir / name).write_text("some-shell$ \n")
+    pending = tmp_path / "autodrive"
+    pending.write_text("")
+
+    tmux_stub.foreground_changes_to("some-shell")
+    tmux_stub.on_enter(f"echo claude > '{tmux_stub.foreground}'")
+
+    def consume_soon() -> None:
+        time.sleep(0.2)
+        pending.unlink(missing_ok=True)
+
+    threading.Thread(target=consume_soon, daemon=True).start()
+    result = walk(
+        tmux_stub,
+        line,
+        env={
+            "HANDOFF_PENDING_FILE": str(pending),
+            "HANDOFF_WATCHER_FOREGROUND_POLL": "0.01",
+        },
+        consume=2,
+    )
+
+    assert result.returncode == 0
+    assert f"-l|{line}|" in tmux_stub.sent_text()
+
+
+def test_resume_line_presses_enter_once_when_the_line_runs(
+    tmux_stub: TmuxStub, tmp_path: Path
+) -> None:
+    """One Enter, though the resume confirms seconds later.
+
+    The relaunch's own confirmation is the sentinel going, which the resumed
+    session's SessionStart does — after a whole Claude Code boot. Retrying
+    against that signal is guaranteed to press again before it can arrive, and
+    those presses land in a session that is already starting, where an Enter
+    answers whatever dialog is on screen rather than costing an empty prompt
+    line. The foreground leaving the shell says the line ran, and says it at
+    once.
+    """
+    for name in ("pane_idle.txt", "pane_after_l.txt", "pane_after_enter.txt"):
+        (tmux_stub.stubdir / name).write_text("some-shell$ \n")
+    pending = tmp_path / "autodrive"
+    pending.write_text("")
+
+    tmux_stub.foreground_changes_to("some-shell")
+    # The relaunch starts the moment the line runs; the sentinel it will
+    # consume outlives that by the length of a boot.
+    tmux_stub.on_enter(f"echo claude > '{tmux_stub.foreground}'")
+
+    def consume_late() -> None:
+        time.sleep(1.0)
+        pending.unlink(missing_ok=True)
+
+    threading.Thread(target=consume_late, daemon=True).start()
+    result = walk(
+        tmux_stub,
+        "claude --resume sess-42",
+        env={
+            "HANDOFF_PENDING_FILE": str(pending),
+            "HANDOFF_WATCHER_FOREGROUND_POLL": "0.01",
+            "HANDOFF_WATCHER_CONSUME_POLL": "0.05",
+        },
+        consume=3,
+    )
+
+    assert result.returncode == 0
+    assert tmux_stub.sent_text().count("Enter") == 1
+
+
+def test_resume_line_presses_again_while_the_shell_still_holds_the_pane(
+    tmux_stub: TmuxStub, tmp_path: Path
+) -> None:
+    """A line that never runs is pressed again, then failed loudly.
+
+    The shell keeping the foreground is the evidence that the keystroke was not
+    taken — the one condition under which pressing again is safe, and the one
+    under which it is needed.
+    """
+    for name in ("pane_idle.txt", "pane_after_l.txt", "pane_after_enter.txt"):
+        (tmux_stub.stubdir / name).write_text("some-shell$ \n")
+    fail_file = tmp_path / "autodrive.failed"
+
+    tmux_stub.foreground_changes_to("some-shell")
+
+    result = walk(
+        tmux_stub,
+        "claude --resume sess-42",
+        env={
+            "HANDOFF_FAIL_FILE": str(fail_file),
+            "HANDOFF_WATCHER_FOREGROUND_POLL": "0.01",
+            "HANDOFF_WATCHER_EXIT_TIMEOUT": "0.3",
+        },
+    )
+
+    assert result.returncode != 0
+    assert tmux_stub.sent_text().count("Enter") > 1
+    assert "some-shell" in fail_file.read_text()
+    assert "never ran" in fail_file.read_text()
+
+
+def test_tui_line_stops_pressing_enter_after_three(
+    tmux_stub: TmuxStub, tmp_path: Path
+) -> None:
+    """The composer keeps the old rule: a registered Enter must not resend.
+
+    The pane holds a live turn once it takes the first Enter, and pressing again
+    submits a second one. Only the shell-prompt path opted out, so this is the
+    negative that keeps the flag from spreading back.
+    """
+    (tmux_stub.stubdir / "pane_after_l.txt").write_text(
+        "/compact  Compact the conversation\n❯ /compact\n"
+    )
+    pending = tmp_path / "autodrive"
+    pending.write_text("")
+
+    def consume_late() -> None:
+        time.sleep(1.0)
+        pending.unlink(missing_ok=True)
+
+    threading.Thread(target=consume_late, daemon=True).start()
+    result = walk(
+        tmux_stub,
+        "/compact",
+        env={
+            "HANDOFF_PENDING_FILE": str(pending),
+            "HANDOFF_WATCHER_CONSUME_POLL": "0.05",
+        },
+        consume=3,
+    )
+
+    assert result.returncode == 0
+    assert tmux_stub.sent_text().count("Enter") == 3
+
+
 def test_resume_line_settle_is_configurable(
     tmux_stub: TmuxStub, tmp_path: Path
 ) -> None:
@@ -495,6 +651,7 @@ def test_resume_line_settle_is_configurable(
     pending.write_text("")
 
     tmux_stub.foreground_changes_to("some-shell")
+    tmux_stub.on_enter(f"echo claude > '{tmux_stub.foreground}'")
 
     def consume_soon() -> None:
         time.sleep(0.05)
@@ -563,7 +720,10 @@ def test_restart_sequence_exit_then_resume_in_order(
     # the baseline sampled before the first line would already be the shell.
     foreground = tmux_stub.foreground
     tmux_stub.on_enter(
-        f"touch '{exit_file}'; rm -f '{pending}'; echo some-shell > '{foreground}'"
+        f"touch '{exit_file}'; rm -f '{pending}';"
+        f" if grep -q -- '-l|claude --resume' '{tmux_stub.sent}';"
+        f" then echo claude > '{foreground}';"
+        f" else echo some-shell > '{foreground}'; fi"
     )
     result = walk(
         tmux_stub,

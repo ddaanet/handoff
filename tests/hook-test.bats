@@ -540,122 +540,6 @@ compact" ]
     [ "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'sentinel*' | wc -l)" -eq 1 ]
 }
 
-# --- _lib.sh: handoff_resume_command ---
-
-# Round-trip the output back through a shell to check the CONTRACT ("survives
-# being retyped") rather than the exact quoting bash's %q happens to choose.
-resplit() {
-    bash -c 'eval "set -- $1"; printf "%s\n" "$@"' _ "$1"
-}
-
-# A fake process table: one directory per pid holding the two files the walk
-# reads. /proc itself cannot be faked, and the pid SELECTION is the part that
-# was wrong, so the seam has to be a tree — a single cmdline file substitutes
-# for the very expression under test.
-# $1=root $2=pid $3=ppid $4.. = argv
-make_proc_entry() {
-    local root="$1" pid="$2" ppid="$3"
-    shift 3
-    mkdir -p "$root/$pid"
-    printf 'Name:\tx\nPPid:\t%s\n' "$ppid" > "$root/$pid/status"
-    printf '%s\0' "$@" > "$root/$pid/cmdline"
-}
-
-# The tree a Stop hook actually runs in: claude spawns `/bin/sh -c "bash …"`,
-# which spawns the hook script. $PPID stops at the wrapper.
-make_restart_proc_tree() {
-    local root="$1"
-    make_proc_entry "$root" 100 50 claude --plugin-dir /foo
-    # shellcheck disable=SC2016  # literal, unexpanded: Claude Code puts the
-    # variable itself in the wrapper's argv and lets sh expand it, which is
-    # exactly why replaying that argv carried an empty plugin root.
-    make_proc_entry "$root" 101 100 /bin/sh -c 'bash ${CLAUDE_PLUGIN_ROOT}/scripts/stop-drive.sh'
-    make_proc_entry "$root" 102 101 bash /x/scripts/stop-drive.sh
-}
-
-@test "handoff_resume_command (walks past the sh -c hook wrapper to claude)" {
-    root="$BATS_TEST_TMPDIR/proc"
-    make_restart_proc_tree "$root"
-    HANDOFF_TEST_PROC_ROOT="$root" run handoff_resume_command 102 "sess-99"
-    [ "$status" -eq 0 ]
-    got="$(resplit "$output")"
-    [ "$got" = "claude
---plugin-dir
-/foo
---resume
-sess-99" ]
-}
-
-# A value containing a space (a --plugin-dir path, say) must survive as ONE
-# argument once retyped, not split into two.
-@test "handoff_resume_command (an argument containing a space survives whole)" {
-    root="$BATS_TEST_TMPDIR/proc"
-    make_proc_entry "$root" 110 50 claude --plugin-dir "/a path/with space"
-    make_proc_entry "$root" 111 110 bash /x/scripts/stop-drive.sh
-    HANDOFF_TEST_PROC_ROOT="$root" run handoff_resume_command 111 "sess-99"
-    [ "$status" -eq 0 ]
-    got="$(resplit "$output")"
-    [ "$got" = "claude
---plugin-dir
-/a path/with space
---resume
-sess-99" ]
-}
-
-# No claude anywhere up the chain: the bare form still relaunches, losing only
-# the flags. Strictly better than replaying somebody else's argv.
-@test "handoff_resume_command (no claude ancestor: bare resume, still succeeds)" {
-    root="$BATS_TEST_TMPDIR/proc"
-    make_proc_entry "$root" 200 0 /sbin/init
-    make_proc_entry "$root" 201 200 bash /x/scripts/stop-drive.sh
-    HANDOFF_TEST_PROC_ROOT="$root" run handoff_resume_command 201 "sess-99"
-    [ "$status" -eq 0 ]
-    [ "$output" = "claude --resume sess-99" ]
-}
-
-@test "handoff_resume_command (no proc source readable at all: bare resume)" {
-    HANDOFF_TEST_PROC_ROOT="$BATS_TEST_TMPDIR/nope" PATH="" \
-        run handoff_resume_command 999 "sess-99"
-    [ "$status" -eq 0 ]
-    [ "$output" = "claude --resume sess-99" ]
-}
-
-# A cyclic parent chain must end the walk, not spin forever. The bound is the
-# whole guarantee, so this is asserted with a `timeout`: without it the walk
-# never returns and the row would hang the suite rather than fail it.
-@test "handoff_resume_command (a cyclic parent chain terminates rather than hanging)" {
-    root="$BATS_TEST_TMPDIR/proc"
-    make_proc_entry "$root" 301 302 bash /x/loop
-    make_proc_entry "$root" 302 301 bash /x/loop
-    # shellcheck disable=SC2016  # `$1` is the inner shell's, bound below
-    run timeout 10 bash -c '
-        source scripts/_lib.sh
-        HANDOFF_TEST_PROC_ROOT="$1" handoff_resume_command 301 "sess-99"
-    ' _ "$root"
-    [ "$status" -eq 0 ]
-    [ "$output" = "claude --resume sess-99" ]
-}
-
-# The bound also has to be big enough for the real tree. `claude` sits three
-# levels up from a hook script at most, but a user's shell, a multiplexer and
-# a wrapper can sit between claude and the pid the walk starts from.
-@test "handoff_resume_command (finds claude past several intermediate levels)" {
-    root="$BATS_TEST_TMPDIR/proc"
-    make_proc_entry "$root" 400 0 claude --plugin-dir /foo
-    make_proc_entry "$root" 401 400 /bin/sh -c "bash /x/a"
-    make_proc_entry "$root" 402 401 bash /x/a
-    make_proc_entry "$root" 403 402 bash /x/b
-    make_proc_entry "$root" 404 403 bash /x/scripts/stop-drive.sh
-    HANDOFF_TEST_PROC_ROOT="$root" run handoff_resume_command 404 "sess-99"
-    [ "$status" -eq 0 ]
-    got="$(resplit "$output")"
-    [ "$got" = "claude
---plugin-dir
-/foo
---resume
-sess-99" ]
-}
-
 # --- write-stage ---
 # Stages handoff-task.md with `git add -f` and does NOT create handoff.md.
 
@@ -1107,32 +991,19 @@ run_stop_drive() {
     echo "$output" | jq -e '.systemMessage | test("/exit")' >/dev/null
 }
 
-# The checkpoint composed only the session id (it cannot see this process's
-# own argv); stop-drive.sh fills in the rest right before the line would be
-# typed or pasted. The not-in-tmux path prints the paste text synchronously,
-# so it is the direct seam to assert the composed line against — no detached
-# process or timing involved.
-#
-# The fake proc tree is built INSIDE the invocation, because it has to be keyed
-# on stop-drive.sh's real $PPID — which is this `bash -c` shell's own $$, the
-# pipeline keeping it alive. That is what makes this the one test covering the
-# `$PPID` default rather than an explicit start pid.
-@test "stop-drive (kind restart, not in tmux: pastes the full resume command)" {
+# The relaunch line reaches the pane exactly as the checkpoint composed it.
+# stop-drive.sh used to rewrite it into this process's own argv, which re-added
+# the flags the launcher shims had injected — once more per restart, growing
+# without bound. The name resolves through PATH instead, so the shims supply
+# them. The not-in-tmux path prints the paste text synchronously, which makes
+# it the direct seam to assert against: no detached process, no timing.
+@test "stop-drive (kind restart, not in tmux: pastes the line as composed)" {
     seed_drive "$tmp" "restart" "/exit" "claude --resume sess-hook-test"
-    # shellcheck disable=SC2016  # `$$` and `$root` are deliberately the inner
-    # shell's own, since only it knows the pid stop-drive.sh will see as $PPID.
-    run_stop_drive "$tmp" \
-        "HANDOFF_TEST_PROC_ROOT=$BATS_TEST_TMPDIR/proc env -u TMUX -u TMUX_PANE" \
-        'root="'"$BATS_TEST_TMPDIR"'/proc"
-         mkdir -p "$root/$$" "$root/900"
-         printf "Name:\tx\nPPid:\t900\n" > "$root/$$/status"
-         printf "%s\0" bash /x/scripts/stop-drive.sh > "$root/$$/cmdline"
-         printf "Name:\tx\nPPid:\t1\n" > "$root/900/status"
-         printf "%s\0" claude --plugin-dir /foo > "$root/900/cmdline"'
+    run_stop_drive "$tmp" "env -u TMUX -u TMUX_PANE"
     [ "$status" -eq 0 ]
     ctx="$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')"
     echo "$ctx" | grep -q '^/exit$'
-    echo "$ctx" | grep -q -- '--plugin-dir /foo --resume sess-hook-test$'
+    echo "$ctx" | grep -qx -- 'claude --resume sess-hook-test'
 }
 
 @test "stop-drive (kind restart: clears a stale exited marker before proceeding)" {

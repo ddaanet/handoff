@@ -18,6 +18,11 @@ Every part of that line is a consequence of reading the wrong process.
 
 ## D1 — the wrong process's argv was replayed
 
+> **Superseded 2026-08-14** (see [The relaunch stops replaying
+> argv](2026-08-14-the-relaunch-stops-replaying-argv.md)). Argv is no
+> longer replayed at all, so the parent-chain walk this section adds is
+> removed with it. D2, the foreground gate, stands.
+
 `handoff_resume_command` read `local pid="${1:-$PPID}"`. Claude Code runs a
 hook as `claude` → `/bin/sh -c "bash …/stop-drive.sh"` → `bash
 stop-drive.sh`, so `$PPID` at `Stop` time is the `sh -c` wrapper. Its argv is

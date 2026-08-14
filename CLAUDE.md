@@ -247,28 +247,20 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   a `SessionStart`; `rename` is not one, so `stop-drive.sh` deletes its sentinel
   outright rather than leaving a `pending` nobody would clear (`compact`,
   `clear` and `restart` all are).
-  `handoff_resume_command()` composes the actual `claude --resume <sid>
-  <argv…>` line `stop-drive.sh` types or pastes for a `restart`: the
-  checkpoint can only supply the session id, not this process's own launch
-  flags, so this reads them fresh from `/proc/<pid>/cmdline` (Linux; NUL-
-  separated, so a value with an embedded space survives as one argument) or
-  falls back to `ps -o command=` (macOS, no `/proc`; a known, accepted gap for
-  that same case) and re-quotes each for replay. Which pid comes from
-  `handoff_claude_pid()`, a bounded parent-chain walk (via
-  `handoff_proc_argv0()`/`handoff_proc_ppid()`, both rc 0 so a plain
-  substitution under `set -e` cannot take a hook down) matching argv[0]'s
-  basename against `claude` — the argument is where the walk *starts*,
-  defaulting to `$PPID`, which is the `/bin/sh -c` wrapper Claude Code spawns
-  and whose argv is the hook command line, not a launch line. Whether that
-  wrapper survives is the shell's exec-optimisation choice, so the depth is
-  not fixed; the `depth < 10` bound is the whole termination guarantee, since
-  a chain read from a table nothing here controls can cycle at any length. A
-  walk that finds nothing falls back to a bare `claude --resume <sid>`.
-  `HANDOFF_TEST_PROC_ROOT` substitutes a fake process *tree* (one directory
-  per pid holding `cmdline` and `status`) for `/proc` in tests, since `/proc`
-  itself cannot be faked — a *tree* because the retired single-file seam
-  substituted for the very expression that was wrong, which is how the
-  wrong-pid defect stayed green.
+  The relaunch line is typed exactly as the checkpoint composed it —
+  `claude --resume <sid>`, the bare name, resolved through PATH by the shell
+  so the launcher shims the original invocation went through run again and
+  supply their own flags (`--plugin-dir <root>`, gitlore's
+  `--settings '{"autoMemoryDirectory":…}'`). Nothing replays this process's
+  argv: it already carries what those shims injected, so replaying it re-added
+  each flag once per restart, without bound. Re-entering the launcher is also
+  the only thing that can restore what is not on any command line — gitlore's
+  shim exports `GITLORE_LAUNCHED=1`, which its own anti-double-inject guard
+  reads. The cost is a flag typed by hand on an install with no shim, which is
+  lost; the `/proc` parent-chain walk that used to preserve it
+  (`handoff_resume_command`, `handoff_claude_pid`, the fake-process-tree
+  fixture) is gone with it. See
+  `docs/changelog/2026-08-14-the-relaunch-stops-replaying-argv.md`.
   `handoff_drive_arm()` rewrites line 1 into a new state, preserving every line
   below it — so it never has to know the kind's shape, which is what lets one
   helper serve `stop-drive.sh` and, in the next pass, `handoff-approved`. The
@@ -309,9 +301,14 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   wrong title and nothing more. The re-gate at the top of each iteration is
   FR-H: confirming a line can take `CONSUME_TIMEOUT` (300s) and the pane is
   live throughout.
-  A `claude --resume …` line (`restart`'s second command) is dispatched to
+  A relaunch line (`restart`'s second command) is dispatched to
   `_drive_shell_line` instead, bypassing `wait_for_idle` and the composer
-  checks entirely: it targets a bare shell once `/exit` is confirmed, where neither
+  checks entirely. `_is_resume_line` recognizes it — `shlex.split`, then
+  argv[0]'s basename against `claude` with `--resume` among the arguments,
+  never a prefix test on the composed `claude --resume <sid>`, which is not
+  the shape `stop-drive.sh` rewrites it into: the replayed argv[0] is the
+  resolved binary, so the real line starts with `/` and read as a slash
+  command until 2026-08-14. It targets a bare shell once `/exit` is confirmed, where neither
   exists nor would reliably signal readiness across every user's shell
   prompt. What stands in is `wait_for_foreground_change` against a baseline
   `main` samples before typing anything — `/exit` confirming means
@@ -346,6 +343,14 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   retries at `VERIFY_DELAY` (the first Enter can be absorbed into the paste
   window as a line break), then a long poll without resending, since a
   registered Enter can take far longer than `VERIFY_DELAY` to reach the signal.
+  The relaunch line does not use it: `submit_launched` + `wait_for_consumed`
+  split delivery from confirmation, which only a shell line can. Enter repeats
+  while `pane_foreground` still reads as the shell — the evidence the
+  keystroke was not taken — and stops the moment anything else is in front, so
+  the happy path presses once; the sentinel is then waited for without
+  touching the pane, because the resumed session needs a whole boot to consume
+  it and an Enter arriving meanwhile answers whatever dialog it is showing. A
+  `/compact` row pins the composer's three-then-silence rule beside it.
   `submit_consumed` waits for `$HANDOFF_PENDING_FILE` (exported by the spawning
   hook) to disappear, which the confirming `SessionStart` is what does —
   confirming the transition rather than the keystroke. `is_busy` was the
@@ -401,11 +406,9 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   file is absent — `Stop` fires every turn. `Stop` does not fire on Esc, so an
   interrupted turn cannot arm a transition.
   For kind `restart`, before either the tmux check or the pasteable-form
-  fallback: clears a stale `.claude/autodrive.exited` (an earlier attempt's
-  leftover would false-positive `submit_exited`) and rewrites the
-  checkpoint-composed `claude --resume <sid>` before-line to the full launch
-  command via `handoff_resume_command` — the only place with access to the
-  exiting process's own argv.
+  fallback, it clears a stale `.claude/autodrive.exited` — an earlier
+  attempt's leftover would false-positive `submit_exited`. It rewrites no
+  line: the checkpoint-composed `claude --resume <sid>` is what gets typed.
 - `scripts/load-compact.sh` — `SessionStart(compact)` entry point: consumes
   `.claude/autodrive` — whose disappearance is itself the confirmation the
   walker was waiting on for the `/compact` line it typed — injects the
@@ -856,17 +859,10 @@ outright regardless of path.
   rather than on an assertion, which proves nothing.
   The `restart` kind adds its own rows to `tests/hook-test.bats`: the shape
   matrix (`clear`'s shape, `/exit`/`claude --resume` in the two command
-  slots), `handoff_resume_command` (argv replay with `--resume` appended, an
-  embedded-space argument surviving whole, the walk reaching past the
-  `/bin/sh -c` hook wrapper and past several intermediate levels, the
-  no-claude-ancestor and no-source-readable fallbacks, and a cyclic chain
-  terminating — that last one asserted under a `timeout`, since without the
-  bound it hangs rather than fails; all against a fake process tree at
-  `HANDOFF_TEST_PROC_ROOT`, `/proc` itself not being fakeable), `stop-drive.sh`'s argv composition and
-  stale-exited-marker clearing (asserted through the not-in-tmux paste path,
-  a synchronous seam, rather than by waiting on the detached walker — and the
-  one row covering the `$PPID` default, so its fake tree is built inside the
-  invoking shell, keyed on that shell's own `$$`), the new
+  slots), `stop-drive.sh`'s stale-exited-marker clearing and its typing the
+  relaunch line exactly as composed (both asserted through the not-in-tmux
+  paste path, a synchronous seam, rather than by waiting on the detached
+  walker), the new
   `session-end.sh` hook (silent absent a pending `restart`, writes the marker
   when one is pending, worktree-scoped), and the new `load-restart.sh` hook
   mirrored against `load-compact.sh`'s own matrix but with one added negative

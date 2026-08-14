@@ -290,20 +290,28 @@ optional after-line — but crosses a boundary neither other kind does: its
 second before-line is typed into a bare shell, not the Claude Code TUI, once
 `/exit` has actually torn the process down. `checkpoint.py` composes only
 `claude --resume <sid>` (the session id from `CLAUDE_CODE_SESSION_ID`; it has
-no view of the process's own argv), and `stop-drive.sh` fills in the rest —
-argv[0] plus every launch flag, read fresh from the exiting process's own
-`/proc/<pid>/cmdline` (macOS: `ps`, a known, accepted gap for a value
-containing a space) and re-quoted for replay — right before the walker would
-type or paste it, since that is the one place with access to that argv.
+no view of the process's own argv), and that is the whole line: it is typed
+exactly as composed, and nothing fills in flags.
 
-Finding that process is a bounded walk up the parent chain, matching
-argv[0]'s basename against `claude`. The hook runs as `claude` →
-`/bin/sh -c "bash …"` → the script, and whether that wrapper survives is the
-shell's exec-optimisation choice, so its distance from the hook is not fixed.
-A walk that finds nothing falls back to a bare `claude --resume <sid>`,
-relaunching without the flags rather than replaying an argv that is not a
-launch line.
-[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+The bare name is what makes that sufficient. The shell resolves it through
+PATH, so every launcher shim the original invocation went through runs again
+and contributes what it contributes — here, one prepending `--plugin-dir
+<repo root>` and gitlore's prepending `--settings
+'{"autoMemoryDirectory":…}'`. Re-entering them is also the only way to
+restore what is not on a command line at all: gitlore's shim `export`s
+`GITLORE_LAUNCHED=1`, which its own anti-double-inject guard reads. A shim
+`exec`s the real binary, so it occupies no process of its own and cannot be
+found by inspecting the tree — running it again is the only handle on it.
+
+Replaying the exiting process's argv is what this replaced, and the reason is
+that the two compose badly: that argv already contains what the shims
+injected, so replaying it hands them a line they then inject into again —
+one more copy of every flag per restart, growing without bound. Dropping the
+replay costs a flag typed by hand on an install with no shim to resupply it,
+which is now silently lost, and takes with it the `/proc` parent-chain walk
+that existed only to read those flags.
+[The relaunch stops replaying argv](changelog/2026-08-14-the-relaunch-stops-replaying-argv.md)
+
 
 A
 stale `.claude/autodrive.exited` left by an earlier, only-partly-successful
@@ -343,8 +351,10 @@ lets `/rename` appear in two kinds with two different fates, and carries the
 recognition check for free, since any line beginning `/` takes the
 type-read-back-Enter path. Four primitives: a `custom-title` transcript
 entry for `/rename`, the sentinel disappearing for `/compact`, `/clear` and
-`claude --resume …` (`submit_consumed`, unchanged across all three — a
-resumed session's `SessionStart` is what does it either way), a genuine
+`claude --resume …` (`submit_consumed` for all three — a
+resumed session's `SessionStart` is what does it either way, though the
+relaunch keeps pressing Enter while it waits and the two TUI lines do not:
+see below), a genuine
 user-prompt transcript entry for prose, and `.claude/autodrive.exited`
 appearing for `/exit` — the one primitive with the opposite polarity, since
 `SessionEnd` can only ever create that marker, never remove one that
@@ -366,6 +376,23 @@ predicate comes to be tested against its own premise, which is what let
 `is_typing` sit inverted against a U+00A0 composer gap while its suite stayed
 green. [Composer predicates match the real
 pane](changelog/2026-08-13-predicates-match-the-real-pane.md)
+
+Every TUI submit sends Enter, retries three times fast, then waits without
+pressing again — a registered Enter can take far longer than `VERIFY_DELAY`
+to reach its signal, and a composer that already took the first would submit
+the turn twice. Delivery and confirmation are one question there: the only
+evidence the keystroke arrived is the thing it caused.
+
+The relaunch line separates them, which is what a shell prompt allows. The
+pane's foreground leaving the shell says the line ran, and says it
+immediately, so Enter repeats only while the shell is still in front and the
+happy path presses once. Confirmation — the sentinel going, which the resumed
+session's `SessionStart` does — is then waited for without touching the pane.
+Retrying against that signal instead is guaranteed to press again before it
+can arrive, since a whole Claude Code boot sits in between, and those presses
+land in a starting session where an Enter answers whatever dialog is on
+screen rather than costing an empty prompt line.
+[The relaunch presses Enter once](changelog/2026-08-14-relaunch-presses-once.md)
 Neither suite reaches the whole path: confirming a `/compact` needs a real
 compaction, so the submit primitives are proven only by driving a transition
 for real against the change that touched them. That dogfood is part of
@@ -386,6 +413,17 @@ before the sequence began. `HANDOFF_WATCHER_SHELL_SETTLE` survives that gate
 as a bounded residual: the shell still redraws its prompt once it has the
 foreground back, and that part is not separately observable.
 [Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+
+Which line that is, the walker decides from the line itself — it is handed
+literal keystrokes and knows no kinds. It parses the line as a shell word list
+and matches argv[0]'s basename against `claude`, with `--resume` among the
+arguments. A parse rather than a prefix test on the one spelling that reaches
+it today: while `stop-drive.sh` rewrote the slot into the exiting process's
+argv, argv[0] was the resolved binary, so the line began with `/` and read as
+a slash command — the prefix test recognized only the shape nothing typed. The
+`--resume` conjunct keeps a continuation prompt that opens with the word
+`claude` as prose.
+[Dispatch on the command, not the prefix](changelog/2026-08-14-resume-line-dispatch.md)
 
 A detached walker's exit status is read by nothing, so non-delivery is
 written to `.claude/autodrive.failed` and reported by
@@ -763,14 +801,15 @@ imperative on the next action, with the reason stated inline and a matching
 [Deciding makes zero tool calls, stated
 once](changelog/2026-08-11-decide-with-zero-tool-calls.md)
 
-**The `claude` process is found, never assumed.** Both halves of a driven
-restart need it — the argv to replay, and the moment it has let go of the
-terminal. `$PPID` inside a hook is the `/bin/sh -c` wrapper Claude Code
-spawns, whose argv is the hook command line, so replaying it relaunched the
-hook with `--resume` appended and carried an unexpanded
-`${CLAUDE_PLUGIN_ROOT}` that a fresh login shell resolved to nothing. One
-bounded parent-chain walk answers both questions.
-[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+**Nothing about the exiting process is read.** A driven restart once
+identified it by a bounded parent-chain walk, to replay its argv — `$PPID`
+inside a hook is the `/bin/sh -c` wrapper Claude Code spawns, whose argv is
+the hook command line, so the naive reading relaunched the hook itself. The
+walk fixed that and the replay then compounded the launcher's flags one copy
+per restart, so both are gone: the line is composed from the session id alone,
+and the one thing still needed from that process — the moment it lets go of
+the terminal — is read from the pane, not from the process table.
+[The relaunch stops replaying argv](changelog/2026-08-14-the-relaunch-stops-replaying-argv.md)
 
 ## Rejected alternatives
 

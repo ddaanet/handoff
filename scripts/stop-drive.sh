@@ -56,16 +56,15 @@ fi
 before=( ${DRIVE_BEFORE[@]+"${DRIVE_BEFORE[@]}"} )
 after=( ${DRIVE_AFTER[@]+"${DRIVE_AFTER[@]}"} )
 
-# The checkpoint composed `claude --resume <sid>` from the session id alone —
-# it has no view of this process's own argv. Fill in the rest here, the one
-# place with access to the exiting process's own command line, and clear any
-# exited-marker a previous, only-partly-successful restart left behind: a
-# stale copy would let submit_exited report success without /exit having run
-# this time.
+# The checkpoint's `claude --resume <sid>` is typed as composed: the name is
+# resolved through PATH by the shell, so the launcher shims the original
+# invocation went through supply their own flags again — replaying this
+# process's argv instead re-added flags they had already injected, once per
+# restart, without bound. Clear any exited-marker a previous, only-partly-
+# successful restart left behind: a stale copy would let submit_exited report
+# success without /exit having run this time.
 if [[ "$DRIVE_KIND" == "restart" ]]; then
     rm -f "$cwd/$HANDOFF_REL_DRIVE_EXITED"
-    sid="${before[1]#claude --resume }"
-    before[1]="$(handoff_resume_command "" "$sid")"
 fi
 
 # FR-G: an empty sequence arms nothing and spawns nothing. The pending state

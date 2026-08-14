@@ -256,7 +256,9 @@ def pane_foreground(pane: str) -> str:
 def _submit_until(pane: str, check: Callable[[], bool]) -> bool:
     """Enter, then wait for ``check()`` to pass.
 
-    Retry 3x, then poll long.
+    Retry 3x, then poll long without pressing again: a registered Enter can take
+    far longer than VERIFY_DELAY to reach the signal, and a composer that
+    already took the first one would submit the turn twice.
     """
     verify_delay = _env_float("HANDOFF_WATCHER_VERIFY_DELAY", 0.5)
     consume_timeout = _env_float("HANDOFF_WATCHER_CONSUME_TIMEOUT", 300)
@@ -283,6 +285,49 @@ def submit_consumed(pane: str) -> bool:
         subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"], check=False)
         return True
     return _submit_until(pane, lambda: not Path(pending).exists())
+
+
+def submit_launched(pane: str, shell: str) -> bool:
+    """Confirm a shell line ran: the pane's foreground leaving ``shell``.
+
+    The relaunch's own confirmation — HANDOFF_PENDING_FILE going, which the
+    resumed session's SessionStart does — cannot arrive for seconds, because a
+    whole Claude Code boot sits in between. Retrying Enter against it presses
+    blind into a session that is already starting, where a stray Enter is not
+    the empty prompt line it would be at a shell: it answers whatever dialog
+    the new session happens to be showing.
+
+    The foreground command leaving the shell says the line ran, and says it at
+    once. So Enter repeats only while the shell is still in front — evidence
+    the keystroke has not been taken — and stops the moment something else is.
+    """
+    verify_delay = _env_float("HANDOFF_WATCHER_VERIFY_DELAY", 0.5)
+    deadline = time.monotonic() + _env_float("HANDOFF_WATCHER_EXIT_TIMEOUT", 30.0)
+    while time.monotonic() < deadline:
+        subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"], check=False)
+        time.sleep(verify_delay)
+        if pane_foreground(pane) != shell:
+            return True
+    return False
+
+
+def wait_for_consumed() -> bool:
+    """Wait for HANDOFF_PENDING_FILE to go, pressing nothing.
+
+    The confirmation half of a line whose delivery is already established — see
+    submit_launched. Unset tolerates the same way submit_consumed does: an
+    unconfirmable submit is not a failed one.
+    """
+    pending = os.environ.get("HANDOFF_PENDING_FILE", "")
+    if not pending:
+        return True
+    deadline = time.monotonic() + _env_float("HANDOFF_WATCHER_CONSUME_TIMEOUT", 300)
+    poll = _env_float("HANDOFF_WATCHER_CONSUME_POLL", 1)
+    while time.monotonic() < deadline:
+        if not Path(pending).exists():
+            return True
+        time.sleep(poll)
+    return False
 
 
 def _read_transcript_entries(transcript: str) -> list[JSONDict]:

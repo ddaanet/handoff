@@ -19,9 +19,11 @@ Port of drive-when-idle.sh — see docs/changelog/2026-08-10-python-split.md.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from _watcher_lib import (
     _env_float,
@@ -33,8 +35,10 @@ from _watcher_lib import (
     snap,
     submit_consumed,
     submit_exited,
+    submit_launched,
     submit_prompted,
     submit_titled,
+    wait_for_consumed,
     wait_for_foreground_change,
     wait_for_idle,
     wait_for_landing,
@@ -54,9 +58,13 @@ def _drive_shell_line(pane: str, line: str, baseline: str, settle: float) -> Non
     match" text — none of which exists once the process has exited to a shell.
     So this line skips them and gates on the pane's foreground command instead:
     /exit confirming means SessionEnd fired, not that the terminal is accepting
-    input again. Then the same Enter-retry-then-poll _submit_until already uses
-    for the other primitives (via submit_consumed, unchanged — the resumed
-    session's SessionStart is still what confirms it).
+    input again.
+
+    Delivery and confirmation are then separate questions, which they are not
+    for a TUI line. submit_launched presses Enter only while the shell is still
+    the foreground, so the happy path presses once; wait_for_consumed then
+    watches for the resumed session's SessionStart without touching the pane,
+    since by then the keystrokes would land in a booting Claude Code.
 
     The settle after the gate is a bounded residual, not the wait itself — the
     shell still redraws its prompt after it regains the foreground, and that
@@ -70,11 +78,15 @@ def _drive_shell_line(pane: str, line: str, baseline: str, settle: float) -> Non
             f"the terminal"
         )
     time.sleep(settle)
+    shell = pane_foreground(pane)
     _send_literal(pane, line)
-    if not submit_consumed(pane):
+    if not submit_launched(pane, shell):
         watcher_fail(
-            f"`{line}` was typed and Entered, but no SessionStart(resume) followed"
+            f"`{line}` was typed, but `{shell}` still held the pane after "
+            f"{timeout}s of Enter — the line never ran"
         )
+    if not wait_for_consumed():
+        watcher_fail(f"`{line}` ran, but no SessionStart(resume) followed")
 
 
 def _drive_line(pane: str, line: str, verify_delay: float) -> None:
@@ -168,6 +180,29 @@ def _confirm_line(pane: str, line: str) -> None:
         )
 
 
+def _is_resume_line(line: str) -> bool:
+    """Report whether this line relaunches Claude Code in a bare shell.
+
+    Content, not position: the walker is handed literal keystrokes and does
+    not know which kind composed them, the same way it dispatches every other
+    line on the command itself.
+
+    Parsed rather than prefix-matched. The line reaching here is `claude
+    --resume <sid>` today, but a prefix test on that exact spelling is what
+    broke when stop-drive.sh briefly rewrote the slot into the exiting
+    process's replayed argv: argv[0] became the resolved binary, so the line
+    started with `/` and read as a slash command. shlex, not a regex, because
+    any quoting here is the shell's own. `--resume` must be among the
+    arguments: a continuation prompt is prose, and prose that opens with the
+    word `claude` must stay prose.
+    """
+    try:
+        parts = shlex.split(line)
+    except ValueError:
+        return False
+    return bool(parts) and Path(parts[0]).name == "claude" and "--resume" in parts[1:]
+
+
 def main(argv: list[str]) -> int:
     """Drive pane argv[1] through the lines in argv[2:], one at a time."""
     if len(argv) < 2:
@@ -182,7 +217,7 @@ def main(argv: list[str]) -> int:
     baseline = pane_foreground(pane)
 
     for line in lines:
-        if line.startswith("claude --resume "):
+        if _is_resume_line(line):
             _drive_shell_line(pane, line, baseline, shell_settle)
         else:
             _drive_line(pane, line, verify_delay)
