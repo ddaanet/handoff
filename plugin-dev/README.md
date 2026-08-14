@@ -33,26 +33,33 @@ on contributor-side dotfiles).
 
 ## Versioning
 
-Releases are tagged `vX.Y.Z`. **Always pin to a tag** when adding or
-updating the toolkit in a consumer plugin. Tracking `main` defeats
-reproducibility — a consumer plugin's old git tags should still resolve
-to the exact toolkit content that was vendored at the time.
+Each release cuts **two** tags. `vX.Y.Z` is the source tag; `dist-vX.Y.Z`
+is what consumers vendor — a `git subtree split --prefix=toolkit` of the
+same commit, so its root tree is only the consumer-facing files. Vendoring
+a source tag would copy this repo's whole working environment (its `memory`
+submodule, `.claude/`, `CLAUDE.md`, its own justfile) into the plugin, so
+both `install.sh` and `update-plugin-dev` refuse a `vX.Y.Z` ref and name
+the `dist-` one instead.
+
+**Always pin to a tag.** Tracking `main` defeats reproducibility — a
+consumer plugin's old git tags should still resolve to the exact toolkit
+content that was vendored at the time.
 
 ## Installing in a plugin
 
-Clone the toolkit at a tag, then run its `install.sh` from the plugin's
-root directory:
+Clone the toolkit at its **source** tag to get the script, then run
+`install.sh` from the plugin's root directory, passing the **dist** tag:
 
 ```sh
-git clone --depth 1 -b v0.2.0 \
+git clone --depth 1 -b v0.5.5 \
     git@github.com:ddaanet/claude-plugin-dev.git /tmp/cpd
 cd /path/to/your/plugin
-bash /tmp/cpd/install.sh v0.2.0
+bash /tmp/cpd/toolkit/install.sh dist-v0.5.5
 ```
 
 `install.sh` does three things:
 
-1. `git subtree add --prefix=plugin-dev … v0.2.0 --squash` (vendors the toolkit).
+1. `git subtree add --prefix=plugin-dev … dist-v0.5.5 --squash` (vendors the toolkit).
 2. Adds `import 'plugin-dev/release.just'` to the plugin's `justfile`
    (creating one if absent).
 3. Wires the version-guard hook into `.claude/settings.json`.
@@ -101,12 +108,18 @@ git commit -m "add claude-plugin-dev toolkit"
 ## Updating in a plugin
 
 ```sh
-just update-plugin-dev v0.2.0
+just update-plugin-dev dist-v0.5.5
 ```
 
 This wraps `git subtree pull` with the prefix and URL baked in. The
-recipe rejects a dirty tree and warns if you pass a branch ref instead
-of a tag.
+recipe rejects a dirty tree, refuses a source (`vX.Y.Z`) ref naming the
+`dist-` one to use instead, and warns if you pass a branch ref.
+
+A plugin vendored before dist refs existed carries the toolkit's leaked
+working environment under `plugin-dev/` — most visibly a `plugin-dev/memory`
+gitlink that makes a bare `git submodule status` fail for the whole repo.
+No manual cleanup is needed: the first pull of a `dist-` tag deletes all
+of it in the same commit.
 
 ## Conventions
 
