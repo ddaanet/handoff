@@ -652,7 +652,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `docs/changelog/2026-07-27-one-channel-one-writer.md`.
 - `plugin-dev/` — vendored
   [claude-plugin-dev](https://github.com/ddaanet/claude-plugin-dev)
-  toolkit (currently `v0.5.0`). Provides:
+  toolkit, pinned to the tag recorded in `plugin-dev/VERSION`. Provides:
   - `release.just` — shared `release` recipe imported by the top-level
     justfile, a thin front for `release.sh`. Owns version bumps, tagging,
     push, GH release, and the marketplace bump in `$MARKETPLACE_DIR`. It

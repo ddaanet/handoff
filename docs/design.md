@@ -9,7 +9,7 @@ file per change, dated, indexed by [`changelog.md`](changelog.md). Those files a
 edited after the fact — they say what was true and what was believed when
 they were written, which is what makes them worth keeping.
 
-Last updated: 2026-08-11.
+Last updated: 2026-08-14.
 
 ## Problem
 
@@ -115,9 +115,75 @@ Those categories constitute the artifact this plugin produces. Everything
 else on the SOTA list is already handled, or reconstructible from code /
 git / memory.
 
+## Requirements
+
+These labels are cited throughout `CLAUDE.md`, the skill bodies and the
+scripts' own comments, so they are fixed points: the numbering is never
+compacted, and a requirement that dies leaves its number retired rather than
+reused. They arrived from two plans with independent numbering, which is why
+the driven-transition pair is lettered — `FR-G` and `FR-H` would have
+collided as numbers.
+
+**The write path.**
+
+- **FR1** — One entry point, `handoff-checkpoint`, serves every skill that
+  writes. Which boundary is in play is a payload field, not a separate
+  binary.
+- **FR2** — The payload is JSON on stdin, validated against a schema. A
+  violation exits non-zero and names the offending field and what was wrong.
+- **FR3** — `handoff-task.md` is written only by the checkpoint. An agent
+  `Write`/`Edit` to that path is denied. `.claude/autodrive` is held to the
+  same rule.
+- **FR4** — `handoff-todo.md` is a scratch list by design. The agent edits it
+  freely all session; the checkpoint is only the wrap-up path.
+- **FR5** — The todo payload supports incremental update: an Edit form
+  (`old_string`/`new_string`) as well as a Write form (`content`). The task
+  file is authored whole, so it takes the Write form only.
+- **FR6** — A file whose body is empty is removed, and the removal staged.
+  File present ⟹ content pending.
+- **FR7** — Everything the checkpoint writes is staged with `git add -f`,
+  deletions included. The checkpoint cannot do it itself (NFR1), so it
+  records the paths in `.claude/checkpoint-manifest` and `PostToolUse(Bash)`
+  stages them.
+- **FR8** — The checkpoint composes `.claude/autodrive` from the transition
+  fields — every line that gets typed, including the `/rename` that sets the
+  session title.
+- **FR9** — Directive output — the memory gate and the SDD ledger nudge — is
+  composed in a fixed order, memory first.
+
+**The driven transition.**
+
+- **FR-G** — The prepare-only compact path re-injects the frame. Nothing is
+  typed, but the transition is *expected*, and that expectation is what
+  `SessionStart(compact)` gates re-injection on — otherwise a hand-typed
+  `/compact` would re-inject nothing.
+- **FR-H** — A multi-line sequence re-gates on idle between lines.
+  Confirming one can take `CONSUME_TIMEOUT` (300s) and the pane is live
+  throughout, so nothing is typed without a fresh idle wait and a fresh
+  composer check.
+
+**Constraints.**
+
+- **NFR1** — No git or tmux work runs in the agent's sandboxed Bash. A
+  sandboxed `git add` can stage successfully while stranding
+  `.git/index.lock`, which fails the *next* command — in the routine wrap-up,
+  the user's `/commit` — naming a git process that does not exist; and tmux
+  is unreachable there at all. This is a constraint, not a preference.
+- **NFR2** — The `PostToolUse(Bash)` and `PreToolUse(Bash)` hooks fire on
+  every Bash call in every session with the plugin installed. Their negative
+  case is one jq parse plus, respectively, one `stat` and one substring test.
+  Neither resolves the root unless it has already matched.
+- **NFR3** — Skill bodies get shorter, not longer. The checkpoint exists to
+  move mechanism out of prose.
+
+**FR12 is gitlore's, not this plugin's** — the registration of the
+`gitlore-memory` submodule in `.gitmodules` as the activation gate. It is
+cited here because the memory directive keys on it; the rest of gitlore's
+numbering has no meaning in this repo.
+
 ## Architecture
 
-Four skills, one write path, eleven hooks, and two files that cross a
+Five skills, one write path, eleven hooks, and two files that cross a
 boundary.
 
 ### The seam
@@ -179,7 +245,9 @@ sandboxed Bash, where `git add` can leave `.git/index.lock` behind and fail
 the *next* command (which in the routine wrap-up is the user's `/commit`),
 and where tmux is unreachable. `PostToolUse(Bash)` (`bash-post.sh`) consumes
 the manifest instead — `git add -f` for every listed path, deletions
-included, plus the rename watcher spawn.
+included. Staging is all it does: a sentinel the checkpoint wrote is armed at
+`Stop` like any other, so spawning the walker here would type into a live
+turn, which is the one thing the `Stop` gate exists to prevent.
 
 `file present ⟹ content pending` is an invariant two writers enforce
 (`checkpoint.py` and `write-stage.sh`, the latter through a
@@ -193,7 +261,7 @@ a hot path, so the interpreter-startup tax lands where it is cheapest to pay.
 The six event hooks that fire on every tool call stay bash. See
 [`docs/changelog/2026-08-10-python-split.md`](changelog/2026-08-10-python-split.md).
 
-### The four skills
+### The skills
 
 One skill per boundary, plus the rename and the restart:
 
@@ -270,8 +338,6 @@ larger half of both descriptions, since that is the reading a bare
   `continue`, since a restart can still be handed a continuation prompt for
   the far side.
 
-
-
 ### Driving the TUI
 
 A **driven transition** is a sequence of lines to type, plus the
@@ -312,11 +378,10 @@ which is now silently lost, and takes with it the `/proc` parent-chain walk
 that existed only to read those flags.
 [The relaunch stops replaying argv](changelog/2026-08-14-the-relaunch-stops-replaying-argv.md)
 
-
-A
-stale `.claude/autodrive.exited` left by an earlier, only-partly-successful
-restart is cleared at the same point, so it cannot let a later attempt's
-`/exit` confirmation false-positive.
+`stop-drive.sh` touches no line of a `restart` sentinel, then. Its one
+restart-specific act is to clear a stale `.claude/autodrive.exited` before it
+arms and spawns, so an earlier, only-partly-successful attempt's leftover
+cannot let this one's `/exit` confirmation false-positive.
 
 The after-line is optional on both driven kinds, because typing the
 transition and submitting a prompt into what it opens are separate
@@ -351,10 +416,10 @@ lets `/rename` appear in two kinds with two different fates, and carries the
 recognition check for free, since any line beginning `/` takes the
 type-read-back-Enter path. Four primitives: a `custom-title` transcript
 entry for `/rename`, the sentinel disappearing for `/compact`, `/clear` and
-`claude --resume …` (`submit_consumed` for all three — a
-resumed session's `SessionStart` is what does it either way, though the
-relaunch keeps pressing Enter while it waits and the two TUI lines do not:
-see below), a genuine
+`claude --resume …` — a `SessionStart` is what removes it in every case,
+though the TUI lines ask delivery and confirmation as one question
+(`submit_consumed`) while the relaunch splits them (`submit_launched`, then
+`wait_for_consumed`: see below) — a genuine
 user-prompt transcript entry for prose, and `.claude/autodrive.exited`
 appearing for `/exit` — the one primitive with the opposite polarity, since
 `SessionEnd` can only ever create that marker, never remove one that
@@ -585,7 +650,9 @@ toolkit, vendored at `plugin-dev/` via `git subtree`. Rationale:
   of truth keeps the contract one file.
 - `git subtree --squash` rather than a submodule keeps the toolkit
   files visible in this repo's tree (no extra clone, no fragile
-  pointer), and pinning to a tag (`v0.4.0`) makes upgrades explicit.
+  pointer), and pinning to a tag makes upgrades explicit — the pinned
+  version is `plugin-dev/VERSION`, which is the vendored tree's own record
+  of it rather than a copy here that would rot at the next update.
 - The toolkit's `release.just` requires consumers to define two
   recipes: `precommit`, the per-plugin checks that must pass before
   every commit, and `prerelease`, the gate `release` actually depends
@@ -927,16 +994,18 @@ and appealing, but a skill that types one of the two lines has no sentence
 that describes it.
 [Driven transitions](changelog/2026-07-29-driven-transitions.md)
 
-**Taking the hook script's grandparent as `claude`** — the `/bin/sh -c`
-wrapper survives or is exec-optimised away at the shell's discretion, so a
-fixed depth is the same brittleness under a different constant.
-[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
-
-**Deriving the pid from tmux's `#{pane_pid}`** — exact, and indifferent to
-what the process is named, but `handoff_resume_command` runs before the tmux
-check in `stop-drive.sh` and must also serve the not-in-tmux paste path,
-where there is no pane to ask.
-[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md)
+**Every way of identifying the exiting `claude` process** — its argv was once
+replayed as the relaunch line, and three candidates were weighed for finding
+it: the hook script's grandparent (the `/bin/sh -c` wrapper survives or is
+exec-optimised away at the shell's discretion, so a fixed depth is the same
+brittleness under a different constant), a parent-chain walk by argv[0]
+basename (shipped, then withdrawn), and tmux's `#{pane_pid}` (exact and
+indifferent to the process's name, but the composer ran before the tmux check
+and had to serve the not-in-tmux paste path too, where there is no pane to
+ask). The whole question is closed rather than settled: the line is composed
+from the session id alone, so nothing identifies that process at all.
+[Restart drive repair](changelog/2026-08-13-restart-drive-repair.md),
+[The relaunch stops replaying argv](changelog/2026-08-14-the-relaunch-stops-replaying-argv.md)
 
 **Lengthening `HANDOFF_WATCHER_SHELL_SETTLE`** — tuning a constant against
 an unbounded shutdown. The failure returns under load, and it is silent: the
