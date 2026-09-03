@@ -1,7 +1,3 @@
 ## Open decisions
 
-- Whether to run the shared `memory/MEMORY.md` compaction. Now measured at 25881 bytes: over gitlore's 25600 advisory budget, and past the ~24.4KB point where Claude Code's loader silently drops the tail, so entries at the end never reach a session. Method already settled: classify each line as WHEN-triggered, HOW-triggered or acted-inline, relocate the acted-inline class into `CLAUDE.md` / `shared-claude.md`, and retire entries whose fact no longer earns a slot. Rewriting fact bodies is not the lever — measured at ~2%, with the index unmoved. Blocked on an explicit go-ahead, since it rewrites the index every ddaanet repo loads.
-
-## Remaining
-
-- Re-run `/gitlore:merge` once the `ddaanet` tier edit has landed, and keep re-running it until it exits 0 — it reconciles one store per invocation, so a second store may still be behind.
+- Whether to run the shared `memory/MEMORY.md` compaction. It sits at 24451 bytes against the ~24.4KB point where Claude Code's loader silently drops the tail, so entries at the end never reach a session — under 1KB of margin, and the next few facts that add routing lines will cross it. gitlore 0.7.1 ships `/gitlore:index-audit` for exactly this pass — measure against the loader cap, relocate, retire or merge entries, then audit the diff for lost routing — which supplies the safeguard a hand-run pass lacked. Blocked on an explicit go-ahead, since it rewrites the index every ddaanet repo loads.
