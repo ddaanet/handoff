@@ -54,9 +54,14 @@
 toolkit_url := "git@github.com:ddaanet/claude-plugin-dev.git"
 toolkit_prefix := "plugin-dev"
 
+# quote() and not a double-quoted interpolation: just substitutes the argument
+# as raw text before this recipe's shell parses the line, so surrounding double
+# quotes do not stop a caller's $(...) from being evaluated. quote() emits a
+# single-quoted literal instead. Written without braces because a recipe body's
+# comments are interpolated too — only file-level ones like this are inert.
 # Bump plugin.json (patch by default), commit, tag, push, GitHub release, bump marketplace.
 release bump='': prerelease
-    bash "{{toolkit_prefix}}/release.sh" "{{bump}}"
+    bash "{{toolkit_prefix}}/release.sh" {{quote(bump)}}
 
 # Complete a release that landed only partially. Idempotent, no gate.
 resume-release:
@@ -66,37 +71,6 @@ resume-release:
 check-version:
     bash "{{toolkit_prefix}}/check-version.sh"
 
-# Pull the vendored plugin-dev toolkit up to a tag. Plugin root, clean tree.
-update-plugin-dev ref:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    git diff --quiet HEAD || { echo "error: uncommitted changes" >&2; exit 1; }
-    [ -d "{{toolkit_prefix}}" ] || { echo "error: {{toolkit_prefix}}/ not found — is the toolkit vendored here?" >&2; exit 1; }
-    # Only a dist tag is vendorable. Every other ref -- source tag, branch,
-    # sha -- resolves to the toolkit's root tree, which is its own working
-    # environment: a `memory` gitlink, .claude/, CLAUDE.md, its own justfile.
-    # Pulling one copies all of that into this plugin and is invisible until
-    # someone runs `git submodule status`, so it is refused, not warned about.
-    case "{{ref}}" in
-      dist-v*) ;;
-      v*)
-        echo "error: '{{ref}}' is a source tag — pull the dist tag instead: dist-{{ref}}" >&2
-        exit 1
-        ;;
-      *)
-        echo "error: '{{ref}}' is not a dist tag — pull dist-vX.Y.Z" >&2
-        echo "       only the dist lineage contains the consumer-facing files." >&2
-        exit 1
-        ;;
-    esac
-    git subtree pull --prefix="{{toolkit_prefix}}" "{{toolkit_url}}" "{{ref}}" --squash
-    # Verify VERSION matches the requested tag (catches half-applied subtree
-    # pulls). Unconditional: the guard above means only a dist-v* ref reaches
-    # here, so the version is always extractable. Still best-effort on the
-    # file, which a ref older than v0.2.0 lacks.
-    expected="$(printf '%s' "{{ref}}" | sed 's/^dist-v//')"
-    if [ -f "{{toolkit_prefix}}/VERSION" ]; then
-      actual=$(tr -d '[:space:]' < "{{toolkit_prefix}}/VERSION")
-      [ "$actual" = "$expected" ] \
-        || echo "warning: {{toolkit_prefix}}/VERSION ($actual) does not match requested ref ({{ref}})" >&2
-    fi
+# Pull the vendored toolkit up to a dist tag; no ref = newest on the remote.
+update-plugin-dev ref='':
+    TOOLKIT_URL="{{toolkit_url}}" bash "{{toolkit_prefix}}/update.sh" {{quote(ref)}}
