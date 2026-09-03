@@ -9,9 +9,14 @@ on contributor-side dotfiles).
 
 - **`release.just`** — the recipes imported into the consumer's
   `justfile`: `release`, `resume-release`, `check-version` and
-  `update-plugin-dev`. `release` and `resume-release` are one-line
-  wrappers around `release.sh`; `update-plugin-dev` pulls a newer
-  toolkit version into the consumer.
+  `update-plugin-dev`. All are one-line wrappers: `release` and
+  `resume-release` around `release.sh`, `update-plugin-dev` around
+  `update.sh`.
+- **`update.sh`** — pulls a newer toolkit version into the consumer.
+  With no ref it resolves the newest `dist-` tag from the remote. After
+  the pull it prints the migration notes for every version crossed —
+  guidance to apply by hand; an update never edits files outside
+  `plugin-dev/`.
 - **`release.sh`** — the release flow itself. Validates state, bumps
   `.claude-plugin/plugin.json`, commits, tags, pushes, creates a GitHub
   release, and bumps (or creates) the plugin's entry in
@@ -27,8 +32,9 @@ on contributor-side dotfiles).
   edits that change `.claude-plugin/plugin.json`'s `.version`. The
   release recipe owns version bumps; manual edits desync the manifest
   from the latest tag and only get caught at release time.
-- **`install.sh`** — one-shot wiring script. Run after vendoring;
-  inserts the justfile import line and the version-guard hook into
+- **`install.sh`** — one-shot install script: vendors the toolkit
+  (resolving the newest `dist-` tag when no ref is given), inserts the
+  justfile import line, and wires the version-guard hook into
   `.claude/settings.json`. Idempotent.
 
 ## Versioning
@@ -47,19 +53,27 @@ content that was vendored at the time.
 
 ## Installing in a plugin
 
-Clone the toolkit at its **source** tag to get the script, then run
-`install.sh` from the plugin's root directory, passing the **dist** tag:
+Clone the toolkit at its newest **source** tag to get the script, then
+run `install.sh` from the plugin's root directory; it resolves and
+vendors the newest **dist** tag itself:
 
 ```sh
-git clone --depth 1 -b v0.5.5 \
-    git@github.com:ddaanet/claude-plugin-dev.git /tmp/cpd
+url=git@github.com:ddaanet/claude-plugin-dev.git
+tag=$(git ls-remote --tags --refs --sort=-v:refname "$url" 'v*' \
+        | head -1 | sed 's|.*/||')
+git clone --depth 1 -b "$tag" "$url" /tmp/cpd
 cd /path/to/your/plugin
-bash /tmp/cpd/toolkit/install.sh dist-v0.5.5
+bash /tmp/cpd/toolkit/install.sh
 ```
+
+This block never names a version, so it cannot go stale. To pin an older
+version, pass its dist tag explicitly: `bash /tmp/cpd/toolkit/install.sh
+dist-vX.Y.Z`.
 
 `install.sh` does three things:
 
-1. `git subtree add --prefix=plugin-dev … dist-v0.5.5 --squash` (vendors the toolkit).
+1. `git subtree add --prefix=plugin-dev … dist-vX.Y.Z --squash` (vendors
+   the toolkit at the resolved or given dist tag).
 2. Adds `import 'plugin-dev/release.just'` to the plugin's `justfile`
    (creating one if absent).
 3. Wires the version-guard hook into `.claude/settings.json`.
@@ -108,12 +122,26 @@ git commit -m "add claude-plugin-dev toolkit"
 ## Updating in a plugin
 
 ```sh
-just update-plugin-dev dist-v0.5.5
+just update-plugin-dev                # newest dist tag on the remote
+just update-plugin-dev dist-vX.Y.Z   # or pin one
 ```
 
-This wraps `git subtree pull` with the prefix and URL baked in. The
-recipe rejects a dirty tree, refuses a source (`vX.Y.Z`) ref naming the
-`dist-` one to use instead, and warns if you pass a branch ref.
+To see what is available:
+
+```sh
+git ls-remote --tags --refs --sort=-v:refname \
+    git@github.com:ddaanet/claude-plugin-dev.git 'dist-v*'
+```
+
+This wraps `git subtree pull` with the prefix and URL baked in. It
+rejects a dirty tree, refuses a source (`vX.Y.Z`) ref naming the
+`dist-` one to use instead, and refuses anything else — a branch, a sha,
+`main` — since only the dist lineage carries the consumer-facing files.
+
+A release that needs a consumer-side step (say, a new required justfile
+recipe) ships a note at `plugin-dev/migrations/vX.Y.Z.md`. After the
+pull, every note in the crossed version range is printed. Apply them by
+hand: the update itself never edits files outside `plugin-dev/`.
 
 A plugin vendored before dist refs existed carries the toolkit's leaked
 working environment under `plugin-dev/` — most visibly a `plugin-dev/memory`

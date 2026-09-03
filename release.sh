@@ -45,19 +45,57 @@ check_marketplace_writable() {
     # bump_marketplace replaces marketplace.json with mktemp + mv, which unlinks
     # and recreates the file in its directory — so probe the directory, not just
     # the file's mode bits. A sandboxed Bash call commonly can't write here.
+    # 2>&1, not 2>/dev/null: on failure $probe carries mktemp's own diagnosis
+    # (permission denied, read-only file system, no such directory), which is
+    # the only thing that distinguishes them. The sandbox line below is advice
+    # for the common case, not a cause this probe established.
     local probe
-    probe=$(mktemp "$marketplace_dir/.release-writability-check.XXXXXX" 2>/dev/null) \
-        || die "$marketplace_dir is not writable — release needs to replace marketplace.json there. If this is a Claude Code sandbox restriction: rerun this Bash call with dangerouslyDisableSandbox, or run '/add-dir $MARKETPLACE_DIR' first."
+    probe=$(mktemp "$marketplace_dir/.release-writability-check.XXXXXX" 2>&1) \
+        || die "$marketplace_dir is not writable: $probe — release needs to replace marketplace.json there. If this is a Claude Code sandbox restriction: rerun this Bash call with dangerouslyDisableSandbox, or run '/add-dir $MARKETPLACE_DIR' first."
     rm -f "$probe"
+}
+
+tree_is_clean() {
+    # $1=repo root. True when nothing tracked is uncommitted there, ignoring two
+    # paths an agent session moves by design between commits.
+    #
+    # `.claude/` is the repo's own agent working environment — settings, hooks,
+    # and the task frames the handoff and precompact skills stage for "whatever
+    # commit lands next". None of it is plugin content: a plugin ships
+    # .claude-plugin/ and the component directories beside it. Excluded whole
+    # rather than by filename, because the set of files written there is a
+    # function of which skills the maintainer runs, not of this script. The
+    # pathspec matches at the path separator, so .claude-plugin/ — where a dirty
+    # file must still stop a release — is untouched by it.
+    #
+    # The second is a gitlore-mounted memory submodule: its gitlink sits ahead
+    # of what HEAD records between commits by design — gitlore's own pre-commit
+    # hook folds that in on the next commit, not this one.
+    #
+    # The mount path is read from .gitmodules rather than assumed to be
+    # `memory`: that is only gitlore's default, the path being $1 to gitlore's
+    # install.sh. Keyed on the submodule NAME, which gitlore fixes, not its url
+    # — git absolutises a relative url on the way into .git/config, so a url
+    # only ever matches .gitmodules itself. `--get` of a single key returns the
+    # value whole, so a path containing spaces needs no -z splitting.
+    #
+    # Deliberately this narrow. A consumer that vendors some other submodule
+    # and forgets to commit its moved gitlink should be refused, so
+    # `--ignore-submodules=all` is not the shortcut it looks like.
+    local dir="$1" mem=""
+    local specs=(. ':(exclude).claude')
+    if [ -f "$dir/.gitmodules" ]; then
+        mem=$(git config -f "$dir/.gitmodules" --get submodule.gitlore-memory.path) || mem=""
+    fi
+    if [ -n "$mem" ]; then
+        specs+=(":(exclude)$mem")
+    fi
+    git -C "$dir" diff --quiet HEAD -- "${specs[@]}"
 }
 
 common_preflight() {
     [ -f "$manifest" ] || die "$manifest not found — run from the plugin root"
-    # Exclude memory/: a gitlore-mounted memory submodule sits at a gitlink SHA
-    # ahead of what HEAD records between commits by design — its own pre-commit
-    # hook folds that in on the next commit, not this one. A no-op pathspec in
-    # any repo without a memory/ path.
-    git diff --quiet HEAD -- . ':(exclude)memory' || die "uncommitted changes"
+    tree_is_clean "." || die "uncommitted changes"
     branch=$(git symbolic-ref -q --short HEAD || echo "")
     # Use symbolic-ref (not rev-parse): when origin/HEAD is unset, rev-parse
     # exits non-zero AND prints "origin/HEAD" to stdout, so the substitution
@@ -69,12 +107,20 @@ common_preflight() {
         || die "MARKETPLACE_DIR not set (set in .envrc to the claude-plugins repo root)"
     marketplace_json="$MARKETPLACE_DIR/.claude-plugin/marketplace.json"
     [ -f "$marketplace_json" ] || die "$marketplace_json not found"
+    # A detached HEAD there is only discovered by the marketplace push, which
+    # runs after the plugin's commit, tag, tag push and GitHub release are all
+    # public. Catch it here instead, with the other MARKETPLACE_DIR checks.
+    git -C "$MARKETPLACE_DIR" symbolic-ref -q --short HEAD >/dev/null \
+        || die "$MARKETPLACE_DIR is on a detached HEAD — check out its branch first"
     marketplace_dir=$(dirname "$marketplace_json")
     # A release always bumps to a version the marketplace doesn't have yet, so
     # the write is never a no-op — check fails fast here, before the tag and
     # the GitHub release. A resume may find the marketplace already correct
     # (a true no-op bump_marketplace can skip entirely); its own writability
     # need is checked there, only when a write actually happens.
+    # Keep this off the last line of the function: a false `&&` list is exempt
+    # from errexit mid-function, but as the final command its status becomes the
+    # function's, and `common_preflight` would exit 1 with no message on resume.
     [ "$mode" = "release" ] && check_marketplace_writable
     plugin_name=$(jq -r .name "$manifest")
     # A missing entry is not an error: on first publication we create one from
@@ -87,7 +133,7 @@ common_preflight() {
         git remote get-url origin >/dev/null 2>&1 \
             || die "'$plugin_name' has no entry in $marketplace_json and no 'origin' remote to derive one from"
     fi
-    git -C "$MARKETPLACE_DIR" diff --quiet HEAD -- . ':(exclude)memory' \
+    tree_is_clean "$MARKETPLACE_DIR" \
         || die "$MARKETPLACE_DIR has uncommitted changes"
 }
 
@@ -133,7 +179,13 @@ release_preflight() {
         return
     fi
 
-    latest_tag=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)
+    # `git tag --list 'v*'` for the same reason as the first-release check
+    # above, plus one more: describe returns the nearest tag of ANY name,
+    # distance-ordered rather than version-ordered, so any unrelated tag on a
+    # later commit reads as the last release. --sort=-v:refname orders by
+    # version; sed -n '1s…p' takes the newest without exiting early, which
+    # under pipefail would surface as a SIGPIPE on a repo with many tags.
+    latest_tag=$(git tag --list 'v*' --sort=-v:refname | sed -n '1s/^v//p')
     if [ -n "$latest_tag" ] && [ "$manifest_version" != "$latest_tag" ]; then
         # shellcheck disable=SC2016  # backticks are literal markdown, not command substitution
         printf 'hint: plugin.json holds the LAST released version. `just release` bumps from there.\n' >&2
@@ -177,11 +229,24 @@ bump_commit_tag() {
         note "tag: $tag created locally (manifest already at $V)"
         return
     fi
+    local prev
+    prev=$(jq -r .version "$manifest")
     tmp=$(mktemp)
     jq --arg v "$V" '.version = $v' "$manifest" > "$tmp"
     mv "$tmp" "$manifest"
     git add "$manifest"
-    git commit -m "release: $V"
+    # A consumer's pre-commit hook can refuse this commit. Dying here with the
+    # bump written and staged strands it: nothing committed, nothing tagged, and
+    # a dirty manifest that then blocks BOTH a re-run and --resume on
+    # common_preflight's "uncommitted changes" — which names neither the gate nor
+    # the leftover. Restoring from HEAD leaves the tree as this run found it, so
+    # satisfying the gate and re-running is the whole recovery.
+    git commit -m "release: $V" || {
+        git checkout HEAD -- "$manifest"
+        printf 'hint: the manifest was rolled back to %s and nothing was tagged.\n' "$prev" >&2
+        printf '      fix what the gate reported above, then run the same command again.\n' >&2
+        die "commit gate refused the release commit"
+    }
     git tag -a "$tag" -m "Release $V"
     acted=1
     note "manifest + tag: $tag created locally"
@@ -194,7 +259,23 @@ push_branch() {
         note "branch $branch: already pushed"
         return
     fi
-    git push
+    # A consumer's pre-push hook can refuse this. gitlore's publishes every
+    # memory store before the parent push and refuses when one diverged, and the
+    # window it opens is human-paced: the release commit's own approval round
+    # sits inside it. The commit and the tag are already local, so the recovery
+    # is resume — never an amend re-pinning the gitlink at the merged memory.
+    # The gitlink a release commit records is always an ancestor of memory's
+    # `live` or `live` itself (each merge takes the pending commit as its second
+    # parent), and a push of `live` publishes every ancestor — so nothing needs
+    # the tagged commit to name the merge, and the tag is never rewritten.
+    # shellcheck disable=SC2016  # backticks are literal markdown, not command substitution
+    git push || {
+        printf 'hint: the release commit and tag %s are local; nothing was pushed.\n' "$tag" >&2
+        printf '      clear what the push reported above, then run `just resume-release`.\n' >&2
+        printf '      gitlore refuses the push while a memory store is diverged: `/gitlore:resolve`\n' >&2
+        printf '      in Claude Code clears it. Repeat the pair if the push is refused again.\n' >&2
+        die "push of $branch failed"
+    }
     acted=1
     note "branch $branch: pushed"
 }
@@ -258,6 +339,12 @@ bump_marketplace() {
         rm -f "$mp_tmp"
     else
         check_marketplace_writable
+        # mktemp creates 0600 and mv carries that mode onto the destination, so
+        # every bump silently narrowed a tracked file. 644 is the mode a clone
+        # of the marketplace repo gets under the usual umask; the mv is kept
+        # (rather than writing through the file) because the no-op guard above
+        # depends on the replace needing directory write, not file write.
+        chmod 644 "$mp_tmp"
         mv "$mp_tmp" "$marketplace_json"
         git -C "$MARKETPLACE_DIR" add .claude-plugin/marketplace.json
     fi
