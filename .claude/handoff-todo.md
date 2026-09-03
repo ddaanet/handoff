@@ -4,4 +4,4 @@
 
 ## Remaining
 
-- Run a driven restart end to end against the real product. The 2026-08-13 restart-drive-repair work is executed in full and both suites pass, but neither reaches the whole path — the design record makes dogfooding a walker change part of landing it, not a follow-up.
+- Re-run `/gitlore:merge` once the `ddaanet` tier edit has landed, and keep re-running it until it exits 0 — it reconciles one store per invocation, so a second store may still be behind.
