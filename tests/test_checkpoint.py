@@ -629,7 +629,29 @@ def test_task_clear_never_existed_writes_nothing_no_d(tmp_path: Path) -> None:
     )
 
 
-def test_task_write_only_headings_removed_manifest_records_d(tmp_path: Path) -> None:
+def test_task_write_only_headings_pre_existing_removed_manifest_records_d(
+    tmp_path: Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    (repo / ".claude" / "handoff-task.md").write_text("## Current task\n\nstale\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content("## Current task\n\n## Open decisions\n"),
+        "todo": todo_content("## Remaining\n\n- an item\n"),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-task.md").exists()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    assert "D .claude/handoff-task.md" in manifest
+    assert "W .claude/handoff-todo.md" in manifest
+
+
+def test_task_write_only_headings_never_existed_no_d(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     payload = {
         "skill": "handoff",
@@ -638,15 +660,17 @@ def test_task_write_only_headings_removed_manifest_records_d(tmp_path: Path) -> 
         "clear": False,
         "continue": None,
         "task": task_content("## Current task\n\n## Open decisions\n"),
-        "todo": todo_keep(),
+        "todo": todo_content("## Remaining\n\n- an item\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     assert not (repo / ".claude" / "handoff-task.md").exists()
-    assert (
-        "D .claude/handoff-task.md"
-        in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
-    )
+    assert (repo / ".claude" / "checkpoint-manifest").is_file()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    # The todo line proves the manifest is live, so the absence below is a claim
+    # about the task route rather than about an empty manifest.
+    assert "W .claude/handoff-todo.md" in manifest.splitlines()
+    assert "handoff-task.md" not in manifest
 
 
 def test_todo_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
@@ -670,7 +694,29 @@ def test_todo_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
     )
 
 
-def test_todo_write_no_items_removed_manifest_records_d(tmp_path: Path) -> None:
+def test_todo_write_no_items_pre_existing_removed_manifest_records_d(
+    tmp_path: Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    (repo / ".claude" / "handoff-todo.md").write_text("## Remaining\n\n- stale\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content("## Current task\n\nreal content\n"),
+        "todo": todo_content("## Remaining\n"),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-todo.md").exists()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    assert "D .claude/handoff-todo.md" in manifest
+    assert "W .claude/handoff-task.md" in manifest
+
+
+def test_todo_write_no_items_never_existed_no_d(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     payload = {
         "skill": "handoff",
@@ -678,16 +724,18 @@ def test_todo_write_no_items_removed_manifest_records_d(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_clear(),
+        "task": task_content("## Current task\n\nreal content\n"),
         "todo": todo_content("## Remaining\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     assert not (repo / ".claude" / "handoff-todo.md").exists()
-    assert (
-        "D .claude/handoff-todo.md"
-        in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
-    )
+    assert (repo / ".claude" / "checkpoint-manifest").is_file()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    # The task line proves the manifest is live, so the absence below is a claim
+    # about the todo route rather than about an empty manifest.
+    assert "W .claude/handoff-task.md" in manifest.splitlines()
+    assert "handoff-todo.md" not in manifest
 
 
 def test_todo_edit_replaces_first_occurrence_stages_w(tmp_path: Path) -> None:

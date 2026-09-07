@@ -341,8 +341,8 @@ def apply_task(root: Path, action: str, content: str) -> list[str]:
     happened.
     """
     path = root / HANDOFF_REL_TASK
+    existed = path.is_file()
     if action == "clear":
-        existed = path.is_file()
         if not existed:
             return []
         path.unlink()
@@ -350,7 +350,7 @@ def apply_task(root: Path, action: str, content: str) -> list[str]:
     path.write_text(content, encoding="utf-8")
     if lib.is_empty_body(content):
         path.unlink()
-        return [f"D {HANDOFF_REL_TASK}"]
+        return [f"D {HANDOFF_REL_TASK}"] if existed else []
     return [f"W {HANDOFF_REL_TASK}"]
 
 
@@ -363,8 +363,8 @@ def apply_todo(root: Path, action: str, content: str, old: str, new: str) -> lis
     if action == "keep":
         return []
     path = root / HANDOFF_REL_TODO
+    existed = path.is_file()
     if action == "clear":
-        existed = path.is_file()
         if not existed:
             return []
         path.unlink()
@@ -372,7 +372,7 @@ def apply_todo(root: Path, action: str, content: str, old: str, new: str) -> lis
     if action == "write":
         path.write_text(content, encoding="utf-8")
     elif action == "edit":
-        if not path.is_file():
+        if not existed:
             err(
                 "todo.old_string",
                 f"edit requested but {HANDOFF_REL_TODO} does not exist",
@@ -380,7 +380,7 @@ def apply_todo(root: Path, action: str, content: str, old: str, new: str) -> lis
         apply_edit("todo", path, old, new)
     if lib.is_empty_body(path.read_text(encoding="utf-8")):
         path.unlink()
-        return [f"D {HANDOFF_REL_TODO}"]
+        return [f"D {HANDOFF_REL_TODO}"] if existed else []
     return [f"W {HANDOFF_REL_TODO}"]
 
 
