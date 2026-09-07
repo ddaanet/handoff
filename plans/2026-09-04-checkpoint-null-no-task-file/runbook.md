@@ -437,10 +437,25 @@ byte-for-byte and the suite is green at its start and its end.
   manifest of `W` lines. Each must red its row after the amendment and is the
   evidence the amendment worked.
 
-  Restore with `git checkout -- scripts/checkpoint.py`, never a `cp` from a
-  saved copy, and assert the restore in the shell after every cycle — a
-  silently no-op'd restore stacked one mutation on the next in an earlier
-  review and read as exactly the "mutations are not disjoint" finding the
+  **Which restore belongs to which situation** (revised 2026-09-07, from the
+  TDD audit — the earlier text said `git checkout --` unconditionally and
+  banned `cp`, which is wrong half the time and cost real work twice in this
+  run). Assert the restore in the shell after every cycle either way; never
+  eyeball it, and never stack.
+
+  - **Clean tree** — `git checkout -- scripts/checkpoint.py`, then assert
+    `git diff --stat scripts/checkpoint.py` is empty.
+  - **Tree carries uncommitted work** — which is every review dispatch that has
+    already applied its own fixes — `git checkout --` would discard those fixes
+    along with the mutation. Reverse the mutation by exact-string edit and
+    assert against a hash taken *before* the first mutation (`sha256sum -c`).
+
+  A `cp` from a saved copy is what failed twice here, both times the same way:
+  `$TMPDIR` was empty, the copy went to `/base.sha` or `/checkpoint.py.orig` and
+  failed, the `&&` chain short-circuited so no mutation ran, and the "evidence"
+  was a run against unmutated code. If you use one anyway, verify the backup is
+  non-empty before relying on it. A silently no-op'd restore stacks one mutation
+  on the next and reads as exactly the "mutations are not disjoint" finding the
   matrix exists to detect.
 
   **A third residual, recorded and closed in the same commit (`87ce9c5`):**
