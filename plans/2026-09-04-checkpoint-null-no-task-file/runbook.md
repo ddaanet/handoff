@@ -63,6 +63,19 @@ byte-for-byte and the suite is green at its start and its end.
   - a well-formed explicit todo dict carrying `file_path` +
     `old_string`/`new_string` → `todo_edit(repo, old, new)`. Four sites, all
     inside `test_todo_edit_*`: 742, 769, 792, 813.
+  - **Added at the Phase 0 review (2026-09-07)**, missed by the counts above
+    because they are neither `None` nor a `task_write(...)` call: the two
+    `("task", {…})` / `("todo", {…})` entries in each of
+    `test_every_boundary_field_is_schema_error_under_autoname` and
+    `test_every_boundary_field_is_schema_error_under_restart` — four
+    parametrize-list entries, routed through `task_content(Path("/x"), "body")`
+    / `todo_content(Path("/x"), "body")`, byte-identical to the literals they
+    replace. They are rejected by **key presence** under a skill that forbids
+    the field, so the value is inert; routing them anyway is what keeps Phase 1
+    from leaving four dicts in the file depicting a `file_path` shape the
+    schema no longer has, and what keeps the value they carry well-formed —
+    a forbidden-field row only discriminates key presence from value shape
+    when its value is valid in itself.
   - **Not routed through a factory, left literal**, in two groups:
     - The three rows whose whole subject is a *wrong* `file_path` —
       `test_drifted_cwd_task_path_under_cwd_rejected` (229),
@@ -114,7 +127,9 @@ byte-for-byte and the suite is green at its start and its end.
 
   The `repo` parameter exists only to compose `file_path`, and Phase 1 drops
   it from all five signatures along with the field. That is a bounded edit —
-  the 11 content/edit call sites (7 `*_content`, 4 `todo_edit`) — and it is
+  the 15 content/edit call sites (11 `*_content`, 4 `todo_edit`; the count was
+  11/7 before the Phase 0 review added the four parametrize entries above) —
+  and it is
   deliberate: keeping a parameter
   no body reads would leave exactly the vestigial residue this repo's
   removal convention forbids. `task_clear()` and `todo_keep()` take no

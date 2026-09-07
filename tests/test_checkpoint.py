@@ -1431,8 +1431,8 @@ def test_rename_missing_under_autoname_errors(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("commit", "with-commit"),
-        ("task", {"file_path": "/x/.claude/handoff-task.md", "content": "body"}),
-        ("todo", {"file_path": "/x/.claude/handoff-todo.md", "content": "body"}),
+        ("task", task_content(Path("/x"), "body")),
+        ("todo", todo_content(Path("/x"), "body")),
         ("clear", True),
         ("compact", True),
         ("continue", "pick up per the task file"),
@@ -1543,8 +1543,8 @@ def test_restart_session_id_unset_errors(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("commit", "with-commit"),
-        ("task", {"file_path": "/x/.claude/handoff-task.md", "content": "body"}),
-        ("todo", {"file_path": "/x/.claude/handoff-todo.md", "content": "body"}),
+        ("task", task_content(Path("/x"), "body")),
+        ("todo", todo_content(Path("/x"), "body")),
         ("rename", "Not Allowed"),
         ("clear", True),
         ("compact", True),
