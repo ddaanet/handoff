@@ -1,5 +1,14 @@
 # `{"content": null}` is a no-op, not "content supplied" (2026-07-27)
 
+> **Superseded 2026-09-07** (see [The payload names its
+> actions](2026-09-07-the-payload-names-its-actions.md)) — scoped to the
+> remedy, not the diagnosis. Writing the literal string `null` into the file
+> was a real defect and had to stop. But giving `null` a no-op meaning put one
+> spelling in front of two fields whose correct behaviours are opposite: for
+> `todo` a no-op is right (FR4), for `task` it preserves a finished frame as
+> current. `null` is now a named schema error on both, and each field's
+> actions are spelled out in a tagged union.
+
 `checkpoint.sh` distinguishes Write-form-with-content from field-absent by key
 presence (`field_has_key task content`), not by the key's value. That's right
 for distinguishing Write from Edit on `todo`, but wrong for `content` itself:

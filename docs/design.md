@@ -9,7 +9,7 @@ file per change, dated, indexed by [`changelog.md`](changelog.md). Those files a
 edited after the fact — they say what was true and what was believed when
 they were written, which is what makes them worth keeping.
 
-Last updated: 2026-08-14.
+Last updated: 2026-09-07.
 
 ## Problem
 
@@ -136,9 +136,10 @@ collided as numbers.
   same rule.
 - **FR4** — `handoff-todo.md` is a scratch list by design. The agent edits it
   freely all session; the checkpoint is only the wrap-up path.
-- **FR5** — The todo payload supports incremental update: an Edit form
-  (`old_string`/`new_string`) as well as a Write form (`content`). The task
-  file is authored whole, so it takes the Write form only.
+- **FR5** — The todo payload supports incremental update:
+  `{"action": "edit", "old_string": …, "new_string": …}` as well as content
+  written whole. The task file is authored whole, so it has no edit action
+  and the schema refuses one.
 - **FR6** — A file whose body is empty is removed, and the removal staged.
   File present ⟹ content pending.
 - **FR7** — Everything the checkpoint writes is staged with `git add -f`,
@@ -215,12 +216,21 @@ Both wrap-up skills decide their content and then make exactly one Bash
 call: `handoff-checkpoint`, a PATH-resident shim (`bin/`) over
 `scripts/checkpoint.py`, taking the whole wrap-up as a schema-validated
 JSON payload on stdin — `skill`, `commit`, the boundary's transition field,
-`continue`, `rename` at the clear boundary, and `task` / `todo` in the
-harness's own tool-call shape: `file_path` + `content` for a
-Write, or — for `todo` alone — `file_path` + `old_string`/`new_string` for
-an Edit. The task file is authored whole at every boundary, so it takes no
-Edit form and the schema refuses one. A violation exits non-zero naming the
-offending field.
+`continue`, `rename` at the clear boundary, and `task` / `todo` as a tagged
+union: the file's content directly as a string, or an object naming an
+action. `task` takes `{"action": "clear"}`; `todo` also takes
+`{"action": "keep"}` and `{"action": "edit", "old_string": …,
+"new_string": …}`. The task file is authored whole at every boundary, so it
+has no edit action, and no keep — a boundary with nothing to carry says so
+with `clear`, which is the case an agent used to reach for `null` and get
+silence. Both keys are required by key presence: `null` and an absent key
+are each a named error, because the defect being fixed was an agent
+choosing a spelling that quietly did the wrong thing, so a wrong spelling
+must fail loudly rather than acquire a meaning. There is no `file_path` —
+`apply_task`/`apply_todo` compose the real path from `HANDOFF_ROOT`, so the
+field was validated against a constant and discarded. A violation exits
+non-zero naming the offending field.
+[The payload names its actions](changelog/2026-09-07-the-payload-names-its-actions.md)
 
 It gets its root from `HANDOFF_ROOT`, injected into the command's
 environment by a `PreToolUse(Bash)` hook (`inject-checkpoint-root.sh`) that
@@ -245,7 +255,8 @@ sandboxed Bash, where `git add` can leave `.git/index.lock` behind and fail
 the *next* command (which in the routine wrap-up is the user's `/commit`),
 and where tmux is unreachable. `PostToolUse(Bash)` (`bash-post.sh`) consumes
 the manifest instead — `git add -f` for every listed path, deletions
-included. Staging is all it does: a sentinel the checkpoint wrote is armed at
+included, and a path it could not stage named on both channels rather than
+dropped from the counts. Staging is all it does: a sentinel the checkpoint wrote is armed at
 `Stop` like any other, so spawning the walker here would type into a live
 turn, which is the one thing the `Stop` gate exists to prevent.
 
@@ -894,6 +905,17 @@ the terminal — is read from the pane, not from the process table.
 [The relaunch stops replaying argv](changelog/2026-08-14-the-relaunch-stops-replaying-argv.md)
 
 ## Rejected alternatives
+
+**A bare magic-string sentinel for the payload's actions** — `"@empty"` or
+`"clear"` as the value of `task`, instead of `{"action": "clear"}`. It
+reinstates the defect class it was meant to retire, one spelling along: a
+typo in a bare token is indistinguishable from content, so `"claer"` is
+written to the file as the task frame's body, silently, exactly as `null`
+silently meant "no-op". `{"action": "emty"}` is a schema error naming the
+field, because the object shape is what makes the value's role explicit
+enough to check. This is the first shape considered at the proof pass, and
+the one a future session will re-propose.
+[The payload names its actions](changelog/2026-09-07-the-payload-names-its-actions.md)
 
 **Loading via an `@.claude/handoff.md` reference** — the reference is
 resident in every turn and cannot be conditional. `SessionStart` +

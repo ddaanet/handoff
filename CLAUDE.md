@@ -9,7 +9,7 @@ High-level flow: the skill decides the task/todo/rename content, then issues
 one `handoff-checkpoint` Bash call carrying the whole wrap-up as a
 schema-validated JSON payload on stdin → `checkpoint.py` writes
 `.claude/handoff-task.md`/`.claude/handoff-todo.md`/`.claude/autodrive` (per
-FR5/FR6 write semantics — a Write or Edit form, empty body ⟹ removed) and
+FR5/FR6 write semantics — content or a named action, empty body ⟹ removed) and
 leaves `.claude/checkpoint-manifest` behind, since staging can't run from the
 agent's sandboxed Bash (NFR1) → `PostToolUse(Bash)` (`bash-post.sh`) consumes
 the manifest and stages every listed path with `git add -f` (deletions
@@ -532,9 +532,16 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   it runs in the agent's Bash, where `CLAUDE_PROJECT_DIR` is unset, so nothing
   else can supply it. Reads the JSON payload on stdin, validates it against
   the schema (FR2 — a violation exits 2 naming the offending field on stderr),
-  applies the `task`/`todo` Write-or-Edit forms (FR5; `task` is Write-form-
-  or-null only), removes a file whose resulting body is empty via
-  `is_empty_body` (FR6), writes `.claude/checkpoint-manifest` —
+  applies the `task`/`todo` tagged union — content as a string, or an object
+  naming an action (`clear` on both; `keep` and `edit` on `todo` alone, since
+  the task frame is authored whole and a scratch list must survive a call that
+  says nothing about it, FR4/FR5). Both keys are required by key presence, so
+  `null` and an absent key are each a named error rather than a spelling that
+  quietly does the wrong thing; there is no `file_path`, the path being
+  composed from `HANDOFF_ROOT`. Removes a file whose resulting body is empty
+  via `is_empty_body` (FR6) — unlink-if-present on both routes, existence
+  sampled before any write, so a `D` manifest line records only a removal that
+  actually happened (D3). Writes `.claude/checkpoint-manifest` —
   always, even with zero lines, so `bash-post.sh`'s presence-gate still
   fires for a call that touched neither file — and composes `.claude/autodrive`
   (FR8) from the transition fields, flattening the title's whitespace on the
@@ -565,7 +572,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   directive output (FR9, via
   `_checkpoint_lib.py`), with the arming instruction composed onto the memory
   directive when the sentinel is held. NFR1: it does no `git` or `tmux` work
-  itself — see `bash-post.sh`. The Edit form's exact string
+  itself — see `bash-post.sh`. The `edit` action's exact string
   replacement (first occurrence, error if `old_string` is absent or
   ambiguous) needs no shell quoting for a multi-line `old_string`/`new_string`
   now that the whole script is Python — it was a `python3` heredoc from
@@ -653,7 +660,13 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   worktree-aware root resolution (a `python3` spawn via `handoff_root`) is
   deferred to the rare positive path. When the manifest is present, stages
   every listed path with `git add -f` (deletions included), consumes
-  then emits a dual-channel summary and deletes the manifest. Staging is all it
+  then emits a dual-channel summary and deletes the manifest. A path it could
+  not stage is **named** on both channels rather than dropped from the counts:
+  the `2>/dev/null` that used to make a stranded `index.lock` read as
+  `staged 0, deleted 0` is gone (D4), and the one benign failure it was
+  covering — a `D` for a gitignored path that never entered the index — is
+  guarded away with `git ls-files` instead, whose own exit status is read, not
+  inferred from empty output. Staging is all it
   does: a sentinel the checkpoint wrote is armed at `Stop` like any other, so
   consuming it here would spawn the walker mid-turn, which is the one thing the
   `Stop` gate exists to prevent. This is where NFR1's git/tmux work happens instead
@@ -782,7 +795,7 @@ outright regardless of path.
   itself — schema validation, write semantics, directive composition, the
   transition/sentinel matrix — moved with the port to
   `tests/test_checkpoint.py` (pytest), described below.
-  `tests/test_checkpoint.py` (89 tests) covers `scripts/checkpoint.py`'s own
+  `tests/test_checkpoint.py` (128 tests) covers `scripts/checkpoint.py`'s own
   behavior end-to-end via subprocess, ported from what was
   `tests/checkpoint.bats`'s exhaustive coverage of `checkpoint.sh` (merged,
   before that, from the deleted `tests/memory-probe.bats` +
@@ -795,8 +808,10 @@ outright regardless of path.
   mentions the trigger file — and it is mutation-checked (disable the
   branch, watch it go red), not observed passing. Also: schema validation
   (each required field missing, each literal with an unknown value, `rename`
-  under `precompact`, `content`+`old_string` together, a partial Edit,
-  `file_path` outside `$root/.claude/`, malformed JSON — each asserting a
+  under `precompact`, `null` and an absent key on each of `task`/`todo`, an
+  action outside the field's own vocabulary, an object with no `action` key, a
+  value that is neither string nor object, an `edit` missing or mistyping
+  either of its strings, malformed JSON — each asserting a
   non-zero exit and that the message names the field), Edit application
   (`old_string` absent, ambiguous, successful), empty-body removal through
   both writers (`checkpoint.py` and `write-stage.sh`) including that the
