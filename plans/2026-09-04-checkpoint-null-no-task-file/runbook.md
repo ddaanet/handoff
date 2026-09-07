@@ -97,7 +97,7 @@ byte-for-byte and the suite is green at its start and its end.
   `{"action": "clear"}`, which is *not* what `"task": None` means today — but
   verified by grep, **no test in the file pre-creates
   `.claude/handoff-task.md`** (the only `write_text` calls against these two
-  paths are at 730, 759, 782 and 824, all todo). With slice 5 guaranteeing no
+  paths are at 730, 759, 782 and 824, all todo). With slice 4 guaranteeing no
   `D` line for a file that never existed, every one of the 61 sites keeps its
   exit code and its manifest assertion.
 
@@ -214,26 +214,28 @@ byte-for-byte and the suite is green at its start and its end.
      the gate, the required-by-key-presence rule silently breaks two of the
      four skills.
 
-  3. **An unrecognized or malformed action is a named error.** Parametrized:
-     `{"action": "emty"}` on either field, `{"action": "keep"}` on `task`
-     (which has no keep — the task frame is authored whole at every boundary),
-     `{"action": "edit", …}` on `task` (this is
-     `test_task_with_old_string_new_string_errors` (428) restated as the
-     positive contract of the union), an object with no `action` key, and a
-     value that is neither string nor object (a number). Each asserts exit 2
-     and that stderr names the offending field.
-
-  4. **The edit action's own required keys.** `{"action": "edit"}` carrying
-     only `old_string`, and only `new_string`: each asserts exit 2 with stderr
-     naming `todo`. These are `test_todo_only_old_string_errors` (468) and
-     `test_todo_only_new_string_errors` (487) restated in action vocabulary —
-     the same contract, reached through the dispatch instead of through key
-     sniffing. `test_todo_edit_old_string_absent_errors`,
+  3. **Everything outside the union is a named error.** One parametrized
+     table covering both the action vocabulary and the `edit` action's own
+     required keys: they are the *same* dispatch in the implementation, and
+     splitting them would leave the second half a GREEN of one `if` line over
+     tests already written. Cases: `{"action": "emty"}` on either field;
+     `{"action": "keep"}` on `task` (which has no keep — the task frame is
+     authored whole at every boundary); `{"action": "edit", …}` on `task`
+     (this is `test_task_with_old_string_new_string_errors` (428) restated as
+     the positive contract of the union); an object with no `action` key; a
+     value that is neither string nor object (a number); `{"action": "edit"}`
+     carrying only `old_string`; and `{"action": "edit"}` carrying only
+     `new_string` — the last two being `test_todo_only_old_string_errors`
+     (468) and `test_todo_only_new_string_errors` (487) restated in action
+     vocabulary, the same contract reached through the dispatch instead of
+     through key sniffing. Each case asserts exit 2 and that stderr names the
+     offending field.
+     `test_todo_edit_old_string_absent_errors`,
      `test_todo_edit_old_string_ambiguous_errors` and
      `test_todo_edit_requested_file_missing_errors` (757, 780, 802) keep
      their assertions unchanged; only their payload construction moves.
 
-  5. **An empty body still removes, and `D` still records only a real
+  4. **An empty body still removes, and `D` still records only a real
      removal.** `test_task_write_only_headings_removed_manifest_records_d`
      (663) is amended into a pair over the same payload — a body of headings
      alone: pre-existing file ⟹ removed and `D` recorded; never-existed file
@@ -292,7 +294,7 @@ byte-for-byte and the suite is green at its start and its end.
   this was checked against real git rather than assumed, and the outline's
   claim that it was is wrong. `git add -f -- <path>` on a path that is neither
   on disk nor in the index exits 128 with `fatal: pathspec '<path>' did not
-  match any files`. Item 1.1 slice 5 retires one route to that state (a `D`
+  match any files`. Item 1.1 slice 4 retires one route to that state (a `D`
   line for a file that never existed); the other survives it — a task or todo
   file that is **on disk but not in the index**, then cleared. It is
   gitignored, so nothing but this hook ever stages it, and any `git reset`
