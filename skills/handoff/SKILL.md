@@ -103,10 +103,10 @@ JSON
 
 Both keys are required, each carrying content as a string or an object naming
 an action. `{"action": "clear"}` removes that file — for `task`, this is how a
-boundary with nothing to carry says so. `{"action": "keep"}` (`todo` only)
-leaves the list untouched. `{"action": "edit", …}` strikes a finished item
-without regenerating the list. `null` is an error on both, as is omitting a
-key.
+boundary with nothing to carry says so. `{"action": "keep"}` leaves the list
+untouched and `{"action": "edit", …}` strikes a finished item without
+regenerating it — both `todo` only. `null` is an error on both, as is omitting
+a key.
 
 Author the continuation prompt **silently**. It gets typed visibly into the
 composer and lands in scrollback, so reprinting it in the reply shows the
@@ -139,7 +139,7 @@ commit then the clear — "Ready to commit, then /clear" — and under
 clear is armed, and the turn ends. The frame is on disk and this is a
 handover, not a report.
 
-**Task file template:**
+**Task file template** (`./.claude/handoff-task.md`):
 
 ```markdown
 ## Current task
@@ -165,8 +165,6 @@ Task file rules:
   the frame next session.
 - No file paths or code beyond what's needed to say what's in progress.
   The working set is reconstructable from `git status` at load time.
-- No location other than `./.claude/handoff-task.md` — the hook reads
-  this exact path.
 
 **Todo file template** (`./.claude/handoff-todo.md`):
 

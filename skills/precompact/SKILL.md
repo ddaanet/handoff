@@ -78,9 +78,10 @@ itself, and the prompt that resumes the work on the far side.
    ```
 
    Both keys are required and `null` is an error on each, as is omitting one.
-   `{"action": "clear"}` removes that file, `{"action": "keep"}` (`todo` only)
-   leaves the list untouched, and `{"action": "edit", …}` strikes a finished
-   item without regenerating the list.
+   `{"action": "clear"}` removes that file — for `task`, this is how a boundary
+   with nothing to carry says so. `{"action": "keep"}` leaves the list
+   untouched and `{"action": "edit", …}` strikes a finished item without
+   regenerating it — both `todo` only.
 
    Author the continuation prompt **silently**. It gets typed visibly into
    the composer and lands in scrollback, so reprinting it in the reply
