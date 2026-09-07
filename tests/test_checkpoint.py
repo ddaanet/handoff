@@ -109,8 +109,28 @@ def add_unidentified_sdd_ledger(repo: Path, slug: str = "ghmem") -> None:
     (d / "progress.md").write_text("# ghmem — progress (C2 COMPLETE)\n")
 
 
-def task_write(file_path: Path | str, content: str) -> dict[str, str]:
-    return {"file_path": str(file_path), "content": content}
+def task_content(repo: Path, content: str) -> dict[str, str]:
+    return {"file_path": str(repo / ".claude" / "handoff-task.md"), "content": content}
+
+
+def task_clear() -> None:
+    return None
+
+
+def todo_content(repo: Path, content: str) -> dict[str, str]:
+    return {"file_path": str(repo / ".claude" / "handoff-todo.md"), "content": content}
+
+
+def todo_keep() -> None:
+    return None
+
+
+def todo_edit(repo: Path, old: str, new: str) -> dict[str, str]:
+    return {
+        "file_path": str(repo / ".claude" / "handoff-todo.md"),
+        "old_string": old,
+        "new_string": new,
+    }
 
 
 def run_checkpoint(
@@ -169,8 +189,8 @@ def test_handoff_root_unset_refuses(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     env = dict(os.environ)
     env.pop("HANDOFF_ROOT", None)
@@ -196,8 +216,8 @@ def test_handoff_root_names_non_directory_refuses(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload, root=repo / "does-not-exist")
     assert result.returncode == 2
@@ -213,10 +233,8 @@ def test_drifted_cwd_writes_injected_root_never_cwd(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_write(
-            root / ".claude" / "handoff-task.md", "## Current task\n\nbody\n"
-        ),
-        "todo": None,
+        "task": task_content(root, "## Current task\n\nbody\n"),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(elsewhere, payload, root=root)
     assert result.returncode == 0
@@ -235,8 +253,11 @@ def test_drifted_cwd_task_path_under_cwd_rejected(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_write(elsewhere / ".claude" / "handoff-task.md", "body"),
-        "todo": None,
+        "task": {
+            "file_path": str(elsewhere / ".claude" / "handoff-task.md"),
+            "content": "body",
+        },
+        "todo": todo_keep(),
     }
     result = run_checkpoint(elsewhere, payload, root=root)
     assert result.returncode == 2
@@ -251,7 +272,12 @@ def test_drifted_cwd_task_path_under_cwd_rejected(tmp_path: Path) -> None:
 
 def test_skill_missing_errors_naming_skill(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
-    payload = {"commit": "with-commit", "rename": "T", "task": None, "todo": None}
+    payload = {
+        "commit": "with-commit",
+        "rename": "T",
+        "task": task_clear(),
+        "todo": todo_keep(),
+    }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
     assert "skill" in result.stderr
@@ -263,8 +289,8 @@ def test_skill_unknown_value_errors_naming_skill(tmp_path: Path) -> None:
         "skill": "bogus",
         "commit": "with-commit",
         "rename": "T",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -278,8 +304,8 @@ def test_commit_missing_errors_naming_commit(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -294,8 +320,8 @@ def test_commit_unknown_value_errors_naming_commit(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -309,8 +335,8 @@ def test_rename_missing_under_handoff_errors_naming_rename(tmp_path: Path) -> No
         "commit": "with-commit",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -324,8 +350,8 @@ def test_each_of_two_skill_values_accepted(tmp_path: Path) -> None:
         "commit": "without-commit",
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     assert run_checkpoint(repo, payload).returncode == 0
     payload = {
@@ -334,8 +360,8 @@ def test_each_of_two_skill_values_accepted(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     assert run_checkpoint(repo, payload).returncode == 0
 
@@ -348,8 +374,8 @@ def test_retired_driven_skill_names_rejected(tmp_path: Path) -> None:
             "commit": "without-commit",
             "clear": False,
             "continue": None,
-            "task": None,
-            "todo": None,
+            "task": task_clear(),
+            "todo": todo_keep(),
         }
         result = run_checkpoint(repo, payload)
         assert result.returncode == 2
@@ -365,8 +391,8 @@ def test_rename_present_under_precompact_errors(tmp_path: Path) -> None:
         "rename": "Not Allowed",
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -384,8 +410,8 @@ def test_empty_or_null_rename_under_precompact_errors(
         "commit": "with-commit",
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
         "rename": value,
     }
     result = run_checkpoint(repo, payload)
@@ -402,8 +428,8 @@ def test_rename_not_a_string_errors(tmp_path: Path, value: object) -> None:
         "commit": "with-commit",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
         "rename": value,
     }
     result = run_checkpoint(repo, payload)
@@ -419,8 +445,8 @@ def test_precompact_with_rename_omitted_accepted(tmp_path: Path) -> None:
         "commit": "without-commit",
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     assert run_checkpoint(repo, payload).returncode == 0
 
@@ -438,7 +464,7 @@ def test_task_with_old_string_new_string_errors(tmp_path: Path) -> None:
             "old_string": "a",
             "new_string": "b",
         },
-        "todo": None,
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -453,7 +479,7 @@ def test_todo_content_and_old_string_together_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
+        "task": task_clear(),
         "todo": {
             "file_path": str(repo / ".claude" / "handoff-todo.md"),
             "content": "## Remaining\n",
@@ -473,7 +499,7 @@ def test_todo_only_old_string_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
+        "task": task_clear(),
         "todo": {
             "file_path": str(repo / ".claude" / "handoff-todo.md"),
             "old_string": "a",
@@ -492,7 +518,7 @@ def test_todo_only_new_string_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
+        "task": task_clear(),
         "todo": {
             "file_path": str(repo / ".claude" / "handoff-todo.md"),
             "new_string": "b",
@@ -511,8 +537,11 @@ def test_task_file_path_outside_claude_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_write(repo / "elsewhere.md", "## Current task\n\nx\n"),
-        "todo": None,
+        "task": {
+            "file_path": str(repo / "elsewhere.md"),
+            "content": "## Current task\n\nx\n",
+        },
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -527,12 +556,12 @@ def test_todo_file_path_outside_claude_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
+        "task": task_clear(),
         # Never written; only tested for rejection.
-        "todo": task_write(
-            "/tmp/not-the-project/.claude/handoff-todo.md",  # noqa: S108
-            "## Remaining\n\n- x\n",
-        ),
+        "todo": {
+            "file_path": "/tmp/not-the-project/.claude/handoff-todo.md",  # noqa: S108
+            "content": "## Remaining\n\n- x\n",
+        },
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -560,7 +589,7 @@ def test_task_content_null_no_file_path_noop(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": {"content": None},
-        "todo": None,
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -581,7 +610,7 @@ def test_task_file_path_content_null_noop(tmp_path: Path) -> None:
             "file_path": str(repo / ".claude" / "handoff-task.md"),
             "content": None,
         },
-        "todo": None,
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -599,7 +628,7 @@ def test_todo_content_null_no_file_path_noop(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
+        "task": task_clear(),
         "todo": {"content": None},
     }
     result = run_checkpoint(repo, payload)
@@ -618,7 +647,7 @@ def test_todo_file_path_content_null_noop(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
+        "task": task_clear(),
         "todo": {
             "file_path": str(repo / ".claude" / "handoff-todo.md"),
             "content": None,
@@ -645,10 +674,8 @@ def test_task_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_write(
-            repo / ".claude" / "handoff-task.md", "## Current task\n\nreal content\n"
-        ),
-        "todo": None,
+        "task": task_content(repo, "## Current task\n\nreal content\n"),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -668,11 +695,8 @@ def test_task_write_only_headings_removed_manifest_records_d(tmp_path: Path) -> 
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_write(
-            repo / ".claude" / "handoff-task.md",
-            "## Current task\n\n## Open decisions\n",
-        ),
-        "todo": None,
+        "task": task_content(repo, "## Current task\n\n## Open decisions\n"),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -691,10 +715,8 @@ def test_todo_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": task_write(
-            repo / ".claude" / "handoff-todo.md", "## Remaining\n\n- an item\n"
-        ),
+        "task": task_clear(),
+        "todo": todo_content(repo, "## Remaining\n\n- an item\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -713,8 +735,8 @@ def test_todo_write_no_items_removed_manifest_records_d(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": task_write(repo / ".claude" / "handoff-todo.md", "## Remaining\n"),
+        "task": task_clear(),
+        "todo": todo_content(repo, "## Remaining\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -736,12 +758,8 @@ def test_todo_edit_replaces_first_occurrence_stages_w(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "old_string": "- finish A\n",
-            "new_string": "",
-        },
+        "task": task_clear(),
+        "todo": todo_edit(repo, "- finish A\n", ""),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -763,12 +781,8 @@ def test_todo_edit_old_string_absent_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "old_string": "- not present",
-            "new_string": "- x",
-        },
+        "task": task_clear(),
+        "todo": todo_edit(repo, "- not present", "- x"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -786,12 +800,8 @@ def test_todo_edit_old_string_ambiguous_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "old_string": "- dup",
-            "new_string": "- single",
-        },
+        "task": task_clear(),
+        "todo": todo_edit(repo, "- dup", "- single"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -807,12 +817,8 @@ def test_todo_edit_requested_file_missing_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "old_string": "a",
-            "new_string": "b",
-        },
+        "task": task_clear(),
+        "todo": todo_edit(repo, "a", "b"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -828,8 +834,8 @@ def test_todo_null_untouched_list_left_alone(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -849,8 +855,8 @@ def test_rename_only_manifest_present_empty_sentinel_written(tmp_path: Path) -> 
         "rename": "Two Words Title",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -871,8 +877,8 @@ def test_multiline_title_flattened_to_one_line(tmp_path: Path) -> None:
         "rename": "Two  Words\nAnd More",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -889,8 +895,8 @@ def test_whitespace_only_title_errors(tmp_path: Path) -> None:
         "rename": "   ",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -906,8 +912,8 @@ def test_precompact_nothing_touched_manifest_still_written_empty(
         "commit": "without-commit",
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -924,12 +930,8 @@ def test_task_and_todo_both_written_manifest_lists_both(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_write(
-            repo / ".claude" / "handoff-task.md", "## Current task\n\nbody\n"
-        ),
-        "todo": task_write(
-            repo / ".claude" / "handoff-todo.md", "## Remaining\n\n- x\n"
-        ),
+        "task": task_content(repo, "## Current task\n\nbody\n"),
+        "todo": todo_content(repo, "## Remaining\n\n- x\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -950,8 +952,8 @@ def test_clear_missing_under_handoff_errors(tmp_path: Path) -> None:
         "commit": "with-commit",
         "rename": "T",
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -966,8 +968,8 @@ def test_clear_not_boolean_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": "yes",
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -982,8 +984,8 @@ def test_clear_present_under_precompact_errors(tmp_path: Path) -> None:
         "clear": True,
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -996,8 +998,8 @@ def test_compact_missing_under_precompact_errors(tmp_path: Path) -> None:
         "skill": "precompact",
         "commit": "with-commit",
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1013,8 +1015,8 @@ def test_compact_present_under_handoff_errors(tmp_path: Path) -> None:
         "clear": False,
         "compact": True,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1028,8 +1030,8 @@ def test_compact_neither_boolean_nor_string_errors(tmp_path: Path) -> None:
         "commit": "with-commit",
         "compact": ["focus"],
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1043,8 +1045,8 @@ def test_empty_compact_directive_errors(tmp_path: Path) -> None:
         "commit": "with-commit",
         "compact": "",
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1058,8 +1060,8 @@ def test_multiline_compact_directive_errors(tmp_path: Path) -> None:
         "commit": "with-commit",
         "compact": "keep the parser\nand the tests",
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1073,8 +1075,8 @@ def test_continue_missing_errors_at_either_boundary(tmp_path: Path) -> None:
         "commit": "with-commit",
         "rename": "T",
         "clear": True,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1084,8 +1086,8 @@ def test_continue_missing_errors_at_either_boundary(tmp_path: Path) -> None:
         "skill": "precompact",
         "commit": "with-commit",
         "compact": True,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1100,8 +1102,8 @@ def test_continuation_against_untyped_transition_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": "pick up per the task file",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1112,8 +1114,8 @@ def test_continuation_against_untyped_transition_errors(tmp_path: Path) -> None:
         "commit": "with-commit",
         "compact": False,
         "continue": "pick up per the task file",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1128,8 +1130,8 @@ def test_multiline_continuation_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": True,
         "continue": "first line\nsecond line",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1144,8 +1146,8 @@ def test_continuation_beginning_with_slash_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": True,
         "continue": "/resume the work",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1160,8 +1162,8 @@ def test_whitespace_only_continuation_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": True,
         "continue": "   ",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1176,8 +1178,8 @@ def test_continue_neither_null_nor_string_errors(tmp_path: Path) -> None:
         "rename": "T",
         "clear": True,
         "continue": True,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -1195,8 +1197,8 @@ def test_handoff_clear_true_no_continuation(tmp_path: Path) -> None:
         "rename": "A Title",
         "clear": True,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1214,8 +1216,8 @@ def test_handoff_clear_true_with_continuation(tmp_path: Path) -> None:
         "rename": "A Title",
         "clear": True,
         "continue": "pick up per the task file",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1232,8 +1234,8 @@ def test_precompact_compact_false_two_line_marker(tmp_path: Path) -> None:
         "commit": "without-commit",
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1247,8 +1249,8 @@ def test_precompact_compact_true_no_continuation_bare_compact(tmp_path: Path) ->
         "commit": "without-commit",
         "compact": True,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1265,8 +1267,8 @@ def test_precompact_focus_directive_and_continuation_both_carried(
         "commit": "without-commit",
         "compact": "keep the parser work",
         "continue": "continue with task 3",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1288,8 +1290,8 @@ def test_typed_transition_with_memory_gate_pending_held(tmp_path: Path) -> None:
         "rename": "A Title",
         "clear": True,
         "continue": "pick up per the task file",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1307,8 +1309,8 @@ def test_held_sentinel_names_the_session_that_holds_it(tmp_path: Path) -> None:
         "rename": "A Title",
         "clear": True,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1327,8 +1329,8 @@ def test_typed_transition_no_memory_gate_armed_no_arming_instruction(
         "rename": "A Title",
         "clear": True,
         "continue": "pick up per the task file",
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1346,8 +1348,8 @@ def test_untyped_handoff_still_types_rename_so_it_holds_too(tmp_path: Path) -> N
         "rename": "A Title",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1366,8 +1368,8 @@ def test_sentinel_typing_nothing_arms_even_with_memory_gate_pending(
         "commit": "without-commit",
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1584,8 +1586,8 @@ def handoff_payload(commit: str) -> dict[str, object]:
         "rename": "Session Title",
         "clear": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
 
 
@@ -1595,8 +1597,8 @@ def precompact_payload(commit: str) -> dict[str, object]:
         "commit": commit,
         "compact": False,
         "continue": None,
-        "task": None,
-        "todo": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
     }
 
 
@@ -1790,8 +1792,8 @@ def test_each_boundary_composes_own_directive_not_the_others(
             "rename": "T",
             "clear": False,
             "continue": None,
-            "task": None,
-            "todo": None,
+            "task": task_clear(),
+            "todo": todo_keep(),
         }
     else:
         payload = {
@@ -1799,8 +1801,8 @@ def test_each_boundary_composes_own_directive_not_the_others(
             "commit": "without-commit",
             "compact": False,
             "continue": None,
-            "task": None,
-            "todo": None,
+            "task": task_clear(),
+            "todo": todo_keep(),
         }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0

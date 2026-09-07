@@ -137,6 +137,15 @@ warn_unreachable = true
 # extra_checks and local_partial_types are already implied by strict on 2.x.
 allow_redefinition = true
 
+[[tool.mypy.overrides]]
+# task_clear()/todo_keep() are payload factories that deliberately return None
+# (today's "leave it alone"/"no file" spelling) and are called for that value
+# in dict literals throughout the suite — the pattern strict mode's
+# func-returns-value check exists to catch a *forgotten* return, not this
+# intentional one.
+module = "test_checkpoint"
+disable_error_code = ["func-returns-value"]
+
 [tool.ty.environment]
 # scripts/ holds importable modules (worktree_root) reached without a
 # package prefix; mirror pytest's pythonpath and mypy's mypy_path.
