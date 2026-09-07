@@ -271,6 +271,18 @@ byte-for-byte and the suite is green at its start and its end.
   - `apply_task(root: Path, action: str, content: str) -> list[str]` — manifest lines; `["D .claude/handoff-task.md"]` only when a file was actually removed, `[]` otherwise
   - `apply_todo(root: Path, action: str, content: str, old: str, new: str) -> list[str]` — same contract for the todo path; `"keep"` returns `[]` without touching the file
 
+  **List revision (recorded 2026-09-07, from Item 0.1's execution):** Item 0.1
+  had to add a scoped `[[tool.mypy.overrides]]` block to `pyproject.toml`
+  disabling `func-returns-value` for the `test_checkpoint` module — under
+  `strict`, mypy rejects every call site that uses `task_clear()`/`todo_keep()`'s
+  deliberate `None` return as a dict value. That override is **transient**: this
+  item flips both factories to return `{"action": "clear"}` / `{"action":
+  "keep"}`, dicts rather than `None`, so the check can no longer fire and the
+  block becomes dead config. Delete it in slice 1, in the same dispatch that
+  flips the factories, and confirm `just precommit` stays green without it.
+  Leaving it is exactly the vestigial residue this repo's removal convention
+  forbids.
+
   Note for the executor: `validate_task` and `validate_todo` lose their `root`
   parameter — the only signature change, though `main` also gains the
   boundary-skill gate around all four calls. Neither returns `"none"` any
