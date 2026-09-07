@@ -324,6 +324,24 @@ byte-for-byte and the suite is green at its start and its end.
   manifest assertion is the whole of what makes the never-existed halves
   evidence.
 
+  **A third note for slice 4 (recorded 2026-09-07, from slice 3's review):
+  assert the exact manifest line, never a bare filename substring.** Slice 3's
+  review found two rows in its table that could not tell `task.action:
+  required` from the absent-key `task: required, …` — merging the two
+  diagnostics left the whole file green — and a third that stayed green under a
+  *weakened* `old_string` guard rather than a deleted one, because the
+  downstream `todo.old_string: edit requested but … does not exist` error
+  carries the same bare `old_string` substring at the same exit code. Two
+  distinct code paths reaching one channel with one substring in common is what
+  makes the assertion vacuous. Slice 4 reaches a channel with the same
+  property: the manifest is a list several routes append to, and `W` and `D`
+  for one path differ by a single leading character. The positive halves must
+  therefore assert the exact line — membership in `.splitlines()`, as the
+  existing rows already do — and the never-existed halves' negative is the one
+  place a *broader* absence (`"handoff-task.md" not in` the whole text, neither
+  `W` nor `D`) is the stronger claim, since there the breadth runs with the
+  assertion rather than against it.
+
   Rows deleted with the forms they cover, not inverted — an inverted test of a
   form that no longer exists is an absence-guard defending nothing:
   `test_task_content_null_no_file_path_noop` (554),
