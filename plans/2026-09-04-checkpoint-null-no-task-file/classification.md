@@ -8,8 +8,9 @@
   … File present ⟹ content pending"), and the mechanism is the already-correct
   empty-body delete path in `apply_task`. Each NFR has measurable criterion:
   **N/A** — no NFR in play; NFR1 (no git/tmux in the agent's Bash) is unchanged.
-- **Routing:** Proceed to triage. Two open *decisions* remain (todo symmetry,
-  absent-key semantics) — decisions for my human partner, not requirements gaps.
+- **Routing:** Proceed to triage. The open *decisions* (todo symmetry,
+  absent-key semantics, and the payload shape itself) were settled at the
+  `/proof` pass on `outline.md`, 2026-09-07.
 
 ## Classification
 
@@ -19,8 +20,9 @@
 - **Requirement stability:** Moderate — the primary FR is settled, but the
   brief leaves the `todo` question open and does not address absent-key
   semantics at all.
-- **Behavioral code check:** **Yes** — changes two return branches in
-  `validate_task`, adding a logic path. Moderate minimum.
+- **Behavioral code check:** **Yes** — replaces the payload layer: both
+  validators, both appliers, and the tagged-union dispatch that supersedes
+  `validate_todo`'s key-combination sniffing. Moderate minimum.
 - **Work type:** Production
 - **Artifact destination:** mixed, dominant **production** — `scripts/` plus
   `agentic-prose` (`skills/handoff/SKILL.md`, `skills/precompact/SKILL.md`) and
@@ -48,6 +50,9 @@ wrong call. Untouched and verified out of scope: the composer/parser pair
 (`checkpoint.py` ↔ `handoff_drive_read`) and the two empty-body writers
 (`checkpoint.py` ↔ `write-stage.sh` via `is_empty_body`).
 
-**Author change:** checkpoint payload semantics for `task`.
+**Author change:** the checkpoint payload contract for `task` and `todo`.
 **Coupled corrector:** none in the edify table; the coupled *documents* are the
-two SKILL.md bodies. **Update needed: yes** — in scope.
+two SKILL.md bodies, `docs/design.md` (which states the payload shape as a
+design decision at 219-222 and FR5's form vocabulary at 139-141), and
+`CLAUDE.md` (Layout and Testing both enumerate the schema). **Update needed:
+yes** — all in scope.

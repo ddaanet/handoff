@@ -1,111 +1,195 @@
-# Outline — `"task": null` means "no task file"
+# Outline — the checkpoint payload names its actions
 
 Source brief: `plans/2026-09-03-brief-checkpoint-null-no-task-file.md`.
 Classification: Moderate / Production — see `classification.md`.
 
+The directory name is a write-time handle from the brief; the job has since
+grown past it. What follows is the current shape.
+
 ## Scope
 
-`"task": null`, and its documented sibling `"task": {"file_path": …,
-"content": null}`, currently exit 0 and touch nothing. Both must mean **no task
-file**: the file is removed and the removal staged, per **FR6** (*file present ⟹
-content pending*). No new requirement — this is FR6 conformance.
+`"task": null` — the spelling an agent reaches for to mean *no task file* —
+currently exits 0 and touches nothing. Rather than give `null` that meaning,
+the payload stops overloading it: `task` and `todo` each carry their content
+directly as a string, and the special cases are named by a tagged action.
+FR6 (*file present ⟹ content pending*) is then satisfied by a form that says
+what it does.
 
-**IN:** `scripts/checkpoint.py` (`validate_task`, and `apply_task`'s manifest
-rule); `tests/test_checkpoint.py`; both SKILL.md bodies; `docs/design.md` +
-a `docs/changelog/` entry.
+```
+"task": "<content>" | {"action": "clear"}
+"todo": "<content>" | {"action": "clear"} | {"action": "keep"}
+                    | {"action": "edit", "old_string": "…", "new_string": "…"}
+```
 
-**OUT:** `todo` semantics (decision 1 below), `write-stage.sh`, `bash-post.sh`,
-`is_empty_body`, the sentinel composer/parser pair. No back-compat branch for
-the old `null` meaning — user base of one, fix forward
+`file_path` goes: `apply_task`/`apply_todo` compose the real path from
+`HANDOFF_ROOT` themselves, so the field was validated against a constant and
+discarded — never load-bearing. Removing it also removes the failure mode its
+guard existed to catch, since the agent can no longer name a path at all.
+
+`null` becomes invalid on both fields, naming the field and the action to use
+instead. That is the point: the defect being fixed is an agent choosing a
+spelling that silently did the wrong thing, so the wrong spelling must fail
+loudly rather than acquire a meaning. `null` stays valid on `continue`, where
+it has exactly one meaning.
+
+**IN:** `scripts/checkpoint.py`, `scripts/bash-post.sh`,
+`tests/test_checkpoint.py`, both wrap-up SKILL.md bodies, `docs/design.md`,
+`docs/changelog/` + its index, `CLAUDE.md`.
+
+**OUT:** `write-stage.sh`, `is_empty_body`, the sentinel composer/parser pair,
+the `autoname`/`restart` payloads (neither carries `task` or `todo`). No
+back-compat branch for the old shape — user base of one, fix forward
 (`no-transition-special-cases`).
 
-## Decisions this outline applies (each is my human partner's to confirm)
+## Decisions this outline applies
 
-1. **`todo` does not follow.** `null` there keeps meaning "not speaking about
-   todo this call". FR5 gives the asymmetry independently: the task file is
-   authored whole, so `null` can only mean absent; the todo file is
-   incrementally edited and has the Edit form precisely so it can change
-   without regeneration. `test_todo_null_untouched_list_left_alone` stands.
-2. **`task` becomes required under `handoff`/`precompact`, by key presence.**
-   Today an absent key and `null` are indistinguishable (`payload.get("task")`).
-   Once `null` deletes, a call that simply *forgets* `task` silently destroys a
-   git-tracked file — a new silent-destructive path of exactly the class this
-   fix closes. Key-presence-required-with-no-default is already the house rule
-   for `clear`, `compact`, `continue` and `rename`. `todo` stays optional,
-   because its `null` is non-destructive. Both SKILL.md bodies already always
-   emit `task`, so no caller changes.
-3. **A `D` manifest line is emitted only when a file was actually removed** —
-   applied uniformly, so `null` and `content: ""` are one code path. Today
-   `apply_task` writes-then-unlinks unconditionally and always emits `D`; on a
-   never-existed file that makes `bash-post.sh` run a `git add` that exits 128
-   into its `2>/dev/null` (verified), so the manifest claims a deletion that
-   never happened. The alternative — always emit `D`, keeping the two forms
-   identically noisy — needs no change to `apply_task` but puts that dead
-   `git add` on the common rename-only path.
+1. **A tagged union, not sentinel strings.** Bare `"@empty"`/`"clear"` tokens
+   were weighed and rejected: a typo in a bare sentinel is indistinguishable
+   from content and silently writes a one-line file — the original defect
+   class at a new spelling. `{"action": "emty"}` is a schema error naming the
+   field. This also folds todo's Edit form into the same union, replacing
+   `validate_todo`'s `has_content`/`has_old`/`has_new` key-combination
+   sniffing with one dispatch.
+2. **Every payload field is required by key presence, with no default** —
+   `task`, `todo`, `clear`, `compact`, `continue`, `rename`. One rule, no
+   per-field carve-out. `{"action": "keep"}` is what expresses "this call says
+   nothing about the list", so `todo`'s optionality is redundant. Both SKILL.md
+   bodies already emit both fields, so no caller changes.
+3. **Removal is unlink-if-present, and `D` records only a removal that
+   happened.** Existence is sampled before any write; `{"action": "clear"}`
+   writes nothing at all. This covers both routes to removal — the explicit
+   clear, and a write whose body turns out empty under `is_empty_body` — in
+   one shape, and keeps `apply_task` and `apply_todo` aligned.
+4. **`bash-post.sh`'s `2>/dev/null` goes with it.** The phantom `D` was the
+   only expected failure that redirect covered; with no manifest line naming a
+   file that never existed, a failed `git add` is a real defect and is
+   currently silent on both channels (a stranded `index.lock` surfaces as
+   `staged 0, deleted 0`). Guarding the expected failure away rather than
+   redirecting is the remedy `no-stderr-suppression` prescribes.
 
 ## Per-file changes
 
 ### `scripts/checkpoint.py`
 
-- `validate_task` (~264): the two `return "none", ""` branches (`task is None`
-  at 267, `content: None` at 273) become `return "write", ""`, routing both
-  into the existing empty-body delete path. Add the required-key check for
-  `handoff`/`precompact` (decision 2), erroring by name per FR2.
-- `apply_task` (~358): emit `D` only when a file was actually removed
-  (decision 3). `content: ""` and the `null` forms share the branch.
-- `validate_todo`/`apply_todo`: **unchanged**.
+- `validate_task`: replaced, not patched. The `file_path` block (275–290) and
+  the `old_string`/`new_string` guard go — a bare string cannot carry either.
+  Accepts a string or `{"action": "clear"}`; rejects `null`; requires the key.
+- `validate_todo`: the largest change. `_todo_file_path` (294–304) is deleted
+  outright; the `file_path` requirement (326–328) goes; the key-combination
+  branching (316–340) collapses into a dispatch on `action`.
+- `apply_task` / `apply_todo`: unlink-if-present, existence sampled first, `D`
+  only on an actual removal.
+
+### `scripts/bash-post.sh`
+
+- Line 36: drop `2>/dev/null`; report a failed `git add` on both channels
+  rather than dropping the path from the counts.
 
 ### `tests/test_checkpoint.py`
 
-- Invert `test_task_content_null_no_file_path_noop` (~554) and
-  `test_task_file_path_content_null_noop` (~572): the file is removed and the
-  removal reaches the manifest when one existed. Rename off `_noop`.
-- Add: `null` against a **pre-existing** task file removes it and records `D`
-  (no test creates that file today — verified — so this path is currently
-  uncovered).
-- Amend `test_task_write_only_headings_removed_manifest_records_d` (~663): no
-  file pre-existed, so under decision 3 it records no `D`. Split into the
-  pre-existing case (records `D`) and the never-existed case (does not).
-- Add: `task` key absent under `handoff` and under `precompact` errors naming
-  the field; `task` still forbidden by key presence under `autoname`/`restart`.
-- Filler tolerance: 61 payloads pass `"task": None` and none pre-create the
-  file, so the delete is a no-op for them; the two that assert
-  `manifest.stat().st_size == 0`
-  (`test_rename_only_manifest_present_empty_sentinel_written` ~844,
-  `test_precompact_nothing_touched_manifest_still_written_empty` ~900) stay
-  green under decision 3 and would break under the alternative.
+The suite is **not** inert under this change — the opposite. Counted: 61
+`"task": None`, 57 `"todo": None`, 11 `task_write(...)` call sites, 25
+`file_path` occurrences, none behind a payload factory. Roughly 130 mechanical
+edits across 1893 lines, which slice 0 below reduces to four helper bodies.
+
+- Delete (not invert) `test_task_content_null_no_file_path_noop` (~554) and
+  `test_task_file_path_content_null_noop` (~572): both exercise forms that
+  cease to exist. Inverting a test whose premise is gone leaves an
+  absence-guard (`remove-cleanly-no-vestigial`).
+- Delete the `file_path`-outside-root and `content`+`old_string` rows with the
+  forms they cover.
+- Add: `null` rejected by name on each field; each field's key absent rejected
+  by name; an unknown `action` rejected by name; `{"action": "clear"}` against
+  a pre-existing file removes it and records `D`; against a never-existed file
+  removes nothing and records no `D`; `{"action": "keep"}` leaves the list
+  alone.
+- Amend `test_task_write_only_headings_removed_manifest_records_d` (~663) into
+  the pre-existing and never-existed cases.
 
 ### `skills/handoff/SKILL.md` and `skills/precompact/SKILL.md`
 
-State the asymmetry rather than leaving it inferred — as written both describe
-`task` and `todo` identically, which is what produced the wrong call. `task`:
-`null` means there is no task file, and the checkpoint removes any stale one.
-`todo`: `null` means this call says nothing about the list, which is left as
-the agent edited it. Keep NFR3 in view — replace wording, do not add a
-paragraph.
+`skills/handoff/SKILL.md:101-103` — "*`task` and `todo` are each the file's
+content, or `null` when there is nothing to say for that file*" — is the
+defect's origin: it tells the agent `null` means "nothing to say", which for
+`task` reads as "no task file". `skills/precompact/SKILL.md:64-65` repeats it.
+Both go, along with `handoff/SKILL.md:98`'s "*or omit the whole field with
+null*", which conflates omitting a key with nulling it.
 
-### `docs/design.md` + `docs/changelog/2026-09-04-null-is-absence.md`
+The replacement names the four actions instead of teaching a rule, and the
+`<abs path to>/.claude/handoff-task.md` interpolation disappears from both
+examples — the agent no longer composes a path it has to derive from a root it
+cannot read. Shorter than what it replaces, so NFR3 is comfortable.
 
-Changelog entry carries the write-time record: the observed failure (2026-09-02,
-handoff 0.13.1 — a frame stating a finished release was still unpublished
-survived into the next session), the two rejected approaches from the brief
-(error on `null`; document the `""` workaround), and the three decisions above.
-Design doc: the `null`-is-absence rule and the task/todo asymmetry belong beside
-FR5/FR6 and the existing "**The task file is checkpoint-only; the todo file is
-not**" decision. Present tense, no status stamp, no byte counts.
+### `docs/design.md`, `docs/changelog/`, `CLAUDE.md`
+
+- `docs/design.md:219-222` states the payload shape as a deliberate choice —
+  `task`/`todo` "in the harness's own tool-call shape" — and this reverses that
+  rationale. It takes a superseding pointer, not a wording edit.
+- `docs/design.md`'s rejected-alternatives section takes the magic-string
+  sentinel with its reasoning — a typo in a bare token is indistinguishable
+  from content and is written as content. Nothing else in the repo carries
+  that argument, and it is the one a future session will re-propose: the
+  first shape considered at the proof pass was itself a bare sentinel.
+- `docs/design.md:139-141` states **FR5** in Write-form/Edit-form vocabulary
+  that ceases to exist. FR5's substance survives (incremental todo update is
+  still supported) and is restated in action terms. FR6 is unaffected.
+- `docs/changelog/2026-09-07-the-payload-names-its-actions.md` — the write-time
+  record, leading with the motivating incident (2026-09-02, handoff 0.13.1: a
+  frame stating a finished release was still unpublished survived into the next
+  session), then the positive design. Rejected alternatives, five:
+  error on `null`; document the `""` workaround; **make `null` delete** (this
+  outline's own approach until 2026-09-07, and the minimal fix, so it is the
+  one a future reader will re-propose); bare magic-string sentinels; keeping
+  `file_path` as a cross-project guard.
+- Its one-line entry in `docs/changelog.md` — required in the same pass.
+- `CLAUDE.md`: the Layout section's description of the payload, and the Testing
+  section's enumeration of covered schema rows, which names `content`+
+  `old_string` and `file_path` outside `$root/.claude/` verbatim.
 
 ## Dependencies and phase shape
 
-Strictly sequential, one slice: schema + apply are one behavioral change and
-their tests red together. Suggested typing for `/runbook` — **tdd** for
-`checkpoint.py` + `tests/test_checkpoint.py` (genuine red is available without
-a stub: the inverted assertions fail against unchanged code), **inline** for the
-two SKILL.md bodies and the docs.
+Five slices. Slice 0 is load-bearing: without it, the moment the schema changes
+~118 payloads red for reasons unrelated to the behavior under test, and the new
+assertions are invisible in that output (`genuine-red-not-missing-sut`).
+
+- **Slice 0 — `general`, no behavior change.** Route every test payload through
+  factory helpers (`task_content`, `task_clear`, `todo_keep`, `todo_edit`)
+  emitting today's dicts. Suite green throughout; the diff is mechanical. This
+  turns ~130 literal edits into four helper bodies.
+- **Slice 1 — `tdd`.** The payload-layer rewrite, with the factories flipped to
+  the new shapes. Red is then the new assertions plus the factories — a genuine
+  assertion red, no stub needed.
+- **Slice 2 — `inline`.** `bash-post.sh:36`. Coupled to slice 1 by cause;
+  separate to keep the tdd slice single-purpose.
+- **Slice 3 — `inline`.** Both SKILL.md bodies.
+- **Slice 4 — `inline`.** `docs/design.md`, the changelog entry, its index
+  line, `CLAUDE.md`.
 
 ## Verification
 
-`just precommit` (lints, `shellcheck -x`, ruff/docformatter/mypy/ty, `bats
-tests/*.bats` + `pytest`). The payload contract changes (`task` required,
-`null` semantics) but neither output file's markdown shape does, so
-`CLAUDE.md`'s breaking-change rule is not triggered on its own terms; the
-release call is my human partner's.
+`just precommit` (lints, `shellcheck -x` — which covers `bash-post.sh` —
+ruff/docformatter/mypy/ty, `bats tests/*.bats` + `pytest`).
+
+**The producer and consumer of this schema go live at different times.**
+`checkpoint.py` runs through the `bin/handoff-checkpoint` shim and is live the
+moment it is written; both SKILL.md bodies are snapshotted at session start
+(`stale-plugin-code`). Between slice 1 and a reload, a live session emits the
+old payload into the new validator, which rejects it — so `/handoff` and
+`/handoff:precompact` fail outright in the session doing the work. Loud, which
+is the right failure, but the remedy is `/reload-plugins` for the bodies, or
+`/handoff:restart`.
+
+**A version bump is a delivery requirement, not a breakage question.** The
+payload is an internal contract between two files shipping in the same plugin,
+with no external producer, so it cannot desynchronize across a release
+boundary — the markdown shape of neither output file changes and `CLAUDE.md`'s
+breaking-change rule is untouched. But the marketplace cache is keyed by
+version: a push under an unchanged version reaches no installed repo and
+`/plugin update` re-fetches nothing. The release call stays my human partner's;
+"no bump" is not among the outcomes that deliver the fix.
+
+**Before dogfooding, establish which plugin root is loaded** — the
+version-keyed cache or `--plugin-dir` — since it decides whether editing the
+working tree changes anything live. `installed_plugins.json`, or grep the
+transcript for `plugins/cache/<owner>/handoff/<version>/`. Then one real
+`/handoff` call, the day it lands.

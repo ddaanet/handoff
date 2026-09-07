@@ -1,3 +1,8 @@
 ## Current task
 
-The design pass for the checkpoint null-means-no-task-file fix is complete. `plans/2026-09-04-checkpoint-null-no-task-file/` holds `classification.md` (Moderate / Production) and `outline.md`, grounded against `scripts/checkpoint.py` and the source brief at `plans/2026-09-03-brief-checkpoint-null-no-task-file.md`. The outline applies three decisions my human partner has not yet confirmed; `/proof` on the outline, then `/runbook`, is the next step.
+The `/proof` pass on the checkpoint-payload outline is complete:
+`plans/2026-09-04-checkpoint-null-no-task-file/outline.md` is rewritten around
+a new subject — the payload names its actions instead of overloading `null` —
+and `classification.md`'s routing, evidence and coupling lines are corrected to
+match. `/runbook` on that outline is the next step, decomposing its five slices
+into phases.
