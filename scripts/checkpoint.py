@@ -302,12 +302,7 @@ def validate_todo(payload: JSONDict) -> tuple[str, str, str, str]:
         if action == "keep":
             return "keep", "", "", ""
         if action == "edit":
-            if "old_string" not in todo:
-                err("todo.old_string", 'required for {"action": "edit"}')
-            if "new_string" not in todo:
-                err("todo.new_string", 'required for {"action": "edit"}')
-            old_string = cast("str", todo["old_string"])
-            new_string = cast("str", todo["new_string"])
+            old_string, new_string = _todo_edit_strings(todo)
             return "edit", "", old_string, new_string
         if action is None:
             err("todo.action", "required")
@@ -317,6 +312,25 @@ def validate_todo(payload: JSONDict) -> tuple[str, str, str, str]:
         f"must be a content string or an object naming an action, got {ttype}",
     )
     raise AssertionError("unreachable")  # err() always raises
+
+
+def _todo_edit_strings(todo: JSONDict) -> tuple[str, str]:
+    """Return the edit action's (old_string, new_string), both required strings.
+
+    Typing them here is what keeps `edit` from being the one arm of the union
+    that types nothing: every other arm's payload is a checked string, and an
+    unchecked one reaches apply_edit's `content.count(old)` as a TypeError,
+    which exits 1 and names no field (FR2).
+    """
+    strings: list[str] = []
+    for key in ("old_string", "new_string"):
+        if key not in todo:
+            err(f"todo.{key}", 'required for {"action": "edit"}')
+        ktype = _json_type(todo[key])
+        if ktype != "string":
+            err(f"todo.{key}", f"must be a string, got {ktype}")
+        strings.append(cast("str", todo[key]))
+    return strings[0], strings[1]
 
 
 def apply_edit(field: str, path: Path, old: str, new: str) -> None:

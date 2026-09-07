@@ -451,6 +451,16 @@ def test_precompact_with_rename_omitted_accepted(tmp_path: Path) -> None:
             {"action": "edit", "old_string": "a"},
             'new_string: required for {"action": "edit"}',
         ),
+        (
+            "todo",
+            {"action": "edit", "old_string": 5, "new_string": "b"},
+            "old_string: must be a string, got number",
+        ),
+        (
+            "todo",
+            {"action": "edit", "old_string": "a", "new_string": None},
+            "new_string: must be a string, got null",
+        ),
     ],
     ids=[
         "task_unknown_action",
@@ -463,6 +473,8 @@ def test_precompact_with_rename_omitted_accepted(tmp_path: Path) -> None:
         "todo_not_string_or_object",
         "todo_edit_missing_old_string",
         "todo_edit_missing_new_string",
+        "todo_edit_old_string_not_a_string",
+        "todo_edit_new_string_not_a_string",
     ],
 )
 def test_task_or_todo_action_vocabulary_errors_naming_field(
@@ -473,9 +485,13 @@ def test_task_or_todo_action_vocabulary_errors_naming_field(
     Both fields dispatch on an `action` key, and `edit`'s own required keys
     are checked by the same dispatch: an unknown action, a missing `action`
     key, a value that is neither string nor object, `task` receiving a
-    `todo`-only action (`keep`, `edit`), and `edit` missing either required
-    key independently — each exits 2 naming the offending field and its own
-    reason.
+    `todo`-only action (`keep`, `edit`), and `edit` missing — or mistyping —
+    either required key independently: each exits 2 naming the offending field
+    and its own reason. The two mistyped rows are what keeps `edit` from being
+    the one arm of the union that types nothing: every other arm's content is
+    a checked string, and an unchecked one reaches `apply_edit`'s
+    `content.count(old)` as a TypeError traceback, which exits 1 and names no
+    field.
 
     `task_edit_rejected`, `todo_edit_missing_old_string` and
     `todo_edit_missing_new_string` restate, in action vocabulary,

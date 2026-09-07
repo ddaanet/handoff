@@ -115,6 +115,12 @@ file it is false:
   `test_todo_edit_replaces_first_occurrence_stages_w`, and
   `test_task_and_todo_both_written_manifest_lists_both`.
 
+> **Amended at the Phase 1 checkpoint review, 2026-09-07.** Against the tree as
+> committed at `87ce9c5`, M2 reds **13**. The eleventh extra is
+> `test_task_clear_removes_pre_existing_file_manifest_records_d`, which gained
+> a `W .claude/handoff-todo.md` assertion when the orchestrator closed the
+> residual below in the same commit. M1 still reds exactly 6.
+
 Neither excess is a defect in the tests — the extra reds are correct coverage,
 and M1's in particular are the direct confirmation that residual 1 really is
 "the half slice 2 left open". The defect is in the record: a stated fact that a
@@ -192,6 +198,14 @@ outside the four is out ("record it as a routed residual rather than fixing
 it"). The fix is one line — `"todo": todo_content("## Remaining\n\n- an
 item\n")` in the pre-existing half — for whichever slice next touches those
 rows.
+
+> **Closed 2026-09-07, in commit `87ce9c5`** — the orchestrator applied that
+> one line rather than carrying it forward, on the ground that this item is
+> what introduced the asymmetry. Confirmed at the Phase 1 checkpoint review:
+> both halves of the pair now carry `todo_content("## Remaining\n\n- an
+> item\n")`, and the pre-existing half reds under M2 (which is why M2's
+> full-file red set is 13 rather than the 12 measured above). Nothing routed
+> out of Item 1.2 remains open.
 
 No other instance of the defect class survives in this file: the only
 manifest-absence assertions are at lines 644, 688, 760 and 861, and all four now

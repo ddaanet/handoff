@@ -150,6 +150,15 @@ state.
 > redded by every mutation. What the original sentence asserted was a
 > full-suite property that no run in this dispatch established.
 
+> **Amended at the Phase 1 checkpoint review, 2026-09-07.** Re-run against the
+> tree as committed at `87ce9c5`, **M2 reds 13, not 12** — M1 still reds 6. The
+> extra row is `test_task_clear_removes_pre_existing_file_manifest_records_d`,
+> which acquired a `W .claude/handoff-todo.md` assertion in the same commit:
+> the review recorded the pair-symmetry break as a routed residual, and the
+> orchestrator closed it in the commit that caused it. So the count above is
+> correct for the tree the review measured and one short for the tree that
+> landed. The property the matrix rests on is unaffected.
+
 ### Representative evidence (full output)
 
 M1, before (unamended rows, mutation applied):

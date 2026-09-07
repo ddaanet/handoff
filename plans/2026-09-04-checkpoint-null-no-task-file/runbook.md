@@ -309,6 +309,7 @@ byte-for-byte and the suite is green at its start and its end.
   not to slice 2. Cheapest form: parametrize
   `test_task_write_creates_file_manifest_records_w` and
   `test_todo_write_creates_file_manifest_records_w` over `skill` the same way.
+  **Closed by Item 1.2 (residual 1), commit `87ce9c5`.**
 
   Two notes for slice 4 from the slice 1 code review, neither obvious from the
   diff. First, the collapse is two edits, not a rewrite: hoist
@@ -441,6 +442,26 @@ byte-for-byte and the suite is green at its start and its end.
   silently no-op'd restore stacked one mutation on the next in an earlier
   review and read as exactly the "mutations are not disjoint" finding the
   matrix exists to detect.
+
+  **A third residual, recorded and closed in the same commit (`87ce9c5`):**
+  amending `test_task_clear_never_existed_writes_nothing_no_d` to carry a live
+  todo line broke the symmetry of slice 1's `clear` pair, whose other half was
+  still on `todo_keep()`. Item 1.2's review routed it forward as a committed
+  slice 1 row; the orchestrator applied the one-line fix instead, since this
+  item is what introduced the asymmetry. Nothing routed out of Phase 1 is
+  still open.
+
+  **List revision (recorded 2026-09-07, from the Phase 1 checkpoint review):
+  `edit`'s two keys are now type-checked, not merely required.** The dispatch
+  on `action` validated the presence of `old_string`/`new_string` but not their
+  type, so `{"action": "edit", "old_string": 5, …}` reached
+  `apply_edit`'s `content.count(old)` and exited **1** with a `TypeError`
+  traceback naming no field — the one arm of the union that typed nothing,
+  against FR2 and against slice 3's own heading ("everything outside the union
+  is a named error"). Closed in `validate_todo` with a two-key loop erroring
+  `todo.<key>: must be a string, got <type>`, plus two rows on slice 3's
+  existing table; mutation-checked by deleting the loop, which reds those two
+  rows alone.
 
 ## Phase 2: Stop swallowing a failed stage (type: inline)
 
