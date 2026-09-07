@@ -292,6 +292,24 @@ byte-for-byte and the suite is green at its start and its end.
   never-existed halves assert **no** `D` line against a write path that still
   emits one unconditionally, so its red is genuine.
 
+  **Open residual (recorded 2026-09-07, from slice 2's review): no test asserts
+  that `precompact` *applies* task/todo content.** Slice 2's review closed the
+  gate's validation half — it found the submitted table sent `"skill":
+  "handoff"` in all four rows, so narrowing `main`'s gate to
+  `if skill == "handoff":` left the **entire repository green** (159 bats + 205
+  pytest) while `/handoff:precompact` silently stopped writing both files. A
+  `skill` dimension over both boundaries fixed it, and that mutation now reds
+  the precompact half; the table is 8 rows and the suite 115.
+  What remains open is narrower: a defect where `validate_*` is reached for
+  `precompact` but `apply_*` is skipped would still pass, because no
+  `precompact` row in the file writes content and asserts a `W` manifest line —
+  all 17 carry `task_clear()`/`todo_keep()`, whose correct outcome (empty
+  manifest, no file) is indistinguishable from the gate skipping the work.
+  Closing it belongs to slice 1's subject, the external contract's positives,
+  not to slice 2. Cheapest form: parametrize
+  `test_task_write_creates_file_manifest_records_w` and
+  `test_todo_write_creates_file_manifest_records_w` over `skill` the same way.
+
   Two notes for slice 4 from the slice 1 code review, neither obvious from the
   diff. First, the collapse is two edits, not a rewrite: hoist
   `existed = path.is_file()` above the `if action == "clear":` line and make

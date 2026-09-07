@@ -491,6 +491,54 @@ def test_malformed_json_errors_naming_payload(tmp_path: Path) -> None:
     assert "payload" in result.stderr
 
 
+@pytest.mark.parametrize("skill", ["handoff", "precompact"])
+@pytest.mark.parametrize(
+    ("field", "shape", "reason"),
+    [
+        ("task", "null", "got null"),
+        ("task", "absent", "required"),
+        ("todo", "null", "got null"),
+        ("todo", "absent", "required"),
+    ],
+    ids=["task_null", "task_absent", "todo_null", "todo_absent"],
+)
+def test_task_or_todo_null_or_absent_errors_naming_field(
+    tmp_path: Path, skill: str, field: str, shape: str, reason: str
+) -> None:
+    """D2: task/todo are each required by key presence, with no default.
+
+    `null` and an absent key are distinct, named errors on both fields — the
+    defect being fixed is an agent choosing a spelling that silently did the
+    wrong thing, so both wrong spellings must fail loudly with their own
+    reason, and neither may write its target file before failing. Run at both
+    boundaries: the rule is main's `skill in ("handoff", "precompact")` gate,
+    and a gate naming only one of them is the way it breaks.
+    """
+    repo = make_repo(tmp_path)
+    payload: dict[str, object] = {
+        "skill": skill,
+        "commit": "with-commit",
+        "continue": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
+    }
+    if skill == "handoff":
+        payload["rename"] = "T"
+        payload["clear"] = False
+    else:
+        payload["compact"] = False
+    if shape == "null":
+        payload[field] = None
+    else:
+        del payload[field]
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 2
+    assert field in result.stderr
+    assert reason in result.stderr
+    target = "handoff-task.md" if field == "task" else "handoff-todo.md"
+    assert not (repo / ".claude" / target).exists()
+
+
 # ==========================================================================
 # Write semantics (FR5) and empty-body removal (FR6)
 # ==========================================================================
