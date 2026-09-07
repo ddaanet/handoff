@@ -1,15 +1,9 @@
 ## Current task
 
-`/orchestrate` on `plans/2026-09-04-checkpoint-null-no-task-file/runbook.md`,
-phases in order. Phase 0 is done and reviewed: the five payload factories are
-in place in `tests/test_checkpoint.py` and the suite is 113 tests green, so
-Phase 1 can change the schema by flipping five factory bodies rather than the
-~118 literal sites they replaced.
+`/orchestrate` on `plans/2026-09-04-checkpoint-null-no-task-file/runbook.md`, phases in order. Phase 1's Item 1.1 (type `tdd`, four slices) is the tagged-union rewrite of `scripts/checkpoint.py`'s payload layer. Slices 1 and 2 are done and reviewed; slice 3 is next.
 
-Phase 1 (Item 1.1, type `tdd`, four slices) is next — the tagged-union rewrite
-of `scripts/checkpoint.py`'s payload layer, four dispatches per slice: RED,
-test review, GREEN, code review.
+Slices 2 and 3 have **no red available**: slice 1's factory flip repointed every payload site at the new shape, so its GREEN had to land the whole union validator to green the suite, and every case those two slices enumerate already errors correctly — verified by running `checkpoint.py` directly, not inferred. They run instead as characterization slices under a **write-then-mutate** protocol, recorded in the runbook's list-revision block: one `edify:test-driver` dispatch writes the table, confirms it passes, then mutates `scripts/checkpoint.py` in place per assertion family and records a mutation matrix; one `edify:corrector` dispatch reproduces that matrix independently as its mechanical first check, standing in for RED output; the orchestrator commits. No GREEN dispatch — nothing is left to implement. Slice 4 is unaffected and keeps the full four-dispatch shape, since its never-existed halves assert no `D` line against a write path that still emits one unconditionally.
 
-Model assignment my human partner set for the run: `edify:test-driver` sonnet,
-`edify:corrector` and every prose edit opus. Items 2.1, 3.1 and 4.1 are
-`inline` — the orchestrator executes those itself rather than dispatching.
+Model assignment my human partner set for the run: `edify:test-driver` sonnet, `edify:corrector` and every prose edit opus. Items 2.1, 3.1 and 4.1 are `inline` — the orchestrator executes those itself rather than dispatching.
+
+Both wrap-up skill bodies still document the retired payload shape (`file_path` + `content`, with `null` meaning "nothing to say"), and `checkpoint.py` now rejects it; Phase 3 is what fixes them. Until it lands, a `handoff-checkpoint` call must send the union directly: `task` is a content string or `{"action": "clear"}`; `todo` is a content string, `{"action": "clear"}`, `{"action": "keep"}`, or `{"action": "edit", "old_string": …, "new_string": …}`. Both are required by key presence — `null` and an absent key are each a named error.
