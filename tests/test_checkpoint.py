@@ -109,28 +109,24 @@ def add_unidentified_sdd_ledger(repo: Path, slug: str = "ghmem") -> None:
     (d / "progress.md").write_text("# ghmem — progress (C2 COMPLETE)\n")
 
 
-def task_content(repo: Path, content: str) -> dict[str, str]:
-    return {"file_path": str(repo / ".claude" / "handoff-task.md"), "content": content}
+def task_content(content: str) -> str:
+    return content
 
 
-def task_clear() -> None:
-    return None
+def task_clear() -> dict[str, str]:
+    return {"action": "clear"}
 
 
-def todo_content(repo: Path, content: str) -> dict[str, str]:
-    return {"file_path": str(repo / ".claude" / "handoff-todo.md"), "content": content}
+def todo_content(content: str) -> str:
+    return content
 
 
-def todo_keep() -> None:
-    return None
+def todo_keep() -> dict[str, str]:
+    return {"action": "keep"}
 
 
-def todo_edit(repo: Path, old: str, new: str) -> dict[str, str]:
-    return {
-        "file_path": str(repo / ".claude" / "handoff-todo.md"),
-        "old_string": old,
-        "new_string": new,
-    }
+def todo_edit(old: str, new: str) -> dict[str, str]:
+    return {"action": "edit", "old_string": old, "new_string": new}
 
 
 def run_checkpoint(
@@ -233,7 +229,7 @@ def test_drifted_cwd_writes_injected_root_never_cwd(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_content(root, "## Current task\n\nbody\n"),
+        "task": task_content("## Current task\n\nbody\n"),
         "todo": todo_keep(),
     }
     result = run_checkpoint(elsewhere, payload, root=root)
@@ -242,27 +238,6 @@ def test_drifted_cwd_writes_injected_root_never_cwd(tmp_path: Path) -> None:
     assert (root / ".claude" / "checkpoint-manifest").is_file()
     assert not (elsewhere / ".claude" / "handoff-task.md").exists()
     assert not (elsewhere / ".claude" / "checkpoint-manifest").exists()
-
-
-def test_drifted_cwd_task_path_under_cwd_rejected(tmp_path: Path) -> None:
-    root = make_repo(tmp_path, "launch2")
-    elsewhere = make_repo(tmp_path, "elsewhere2")
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": {
-            "file_path": str(elsewhere / ".claude" / "handoff-task.md"),
-            "content": "body",
-        },
-        "todo": todo_keep(),
-    }
-    result = run_checkpoint(elsewhere, payload, root=root)
-    assert result.returncode == 2
-    assert "task.file_path" in result.stderr
-    assert not (elsewhere / ".claude" / "handoff-task.md").exists()
 
 
 # ==========================================================================
@@ -471,26 +446,6 @@ def test_task_with_old_string_new_string_errors(tmp_path: Path) -> None:
     assert "task" in result.stderr
 
 
-def test_todo_content_and_old_string_together_errors(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": task_clear(),
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "content": "## Remaining\n",
-            "old_string": "a",
-        },
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 2
-    assert "todo" in result.stderr
-
-
 def test_todo_only_old_string_errors(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     payload = {
@@ -529,136 +484,11 @@ def test_todo_only_new_string_errors(tmp_path: Path) -> None:
     assert "todo" in result.stderr
 
 
-def test_task_file_path_outside_claude_errors(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": {
-            "file_path": str(repo / "elsewhere.md"),
-            "content": "## Current task\n\nx\n",
-        },
-        "todo": todo_keep(),
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 2
-    assert "task.file_path" in result.stderr
-
-
-def test_todo_file_path_outside_claude_errors(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": task_clear(),
-        # Never written; only tested for rejection.
-        "todo": {
-            "file_path": "/tmp/not-the-project/.claude/handoff-todo.md",  # noqa: S108
-            "content": "## Remaining\n\n- x\n",
-        },
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 2
-    assert "todo.file_path" in result.stderr
-
-
 def test_malformed_json_errors_naming_payload(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     result = run_checkpoint(repo, "{not valid json")
     assert result.returncode == 2
     assert "payload" in result.stderr
-
-
-# ==========================================================================
-# {"content": null} no-ops
-# ==========================================================================
-
-
-def test_task_content_null_no_file_path_noop(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": {"content": None},
-        "todo": todo_keep(),
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 0
-    assert not (repo / ".claude" / "handoff-task.md").exists()
-    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
-    assert "handoff-task.md" not in manifest
-
-
-def test_task_file_path_content_null_noop(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": {
-            "file_path": str(repo / ".claude" / "handoff-task.md"),
-            "content": None,
-        },
-        "todo": todo_keep(),
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 0
-    assert not (repo / ".claude" / "handoff-task.md").exists()
-    assert (
-        "handoff-task.md" not in (repo / ".claude" / "checkpoint-manifest").read_text()
-    )
-
-
-def test_todo_content_null_no_file_path_noop(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": task_clear(),
-        "todo": {"content": None},
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 0
-    assert not (repo / ".claude" / "handoff-todo.md").exists()
-    assert (
-        "handoff-todo.md" not in (repo / ".claude" / "checkpoint-manifest").read_text()
-    )
-
-
-def test_todo_file_path_content_null_noop(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": task_clear(),
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "content": None,
-        },
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 0
-    assert not (repo / ".claude" / "handoff-todo.md").exists()
-    assert (
-        "handoff-todo.md" not in (repo / ".claude" / "checkpoint-manifest").read_text()
-    )
 
 
 # ==========================================================================
@@ -668,22 +498,66 @@ def test_todo_file_path_content_null_noop(tmp_path: Path) -> None:
 
 def test_task_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
+    content = "## Current task\n\nreal content\n"
     payload = {
         "skill": "handoff",
         "commit": "with-commit",
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_content(repo, "## Current task\n\nreal content\n"),
+        "task": task_content(content),
         "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     assert (repo / ".claude" / "handoff-task.md").is_file()
-    assert "real content" in (repo / ".claude" / "handoff-task.md").read_text()
+    assert (repo / ".claude" / "handoff-task.md").read_text() == content
     assert (
         "W .claude/handoff-task.md"
         in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    )
+
+
+def test_task_clear_removes_pre_existing_file_manifest_records_d(
+    tmp_path: Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    (repo / ".claude" / "handoff-task.md").write_text("## Current task\n\nstale\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-task.md").exists()
+    assert (
+        "D .claude/handoff-task.md"
+        in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    )
+
+
+def test_task_clear_never_existed_writes_nothing_no_d(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-task.md").exists()
+    assert (repo / ".claude" / "checkpoint-manifest").is_file()
+    assert (
+        "handoff-task.md" not in (repo / ".claude" / "checkpoint-manifest").read_text()
     )
 
 
@@ -695,7 +569,7 @@ def test_task_write_only_headings_removed_manifest_records_d(tmp_path: Path) -> 
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_content(repo, "## Current task\n\n## Open decisions\n"),
+        "task": task_content("## Current task\n\n## Open decisions\n"),
         "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
@@ -709,6 +583,7 @@ def test_task_write_only_headings_removed_manifest_records_d(tmp_path: Path) -> 
 
 def test_todo_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
+    content = "## Remaining\n\n- an item\n"
     payload = {
         "skill": "handoff",
         "commit": "with-commit",
@@ -716,11 +591,11 @@ def test_todo_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_content(repo, "## Remaining\n\n- an item\n"),
+        "todo": todo_content(content),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
-    assert "an item" in (repo / ".claude" / "handoff-todo.md").read_text()
+    assert (repo / ".claude" / "handoff-todo.md").read_text() == content
     assert (
         "W .claude/handoff-todo.md"
         in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
@@ -736,7 +611,7 @@ def test_todo_write_no_items_removed_manifest_records_d(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_content(repo, "## Remaining\n"),
+        "todo": todo_content("## Remaining\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -759,7 +634,7 @@ def test_todo_edit_replaces_first_occurrence_stages_w(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_edit(repo, "- finish A\n", ""),
+        "todo": todo_edit("- finish A\n", ""),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -782,7 +657,7 @@ def test_todo_edit_old_string_absent_errors(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_edit(repo, "- not present", "- x"),
+        "todo": todo_edit("- not present", "- x"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -801,7 +676,7 @@ def test_todo_edit_old_string_ambiguous_errors(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_edit(repo, "- dup", "- single"),
+        "todo": todo_edit("- dup", "- single"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
@@ -818,16 +693,17 @@ def test_todo_edit_requested_file_missing_errors(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_edit(repo, "a", "b"),
+        "todo": todo_edit("a", "b"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
     assert "does not exist" in result.stderr
 
 
-def test_todo_null_untouched_list_left_alone(tmp_path: Path) -> None:
+def test_todo_keep_leaves_pre_existing_list_alone(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
-    (repo / ".claude" / "handoff-todo.md").write_text("## Remaining\n\n- untouched\n")
+    before = "## Remaining\n\n- untouched\n"
+    (repo / ".claude" / "handoff-todo.md").write_text(before)
     payload = {
         "skill": "handoff",
         "commit": "with-commit",
@@ -839,7 +715,10 @@ def test_todo_null_untouched_list_left_alone(tmp_path: Path) -> None:
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
-    assert "untouched" in (repo / ".claude" / "handoff-todo.md").read_text()
+    assert (repo / ".claude" / "handoff-todo.md").read_text() == before
+    assert (
+        "handoff-todo.md" not in (repo / ".claude" / "checkpoint-manifest").read_text()
+    )
 
 
 # ==========================================================================
@@ -930,8 +809,8 @@ def test_task_and_todo_both_written_manifest_lists_both(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_content(repo, "## Current task\n\nbody\n"),
-        "todo": todo_content(repo, "## Remaining\n\n- x\n"),
+        "task": task_content("## Current task\n\nbody\n"),
+        "todo": todo_content("## Remaining\n\n- x\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
@@ -1431,8 +1310,8 @@ def test_rename_missing_under_autoname_errors(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("commit", "with-commit"),
-        ("task", task_content(Path("/x"), "body")),
-        ("todo", todo_content(Path("/x"), "body")),
+        ("task", task_content("body")),
+        ("todo", todo_content("body")),
         ("clear", True),
         ("compact", True),
         ("continue", "pick up per the task file"),
@@ -1543,8 +1422,8 @@ def test_restart_session_id_unset_errors(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("commit", "with-commit"),
-        ("task", task_content(Path("/x"), "body")),
-        ("todo", todo_content(Path("/x"), "body")),
+        ("task", task_content("body")),
+        ("todo", todo_content("body")),
         ("rename", "Not Allowed"),
         ("clear", True),
         ("compact", True),

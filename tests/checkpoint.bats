@@ -209,7 +209,7 @@ pick up per the task file" ]
 # ==========================================================================
 
 handoff_payload() {
-    jq -nc --arg commit "$1" '{skill:"handoff", commit:$commit, rename:"Session Title", clear:false, continue:null, task:null, todo:null}'
+    jq -nc --arg commit "$1" '{skill:"handoff", commit:$commit, rename:"Session Title", clear:false, continue:null, task:{action:"clear"}, todo:{action:"keep"}}'
 }
 
 @test "shim: bin/handoff-checkpoint execs the checkpoint, forwards stdin" {

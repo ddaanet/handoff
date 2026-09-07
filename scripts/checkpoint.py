@@ -261,83 +261,61 @@ def validate_continuation(payload: JSONDict, skill: str, *, typed: bool) -> str:
     return continuation
 
 
-def validate_task(payload: JSONDict, root: Path) -> tuple[str, str]:
-    """("none", "") or ("write", content)."""
-    task = payload.get("task")
-    if task is None:
-        return "none", ""
-    if not isinstance(task, dict):
-        err("task", "must be an object or null")
-    if "old_string" in task or "new_string" in task:
-        err("task", "old_string/new_string are not allowed for task (Write form only)")
-    if "content" in task and task.get("content") is None:
-        return "none", ""
-    if "file_path" not in task:
-        err("task.file_path", "required")
-    if "content" not in task:
-        err("task.content", "required")
-
-    file_path = task.get("file_path")
-    if not file_path:
-        err("task.file_path", "must be a non-empty string")
-    resolved = Path(file_path).resolve()
-    expected = (root / HANDOFF_REL_TASK).resolve()
-    if resolved != expected:
-        err(
-            "task.file_path",
-            f"must resolve to $root/{HANDOFF_REL_TASK} (got {file_path})",
-        )
-
-    return "write", cast("str", task.get("content"))
+def validate_task(payload: JSONDict) -> tuple[str, str]:
+    """("write", content) or ("clear", "")."""
+    if "task" not in payload:
+        err("task", 'required, a content string or {"action": "clear"}')
+    task = payload["task"]
+    ttype = _json_type(task)
+    if ttype == "string":
+        return "write", cast("str", task)
+    if ttype == "object":
+        action = task.get("action")
+        if action == "clear":
+            return "clear", ""
+        if action is None:
+            err("task.action", "required")
+        err("task.action", f'must be "clear", got "{action}"')
+    err(
+        "task",
+        f'must be a content string or {{"action": "clear"}}, got {ttype}',
+    )
+    raise AssertionError("unreachable")  # err() always raises
 
 
-def _todo_file_path(todo: JSONDict, root: Path) -> None:
-    file_path = todo.get("file_path")
-    if not file_path:
-        err("todo.file_path", "must be a non-empty string")
-    resolved = Path(file_path).resolve()
-    expected = (root / HANDOFF_REL_TODO).resolve()
-    if resolved != expected:
-        err(
-            "todo.file_path",
-            f"must resolve to $root/{HANDOFF_REL_TODO} (got {file_path})",
-        )
-
-
-def validate_todo(payload: JSONDict, root: Path) -> tuple[str, str, str, str]:
+def validate_todo(payload: JSONDict) -> tuple[str, str, str, str]:
     """Return the todo action and its content or old/new strings.
 
-    ("none", "", "", ""), ("write", content, "", "") or ("edit", "", old_string,
-    new_string).
+    ("write", content, "", ""), ("edit", "", old_string, new_string), ("clear",
+    "", "", "") or ("keep", "", "", "").
     """
-    todo = payload.get("todo")
-    if todo is None:
-        return "none", "", "", ""
-    if not isinstance(todo, dict):
-        err("todo", "must be an object or null")
-
-    has_content = "content" in todo
-    has_old = "old_string" in todo
-    has_new = "new_string" in todo
-
-    if has_content and todo.get("content") is None and not has_old and not has_new:
-        return "none", "", "", ""
-
-    if "file_path" not in todo:
-        err("todo.file_path", "required")
-    _todo_file_path(todo, root)
-
-    if has_content and (has_old or has_new):
-        err("todo", "content and old_string/new_string are mutually exclusive")
-    if has_content:
-        return "write", cast("str", todo.get("content")), "", ""
-    if has_old or has_new:
-        if not (has_old and has_new):
-            err("todo", "old_string and new_string must both be present")
-        old_string = cast("str", todo.get("old_string"))
-        new_string = cast("str", todo.get("new_string"))
-        return "edit", "", old_string, new_string
-    err("todo", "must have content, or old_string and new_string")
+    if "todo" not in payload:
+        err("todo", "required, a content string or an object naming an action")
+    todo = payload["todo"]
+    ttype = _json_type(todo)
+    if ttype == "string":
+        return "write", cast("str", todo), "", ""
+    if ttype == "object":
+        action = todo.get("action")
+        if action == "clear":
+            return "clear", "", "", ""
+        if action == "keep":
+            return "keep", "", "", ""
+        if action == "edit":
+            if "old_string" not in todo:
+                err("todo.old_string", 'required for {"action": "edit"}')
+            if "new_string" not in todo:
+                err("todo.new_string", 'required for {"action": "edit"}')
+            old_string = cast("str", todo["old_string"])
+            new_string = cast("str", todo["new_string"])
+            return "edit", "", old_string, new_string
+        if action is None:
+            err("todo.action", "required")
+        err("todo.action", f'must be "clear", "keep" or "edit", got "{action}"')
+    err(
+        "todo",
+        f"must be a content string or an object naming an action, got {ttype}",
+    )
     raise AssertionError("unreachable")  # err() always raises
 
 
@@ -356,10 +334,19 @@ def apply_edit(field: str, path: Path, old: str, new: str) -> None:
 
 
 def apply_task(root: Path, action: str, content: str) -> list[str]:
-    """Apply the task write (FR5/FR6) and return its manifest lines."""
-    if action != "write":
-        return []
+    """Apply the task write or clear (FR5/FR6/FR7/D3).
+
+    Returns manifest lines. `clear` is unlink-if-present: existence is sampled
+    before any write, and a `D` line records only a removal that actually
+    happened.
+    """
     path = root / HANDOFF_REL_TASK
+    if action == "clear":
+        existed = path.is_file()
+        if not existed:
+            return []
+        path.unlink()
+        return [f"D {HANDOFF_REL_TASK}"]
     path.write_text(content, encoding="utf-8")
     if lib.is_empty_body(content):
         path.unlink()
@@ -368,10 +355,20 @@ def apply_task(root: Path, action: str, content: str) -> list[str]:
 
 
 def apply_todo(root: Path, action: str, content: str, old: str, new: str) -> list[str]:
-    """Apply the todo write or edit (FR5/FR6) and return its manifest lines."""
-    if action == "none":
+    """Apply the todo write, edit, clear or keep (FR5/FR6/FR7/D3).
+
+    Returns manifest lines. "keep" returns [] without touching the file; "clear"
+    is unlink-if-present, existence sampled before any write.
+    """
+    if action == "keep":
         return []
     path = root / HANDOFF_REL_TODO
+    if action == "clear":
+        existed = path.is_file()
+        if not existed:
+            return []
+        path.unlink()
+        return [f"D {HANDOFF_REL_TODO}"]
     if action == "write":
         path.write_text(content, encoding="utf-8")
     elif action == "edit":
@@ -482,11 +479,14 @@ def main() -> int:
     transition = build_transition(payload, skill, title)
     continuation = validate_continuation(payload, skill, typed=transition.typed)
 
-    task_action, task_content = validate_task(payload, root)
-    todo_action, todo_content, todo_old, todo_new = validate_todo(payload, root)
-
-    manifest_lines = apply_task(root, task_action, task_content)
-    manifest_lines += apply_todo(root, todo_action, todo_content, todo_old, todo_new)
+    manifest_lines: list[str] = []
+    if skill in ("handoff", "precompact"):
+        task_action, task_content = validate_task(payload)
+        todo_action, todo_content, todo_old, todo_new = validate_todo(payload)
+        manifest_lines = apply_task(root, task_action, task_content)
+        manifest_lines += apply_todo(
+            root, todo_action, todo_content, todo_old, todo_new
+        )
     write_manifest(root, manifest_lines)
 
     memory, second = compose_directives(skill, root, commit_mode)
