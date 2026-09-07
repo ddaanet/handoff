@@ -62,7 +62,7 @@ itself, and the prompt that resumes the work on the far side.
 
    Then run `handoff-checkpoint` (Bash) with `"skill": "precompact"` (no
    `rename` field — precompact never renames), the three answers from step
-   1, and `task`/`todo` each either the drafted content or `null`:
+   1, and `task`/`todo` each carrying the drafted content or naming an action:
 
    ```
    handoff-checkpoint <<'JSON'
@@ -71,11 +71,16 @@ itself, and the prompt that resumes the work on the far side.
      "commit": "<with-commit|without-commit>",
      "compact": <true|false|"focus directive">,
      "continue": <"one line of prose"|null>,
-     "task": {"file_path": "<abs path to>/.claude/handoff-task.md", "content": "<task content, or null>"},
-     "todo": {"file_path": "<abs path to>/.claude/handoff-todo.md", "content": "<todo content, or null>"}
+     "task": <"task content"|{"action": "clear"}>,
+     "todo": <"todo content"|{"action": "clear"}|{"action": "keep"}|{"action": "edit", "old_string": "…", "new_string": "…"}>
    }
    JSON
    ```
+
+   Both keys are required and `null` is an error on each, as is omitting one.
+   `{"action": "clear"}` removes that file, `{"action": "keep"}` (`todo` only)
+   leaves the list untouched, and `{"action": "edit", …}` strikes a finished
+   item without regenerating the list.
 
    Author the continuation prompt **silently**. It gets typed visibly into
    the composer and lands in scrollback, so reprinting it in the reply

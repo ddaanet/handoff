@@ -95,17 +95,18 @@ handoff-checkpoint <<'JSON'
   "rename": "<session title>",
   "clear": <true|false>,
   "continue": <"one line of prose"|null>,
-  "task": {"file_path": "<abs path to>/.claude/handoff-task.md", "content": "<task content, or omit the whole field with null>"},
-  "todo": {"file_path": "<abs path to>/.claude/handoff-todo.md", "content": "<todo content, or omit the whole field with null>"}
+  "task": <"task content"|{"action": "clear"}>,
+  "todo": <"todo content"|{"action": "clear"}|{"action": "keep"}|{"action": "edit", "old_string": "…", "new_string": "…"}>
 }
 JSON
 ```
 
-`task` and `todo` are each the file's content, or `null` when there is
-nothing to say for that file — the checkpoint decides absence from content,
-not from a wipe. `todo` may also carry an incremental edit
-(`old_string`/`new_string`) instead of full `content`, for striking a
-finished item without regenerating the whole list.
+Both keys are required, each carrying content as a string or an object naming
+an action. `{"action": "clear"}` removes that file — for `task`, this is how a
+boundary with nothing to carry says so. `{"action": "keep"}` (`todo` only)
+leaves the list untouched. `{"action": "edit", …}` strikes a finished item
+without regenerating the list. `null` is an error on both, as is omitting a
+key.
 
 Author the continuation prompt **silently**. It gets typed visibly into the
 composer and lands in scrollback, so reprinting it in the reply shows the
