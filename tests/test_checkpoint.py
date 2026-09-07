@@ -426,62 +426,82 @@ def test_precompact_with_rename_omitted_accepted(tmp_path: Path) -> None:
     assert run_checkpoint(repo, payload).returncode == 0
 
 
-def test_task_with_old_string_new_string_errors(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("task", {"action": "emty"}, 'got "emty"'),
+        ("todo", {"action": "emty"}, 'got "emty"'),
+        ("task", {"action": "keep"}, 'got "keep"'),
+        (
+            "task",
+            {"action": "edit", "old_string": "a", "new_string": "b"},
+            'got "edit"',
+        ),
+        ("task", {}, "action: required"),
+        ("todo", {}, "action: required"),
+        ("task", 42, "got number"),
+        ("todo", 42, "got number"),
+        (
+            "todo",
+            {"action": "edit", "new_string": "b"},
+            'old_string: required for {"action": "edit"}',
+        ),
+        (
+            "todo",
+            {"action": "edit", "old_string": "a"},
+            'new_string: required for {"action": "edit"}',
+        ),
+    ],
+    ids=[
+        "task_unknown_action",
+        "todo_unknown_action",
+        "task_keep_rejected",
+        "task_edit_rejected",
+        "task_no_action_key",
+        "todo_no_action_key",
+        "task_not_string_or_object",
+        "todo_not_string_or_object",
+        "todo_edit_missing_old_string",
+        "todo_edit_missing_new_string",
+    ],
+)
+def test_task_or_todo_action_vocabulary_errors_naming_field(
+    tmp_path: Path, field: str, value: object, reason: str
+) -> None:
+    """Everything outside the union is a named error.
+
+    Both fields dispatch on an `action` key, and `edit`'s own required keys
+    are checked by the same dispatch: an unknown action, a missing `action`
+    key, a value that is neither string nor object, `task` receiving a
+    `todo`-only action (`keep`, `edit`), and `edit` missing either required
+    key independently — each exits 2 naming the offending field and its own
+    reason.
+
+    `task_edit_rejected`, `todo_edit_missing_old_string` and
+    `todo_edit_missing_new_string` restate, in action vocabulary,
+    `test_task_with_old_string_new_string_errors` /
+    `test_todo_only_new_string_errors` / `test_todo_only_old_string_errors` —
+    the same contract reached through the dispatch instead of through
+    key-combination sniffing on a bare object. Each `reason` pins that
+    shape's own diagnostic and no other: an `edit` missing a key must say
+    `required for`, not the `does not exist` / `not found` / `ambiguous` the
+    same `todo.old_string` namespace also carries.
+    """
     repo = make_repo(tmp_path)
-    payload = {
+    payload: dict[str, object] = {
         "skill": "handoff",
         "commit": "with-commit",
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": {
-            "file_path": str(repo / ".claude" / "handoff-task.md"),
-            "old_string": "a",
-            "new_string": "b",
-        },
+        "task": task_clear(),
         "todo": todo_keep(),
     }
+    payload[field] = value
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
-    assert "task" in result.stderr
-
-
-def test_todo_only_old_string_errors(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": task_clear(),
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "old_string": "a",
-        },
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 2
-    assert "todo" in result.stderr
-
-
-def test_todo_only_new_string_errors(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    payload = {
-        "skill": "handoff",
-        "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
-        "continue": None,
-        "task": task_clear(),
-        "todo": {
-            "file_path": str(repo / ".claude" / "handoff-todo.md"),
-            "new_string": "b",
-        },
-    }
-    result = run_checkpoint(repo, payload)
-    assert result.returncode == 2
-    assert "todo" in result.stderr
+    assert field in result.stderr
+    assert reason in result.stderr
 
 
 def test_malformed_json_errors_naming_payload(tmp_path: Path) -> None:
