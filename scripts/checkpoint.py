@@ -336,29 +336,33 @@ def apply_edit(field: str, path: Path, old: str, new: str) -> None:
 def apply_task(root: Path, action: str, content: str) -> list[str]:
     """Apply the task write or clear (FR5/FR6/FR7/D3).
 
-    Returns manifest lines. `clear` is unlink-if-present: existence is sampled
-    before any write, and a `D` line records only a removal that actually
-    happened.
+    Returns manifest lines. Both routes to removal — the explicit `clear` and a
+    body that is empty under `is_empty_body` — are one unlink-if-present:
+    existence is sampled before any write, a `D` line records only a removal
+    that actually happened, and an empty body is never written first.
     """
     path = root / HANDOFF_REL_TASK
     existed = path.is_file()
-    if action == "clear":
+    if action == "clear" or lib.is_empty_body(content):
         if not existed:
             return []
         path.unlink()
         return [f"D {HANDOFF_REL_TASK}"]
     path.write_text(content, encoding="utf-8")
-    if lib.is_empty_body(content):
-        path.unlink()
-        return [f"D {HANDOFF_REL_TASK}"] if existed else []
     return [f"W {HANDOFF_REL_TASK}"]
 
 
 def apply_todo(root: Path, action: str, content: str, old: str, new: str) -> list[str]:
     """Apply the todo write, edit, clear or keep (FR5/FR6/FR7/D3).
 
-    Returns manifest lines. "keep" returns [] without touching the file; "clear"
-    is unlink-if-present, existence sampled before any write.
+    Returns manifest lines. "keep" returns [] without touching the file, not
+    even to stat it, which is why existence is sampled below that branch and
+    not at the top as in apply_task. Every other action samples it before any
+    write: `edit` requires the file to exist, and both routes to removal — the
+    explicit `clear` and a resulting body empty under `is_empty_body` — are
+    unlink-if-present, a `D` line recording only a removal that actually
+    happened. Unlike apply_task's, that emptiness test reads the file rather
+    than `content`, since an `edit`'s result exists only on disk.
     """
     if action == "keep":
         return []
