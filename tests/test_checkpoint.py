@@ -564,18 +564,31 @@ def test_task_or_todo_null_or_absent_errors_naming_field(
 # ==========================================================================
 
 
-def test_task_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
+@pytest.mark.parametrize("skill", ["handoff", "precompact"])
+def test_task_write_creates_file_manifest_records_w(tmp_path: Path, skill: str) -> None:
+    """Run at both boundaries: `main`'s `if skill in ("handoff", "precompact")`
+    gate must not merely validate the payload for precompact — it must also
+    apply it.
+
+    A gate narrowed to `handoff` alone would still validate a precompact payload
+    correctly and then skip the write, which every prior row here left
+    unobserved because it never ran a `precompact` payload through this
+    assertion.
+    """
     repo = make_repo(tmp_path)
     content = "## Current task\n\nreal content\n"
-    payload = {
-        "skill": "handoff",
+    payload: dict[str, object] = {
+        "skill": skill,
         "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
         "continue": None,
         "task": task_content(content),
         "todo": todo_keep(),
     }
+    if skill == "handoff":
+        payload["rename"] = "T"
+        payload["clear"] = False
+    else:
+        payload["compact"] = False
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     assert (repo / ".claude" / "handoff-task.md").is_file()
@@ -598,15 +611,16 @@ def test_task_clear_removes_pre_existing_file_manifest_records_d(
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_keep(),
+        "todo": todo_content("## Remaining\n\n- an item\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     assert not (repo / ".claude" / "handoff-task.md").exists()
-    assert (
-        "D .claude/handoff-task.md"
-        in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
-    )
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    # Carries the same live-manifest todo line as its never-existed partner, so
+    # the pair differs only in whether the task file exists first.
+    assert "W .claude/handoff-todo.md" in manifest.splitlines()
+    assert "D .claude/handoff-task.md" in manifest.splitlines()
 
 
 def test_task_clear_never_existed_writes_nothing_no_d(tmp_path: Path) -> None:
@@ -618,15 +632,17 @@ def test_task_clear_never_existed_writes_nothing_no_d(tmp_path: Path) -> None:
         "clear": False,
         "continue": None,
         "task": task_clear(),
-        "todo": todo_keep(),
+        "todo": todo_content("## Remaining\n\n- an item\n"),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     assert not (repo / ".claude" / "handoff-task.md").exists()
     assert (repo / ".claude" / "checkpoint-manifest").is_file()
-    assert (
-        "handoff-task.md" not in (repo / ".claude" / "checkpoint-manifest").read_text()
-    )
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    # The todo line proves the manifest is live, so the absence below is a claim
+    # about the task route rather than about an empty manifest.
+    assert "W .claude/handoff-todo.md" in manifest.splitlines()
+    assert "handoff-task.md" not in manifest
 
 
 def test_task_write_only_headings_pre_existing_removed_manifest_records_d(
@@ -673,20 +689,28 @@ def test_task_write_only_headings_never_existed_no_d(tmp_path: Path) -> None:
     assert "handoff-task.md" not in manifest
 
 
-def test_todo_write_creates_file_manifest_records_w(tmp_path: Path) -> None:
+@pytest.mark.parametrize("skill", ["handoff", "precompact"])
+def test_todo_write_creates_file_manifest_records_w(tmp_path: Path, skill: str) -> None:
+    """Mirrors test_task_write_creates_file_manifest_records_w's own note: the
+    `precompact` half proves `main` applies the payload it validates, not merely
+    validates it."""
     repo = make_repo(tmp_path)
     content = "## Remaining\n\n- an item\n"
-    payload = {
-        "skill": "handoff",
+    payload: dict[str, object] = {
+        "skill": skill,
         "commit": "with-commit",
-        "rename": "T",
-        "clear": False,
         "continue": None,
         "task": task_clear(),
         "todo": todo_content(content),
     }
+    if skill == "handoff":
+        payload["rename"] = "T"
+        payload["clear"] = False
+    else:
+        payload["compact"] = False
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
+    assert (repo / ".claude" / "handoff-todo.md").is_file()
     assert (repo / ".claude" / "handoff-todo.md").read_text() == content
     assert (
         "W .claude/handoff-todo.md"
@@ -826,15 +850,17 @@ def test_todo_keep_leaves_pre_existing_list_alone(tmp_path: Path) -> None:
         "rename": "T",
         "clear": False,
         "continue": None,
-        "task": task_clear(),
+        "task": task_content("## Current task\n\nreal content\n"),
         "todo": todo_keep(),
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     assert (repo / ".claude" / "handoff-todo.md").read_text() == before
-    assert (
-        "handoff-todo.md" not in (repo / ".claude" / "checkpoint-manifest").read_text()
-    )
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    # The task line proves the manifest is live, so the absence below is a claim
+    # about the todo route rather than about an empty manifest.
+    assert "W .claude/handoff-task.md" in manifest.splitlines()
+    assert "handoff-todo.md" not in manifest
 
 
 # ==========================================================================
