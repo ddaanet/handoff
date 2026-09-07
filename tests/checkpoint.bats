@@ -310,3 +310,69 @@ handoff_payload() {
     [ ! -e "$wt/.claude/checkpoint-manifest" ]
     echo "$output" | jq -e '.systemMessage | test("staged 0")' >/dev/null
 }
+
+# The two rows below are a pair over one fixture, differing only in whether the
+# path was ever in the index. `git add -f` on a path that is neither on disk nor
+# in the index exits 128 with "did not match any files" — a benign, expected
+# failure, since both paths are gitignored and any `git reset` since the last
+# checkpoint leaves one in exactly that state. Guarding it away is what lets the
+# redirect go; without the guard the second row would report a failure.
+@test "bash-post: D for a path in the index -> counted in deleted, no failure" {
+    repo="$BATS_TEST_TMPDIR/bp-d-tracked"; mkdir -p "$repo/.claude"
+    git -C "$repo" init -q
+    printf 'seed\n' > "$repo/.claude/handoff-task.md"
+    git -C "$repo" add -f .claude/handoff-task.md
+    git -C "$repo" -c user.email=t@t -c user.name=t commit -qm seed
+    rm -f "$repo/.claude/handoff-task.md"
+    printf '%s\n' "D .claude/handoff-task.md" > "$repo/.claude/checkpoint-manifest"
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash "$2"
+    ' _ "$repo" "$BASHPOST"
+    [ "$status" -eq 0 ]
+    git -C "$repo" status --porcelain .claude/handoff-task.md | grep -q '^D'
+    echo "$output" | jq -e '.systemMessage | test("staged 0, deleted 1")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("failed to stage") | not' >/dev/null
+}
+
+@test "bash-post: D for a path never in the index -> silent, uncounted, no failure" {
+    repo="$BATS_TEST_TMPDIR/bp-d-untracked"; mkdir -p "$repo/.claude"
+    git -C "$repo" init -q
+    printf '%s\n' "D .claude/handoff-task.md" > "$repo/.claude/checkpoint-manifest"
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash "$2"
+    ' _ "$repo" "$BASHPOST"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/checkpoint-manifest" ]
+    echo "$output" | jq -e '.systemMessage | test("staged 0, deleted 0")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("failed to stage") | not' >/dev/null
+}
+
+# The failure channel itself. A stranded index.lock is the motivating case: today
+# the redirect eats git's explanation and the path just vanishes from the counts,
+# so this reports "staged 0, deleted 0" and nothing else.
+@test "bash-post: a path that cannot be staged -> reported on both channels, named" {
+    repo="$BATS_TEST_TMPDIR/bp-locked"; mkdir -p "$repo/.claude"
+    git -C "$repo" init -q
+    printf 'new todo body\n' > "$repo/.claude/handoff-todo.md"
+    printf '%s\n' "W .claude/handoff-todo.md" > "$repo/.claude/checkpoint-manifest"
+    : > "$repo/.git/index.lock"
+    # stderr is captured separately, not merged: git's own explanation now
+    # reaches it, and bats would otherwise fold it into $output ahead of the
+    # JSON on stdout. Keeping them apart is also what lets the last assertion
+    # below pin the explanation itself, which is the whole point of dropping
+    # the redirect — the named path says which, git's message says why.
+    err="$repo/stderr.txt"
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash "$2" 2>"$3"
+    ' _ "$repo" "$BASHPOST" "$err"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/checkpoint-manifest" ]
+    echo "$output" \
+        | jq -e '.systemMessage | test("failed to stage: .claude/handoff-todo.md")' >/dev/null
+    echo "$output" \
+        | jq -e '.hookSpecificOutput.additionalContext | test("failed to stage: .claude/handoff-todo.md")' >/dev/null
+    grep -q 'index.lock' "$err"
+}
