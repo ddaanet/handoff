@@ -261,6 +261,51 @@ byte-for-byte and the suite is green at its start and its end.
      failure Phase 2's redirect was covering, which is why Phase 2 depends on
      this slice landing and why it still has to guard the other route itself.
 
+  **List revision (recorded 2026-09-07, from slice 1's execution): slices 2
+  and 3 have no red available, and slice 4 does.** Slice 1's factory flip
+  repointed all ~118 payload sites at the new shape, so its GREEN had to land
+  the whole union validator to green the suite — which means every case slices
+  2 and 3 enumerate *already* exits 2 naming its field. Verified by running
+  `scripts/checkpoint.py` directly at `e9f985f`, not inferred: `"task": null`
+  → `task: must be a content string or {"action": "clear"}, got null`; the key
+  absent → `task: required, …`; `{"action": "emty"}` → `task.action: must be
+  "clear", got "emty"`; `{"action": "keep"}` on `task` → the same; an `edit`
+  missing one key → `todo.new_string: required for {"action": "edit"}`; a
+  number → `task: … got number`. The slice 1 code review probed all twelve and
+  agrees.
+
+  So slices 2 and 3 are **characterization slices**: the coverage is wanted —
+  FR2 is mapped to this item and these are the rows that pin it — but the
+  four-dispatch RED/review/GREEN/review shape does not fit, because there is
+  no GREEN and a first-run green is not evidence that an assertion
+  discriminates. Each runs instead as **write-then-mutate**: one
+  `edify:test-driver` dispatch writes the parametrized table, confirms it
+  passes against the unchanged SUT, and then — per case group — mutates
+  `scripts/checkpoint.py` **in place** (save, mutate, run, restore; never
+  relocate the tests, which resolve paths from their own location) and records
+  which rows red under which mutation. A case no mutation can red is a finding,
+  not a pass. The dispatch commits once, suite green throughout; the
+  `edify:corrector` review that follows audits the mutation evidence as its
+  mechanical first check, in place of the RED output it would otherwise get.
+
+  Slice 4 is **unaffected** and keeps the full four-dispatch shape: its
+  never-existed halves assert **no** `D` line against a write path that still
+  emits one unconditionally, so its red is genuine.
+
+  Two notes for slice 4 from the slice 1 code review, neither obvious from the
+  diff. First, the collapse is two edits, not a rewrite: hoist
+  `existed = path.is_file()` above the `if action == "clear":` line and make
+  the empty-body branch's `return [f"D …"]` conditional on `existed`. The
+  `clear` branch then *is* the tail of the shared removal route; in
+  `apply_todo` the same hoist also serves the `edit` route's own
+  `path.is_file()` check, so it removes a stat rather than adding one. Second,
+  and load-bearing for the tests: in the write route the **disk** state is
+  already correct for a never-existed empty body — the file is written, then
+  unlinked — so a "nothing on disk" assertion passes both before and after the
+  change and cannot discriminate. The phantom is the `D`, not the file. The
+  manifest assertion is the whole of what makes the never-existed halves
+  evidence.
+
   Rows deleted with the forms they cover, not inverted — an inverted test of a
   form that no longer exists is an absence-guard defending nothing:
   `test_task_content_null_no_file_path_noop` (554),
