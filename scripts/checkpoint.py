@@ -3,8 +3,9 @@
 
 Reads a JSON payload on stdin, validates it against the schema (FR2 — a
 violation exits 2 naming the offending field on stderr), applies the task/todo
-Write-or-Edit forms (FR5/FR6), writes the manifest (FR7), composes the sentinel
-(FR8), and prints the directive output (FR9).
+tagged union — content, or an object naming an action (FR5/FR6) — writes the
+manifest (FR7), composes the sentinel (FR8), and prints the directive output
+(FR9).
 
 NFR1: nothing here mutates git state and no tmux runs — this is the agent's
 sandboxed Bash. scripts/bash-post.sh (PostToolUse(Bash), bash, unmoved) does the

@@ -224,12 +224,13 @@ action. `task` takes `{"action": "clear"}`; `todo` also takes
 has no edit action, and no keep — a boundary with nothing to carry says so
 with `clear`, which is the case an agent used to reach for `null` and get
 silence. Both keys are required by key presence: `null` and an absent key
-are each a named error, because the defect being fixed was an agent
-choosing a spelling that quietly did the wrong thing, so a wrong spelling
-must fail loudly rather than acquire a meaning. There is no `file_path` —
-`apply_task`/`apply_todo` compose the real path from `HANDOFF_ROOT`, so the
-field was validated against a constant and discarded. A violation exits
-non-zero naming the offending field.
+are each a named error, because a spelling that quietly does the wrong
+thing is the defect this shape exists to prevent — a wrong one has to fail
+loudly rather than acquire a meaning. There is no `file_path` —
+`apply_task`/`apply_todo` compose the real path from `HANDOFF_ROOT`, so a
+payload-supplied one would ask the agent to derive a path from a root it
+cannot read, only to be checked against the one the write uses anyway. A
+violation exits non-zero naming the offending field.
 [The payload names its actions](changelog/2026-09-07-the-payload-names-its-actions.md)
 
 It gets its root from `HANDOFF_ROOT`, injected into the command's
@@ -256,9 +257,10 @@ the *next* command (which in the routine wrap-up is the user's `/commit`),
 and where tmux is unreachable. `PostToolUse(Bash)` (`bash-post.sh`) consumes
 the manifest instead — `git add -f` for every listed path, deletions
 included, and a path it could not stage named on both channels rather than
-dropped from the counts. Staging is all it does: a sentinel the checkpoint wrote is armed at
-`Stop` like any other, so spawning the walker here would type into a live
-turn, which is the one thing the `Stop` gate exists to prevent.
+dropped from the counts. Staging is all it does: a sentinel the checkpoint
+wrote is armed at `Stop` like any other, so spawning the walker here would
+type into a live turn, which is the one thing the `Stop` gate exists to
+prevent.
 
 `file present ⟹ content pending` is an invariant two writers enforce
 (`checkpoint.py` and `write-stage.sh`, the latter through a

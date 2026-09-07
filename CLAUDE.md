@@ -541,7 +541,9 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   composed from `HANDOFF_ROOT`. Removes a file whose resulting body is empty
   via `is_empty_body` (FR6) — unlink-if-present on both routes, existence
   sampled before any write, so a `D` manifest line records only a removal that
-  actually happened (D3). Writes `.claude/checkpoint-manifest` —
+  actually happened. See
+  `docs/changelog/2026-09-07-the-payload-names-its-actions.md`.
+  Writes `.claude/checkpoint-manifest` —
   always, even with zero lines, so `bash-post.sh`'s presence-gate still
   fires for a call that touched neither file — and composes `.claude/autodrive`
   (FR8) from the transition fields, flattening the title's whitespace on the
@@ -663,10 +665,12 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   then emits a dual-channel summary and deletes the manifest. A path it could
   not stage is **named** on both channels rather than dropped from the counts:
   the `2>/dev/null` that used to make a stranded `index.lock` read as
-  `staged 0, deleted 0` is gone (D4), and the one benign failure it was
+  `staged 0, deleted 0` is gone, and the one benign failure it was
   covering — a `D` for a gitignored path that never entered the index — is
   guarded away with `git ls-files` instead, whose own exit status is read, not
-  inferred from empty output. Staging is all it
+  inferred from empty output. See
+  `docs/changelog/2026-09-07-the-payload-names-its-actions.md`.
+  Staging is all it
   does: a sentinel the checkpoint wrote is armed at `Stop` like any other, so
   consuming it here would spawn the walker mid-turn, which is the one thing the
   `Stop` gate exists to prevent. This is where NFR1's git/tmux work happens instead
@@ -813,10 +817,11 @@ outright regardless of path.
   value that is neither string nor object, an `edit` missing or mistyping
   either of its strings, malformed JSON — each asserting a
   non-zero exit and that the message names the field), Edit application
-  (`old_string` absent, ambiguous, successful), empty-body removal through
-  both writers (`checkpoint.py` and `write-stage.sh`) including that the
-  deletion reaches the manifest, and `bash-post.sh` (manifest absent,
-  manifest present, a sentinel left untouched). The `skill` enum's four values
+  (`old_string` absent, ambiguous, successful), and empty-body removal
+  including that the deletion reaches the manifest. It does **not** cover
+  `write-stage.sh` or `bash-post.sh`, which this sentence used to claim: those
+  are bash and are tested where the two bullets above say, in
+  `tests/hook-test.bats` and `tests/checkpoint.bats`. The `skill` enum's four values
   each accepted, the two retired driven-skill names rejected, `rename` rejected
   under `precompact` and `restart`, required under the other two, and each
   boundary's directive asserted against the absence of the other's.
