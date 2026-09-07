@@ -13,7 +13,7 @@ outline's "Decisions this outline applies".
 | Requirement | Phase | Items | Notes |
 |---|---|---|---|
 | FR2 — payload validated against a schema, violation exits non-zero naming the field | 1 | 1.1 | The tagged union replaces key-combination sniffing; `null` and an absent key each become a named error |
-| FR4 — `handoff-todo.md` is a scratch list the agent edits freely; the checkpoint is only the wrap-up path | 1 | 1.1 | This is why `todo` has a `keep` action and `task` does not: a call that says nothing about the list must not wipe it |
+| FR4 — `handoff-todo.md` is a scratch list the agent edits freely; the checkpoint is only the wrap-up path | 1 | 1.1, 1.2 | This is why `todo` has a `keep` action and `task` does not: a call that says nothing about the list must not wipe it |
 | FR5 — todo supports incremental update; task is Write-form only | 1 | 1.1 | Restated in action vocabulary: `{"action": "edit"}` for todo, no edit action for task |
 | FR6 — a file whose body is empty is removed; file present ⟹ content pending | 1 | 1.1 | Both routes to removal — explicit `{"action": "clear"}` and a write whose body is empty under `is_empty_body` |
 | FR7 — everything written is staged via the manifest, deletions included | 1, 2 | 1.1, 2.1 | `D` records only a removal that happened; `bash-post.sh` stops swallowing a failed `git add` |
@@ -384,6 +384,63 @@ byte-for-byte and the suite is green at its start and its end.
   boundary-skill gate around all four calls. Neither returns `"none"` any
   more — `"clear"` and `"keep"` are distinct outcomes and `apply_*` must not
   collapse them.
+
+- Item 1.2 (added 2026-09-07, after Item 1.1's four slices closed): close the
+  two coverage residuals both reviews routed here rather than fixing in place.
+  Tests only — `tests/test_checkpoint.py` — with no implementation half, since
+  the code is correct and the defect is that three rows cannot prove it.
+  Requirements: FR2, FR4, FR5, FR7. Depends on: Item 1.1.
+
+  Both belong to slice 1's subject, the external contract's positives, and
+  neither was fixable inside the slice that found it: slice 2's review found
+  the first while reviewing slice 2's own table, and slice 4's review found the
+  second in two rows slice 1 had already committed. Amending a committed
+  slice's rows from a later slice's dispatch would put the edit in the wrong
+  commit, which is why they were carried rather than absorbed. They are batched
+  into one dispatch because they are the same defect class in the same file: an
+  assertion whose correct outcome is indistinguishable from the code not
+  running at all.
+
+  1. **`precompact` must be shown to apply, not merely to validate.** A defect
+     where `validate_*` is reached for `precompact` but `apply_*` is skipped
+     passes the whole suite today, because all 17 `precompact` payloads carry
+     `task_clear()`/`todo_keep()`, whose correct outcome — empty manifest, no
+     file — is exactly what the gate skipping the work would produce. Fix:
+     parametrize `test_task_write_creates_file_manifest_records_w` and
+     `test_todo_write_creates_file_manifest_records_w` over `skill`, the way
+     slice 2's table already is. This is the half of `main`'s
+     `if skill in ("handoff", "precompact")` gate that slice 2 left open —
+     slice 2's review closed the validation half and said so.
+
+  2. **Two slice 1 rows assert an absence over an empty manifest.**
+     `test_task_clear_never_existed_writes_nothing_no_d` and
+     `test_todo_keep_leaves_pre_existing_list_alone` both assert the manifest
+     names no line for their file, on a success path where the manifest is
+     empty outright — so "the manifest says nothing about anything" satisfies
+     them. Demonstrated: a mutation emptying the manifest of every `W` line
+     leaves the first green. Fix: the same shape slice 4's review applied to
+     its own pair — give the payload a second field whose `W` line must
+     survive, and assert that line before the absence. The `todo_keep` row is
+     the milder case, since its `read_text() == before` is a real positive; the
+     `task_clear` row has no positive at all.
+
+  **No red is available for either**, for the reason slices 2 and 3 had none:
+  the code is already correct and these rows already pass. Run this item under
+  the same **write-then-mutate** protocol recorded above — one
+  `edify:test-driver` dispatch amends the rows, confirms they pass, then
+  mutates `scripts/checkpoint.py` in place per assertion family and records
+  which rows red under which mutation; one `edify:corrector` dispatch
+  reproduces that matrix independently as its mechanical first check. The
+  mutations that matter are the two already known to leave these rows green:
+  narrowing `main`'s gate to `if skill == "handoff":`, and emptying the
+  manifest of `W` lines. Each must red its row after the amendment and is the
+  evidence the amendment worked.
+
+  Restore with `git checkout -- scripts/checkpoint.py`, never a `cp` from a
+  saved copy, and assert the restore in the shell after every cycle — a
+  silently no-op'd restore stacked one mutation on the next in an earlier
+  review and read as exactly the "mutations are not disjoint" finding the
+  matrix exists to detect.
 
 ## Phase 2: Stop swallowing a failed stage (type: inline)
 
