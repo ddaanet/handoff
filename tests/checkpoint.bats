@@ -376,3 +376,55 @@ handoff_payload() {
         | jq -e '.hookSpecificOutput.additionalContext | test("failed to stage: .claude/handoff-todo.md")' >/dev/null
     grep -q 'index.lock' "$err"
 }
+
+# The pair for row 2: the same `D` line for a path ls-files does not list, but
+# here because git cannot read the index at all rather than because the path
+# never entered it. `add` could not have staged into that repo either, so the
+# guard must report it, not swallow it. `.git` is a garbage file so the failure
+# holds wherever BATS_TEST_TMPDIR happens to sit — an enclosing repo cannot
+# rescue it into a successful, empty ls-files.
+@test "bash-post: D whose index cannot be read -> reported, not swallowed by the guard" {
+    repo="$BATS_TEST_TMPDIR/bp-d-broken"; mkdir -p "$repo/.claude"
+    printf 'not a gitfile\n' > "$repo/.git"
+    printf '%s\n' "D .claude/handoff-task.md" > "$repo/.claude/checkpoint-manifest"
+    err="$repo/stderr.txt"
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash "$2" 2>"$3"
+    ' _ "$repo" "$BASHPOST" "$err"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/checkpoint-manifest" ]
+    echo "$output" \
+        | jq -e '.systemMessage | test("failed to stage: .claude/handoff-task.md")' >/dev/null
+    echo "$output" \
+        | jq -e '.hookSpecificOutput.additionalContext | test("failed to stage: .claude/handoff-task.md")' >/dev/null
+    echo "$output" \
+        | jq -e '.hookSpecificOutput.additionalContext | test("Leave them staged") | not' >/dev/null
+    [ -s "$err" ]
+}
+
+# The one combination where both optional clauses of agent_ctx appear at once,
+# which is what the trailing period moving out of the initial assignment has to
+# survive: the failure joins the semicolon list, the sentence closes, and only
+# then does the "Leave them staged" clause follow. A `W` line for a path that is
+# not on disk is the cheapest way to fail one path while another succeeds; the
+# checkpoint does not compose that manifest itself, and this row is about the
+# composition, not the cause.
+@test "bash-post: one staged and one failed -> both clauses compose in order" {
+    repo="$BATS_TEST_TMPDIR/bp-mixed"; mkdir -p "$repo/.claude"
+    git -C "$repo" init -q
+    printf 'task body\n' > "$repo/.claude/handoff-task.md"
+    printf '%s\n' "W .claude/handoff-task.md" "W .claude/handoff-todo.md" \
+        > "$repo/.claude/checkpoint-manifest"
+    err="$repo/stderr.txt"
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash "$2" 2>"$3"
+    ' _ "$repo" "$BASHPOST" "$err"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.systemMessage
+        | test("staged 1, deleted 0; failed to stage: .claude/handoff-todo.md")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext
+        | test("staged: .claude/handoff-task.md; deleted: none; failed to stage: .claude/handoff-todo.md. Leave them staged")' >/dev/null
+    grep -q 'did not match any files' "$err"
+}

@@ -43,8 +43,19 @@ while IFS= read -r line || [ -n "$line" ]; do
     # than redirecting, so whatever still reaches stderr is a genuine failure.
     # Not `ls-files --error-unmatch`, which writes its own message to stderr
     # and would need back the very redirect this removes.
-    if [ "$op" = "D" ] && [ -z "$(git -C "$cwd" ls-files -- "$rel")" ]; then
-        continue
+    #
+    # ls-files *itself* failing is not that case — a repo `git add` could not
+    # have staged into either — so it is reported rather than swallowed. The
+    # branch is load-bearing: a failed command substitution does not trip
+    # `set -e` from inside a `[ ]` test, so folded into one condition its empty
+    # output reads as "never in the index" and skips the path silently, which
+    # is the exact swallow this item exists to remove.
+    if [ "$op" = "D" ]; then
+        if ! indexed="$(git -C "$cwd" ls-files -- "$rel")"; then
+            failed+=("$rel")
+            continue
+        fi
+        [ -n "$indexed" ] || continue
     fi
     if git -C "$cwd" add -f -- "$rel"; then
         if [ "$op" = "D" ]; then
@@ -66,6 +77,12 @@ agent_ctx="checkpoint manifest consumed — staged: ${staged[*]:-none}; deleted:
 # deleted 0" on both channels. git's stderr now reaches the user; this names
 # which path it was, on both channels and in one spelling, since the counts
 # alone cannot say and two wordings of one fact read as two facts.
+#
+# `${failed[*]}` joins on a space, which would be ambiguous for a path holding
+# one. It cannot: checkpoint.py composes every manifest line from its two path
+# constants and the payload no longer carries a `file_path`, so the only names
+# that reach here are `.claude/handoff-task.md` and `.claude/handoff-todo.md`.
+# Same bound as the `${staged[*]}` / `${deleted[*]}` joins above.
 if [ ${#failed[@]} -gt 0 ]; then
     summary="$summary; failed to stage: ${failed[*]}"
     agent_ctx="$agent_ctx; failed to stage: ${failed[*]}"
