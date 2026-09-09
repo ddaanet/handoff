@@ -208,6 +208,8 @@ pick up per the task file" ]
 # shim (bin/handoff-checkpoint)
 # ==========================================================================
 
+# The union's spelling, hardcoded outside the Python factories: keep in step
+# with task_clear()/todo_keep() in tests/test_checkpoint.py.
 handoff_payload() {
     jq -nc --arg commit "$1" '{skill:"handoff", commit:$commit, rename:"Session Title", clear:false, continue:null, task:{action:"clear"}, todo:{action:"keep"}}'
 }

@@ -226,7 +226,17 @@ with `clear`, which is the case an agent used to reach for `null` and get
 silence. Both keys are required by key presence: `null` and an absent key
 are each a named error, because a spelling that quietly does the wrong
 thing is the defect this shape exists to prevent — a wrong one has to fail
-loudly rather than acquire a meaning. There is no `file_path` —
+loudly rather than acquire a meaning. The action object holds to the same
+rule inside itself: its own `action` is read by key presence, so an explicit
+`null` is reported as the value it is rather than as an omission, and any key
+the named action does not take is a named error rather than a silent
+discard. Ignoring one reopens the defect one level down — an agent told
+`must be "clear", got "write"` that corrects only the action leaves its
+`content` in place, and the frame is removed with nothing said. The two
+`required` messages name the whole vocabulary for the same reason: that
+branch is what an out-of-date producer sending the retired
+`{"file_path": …, "content": …}` shape lands on, so it has to say what to
+write instead. There is no `file_path` —
 `apply_task`/`apply_todo` compose the real path from `HANDOFF_ROOT`, so a
 payload-supplied one would ask the agent to derive a path from a root it
 cannot read, only to be checked against the one the write uses anyway. A

@@ -114,6 +114,8 @@ def task_content(content: str) -> str:
 
 
 def task_clear() -> dict[str, str]:
+    # Also spelled out in tests/checkpoint.bats' handoff_payload(); the two
+    # move together.
     return {"action": "clear"}
 
 
@@ -123,6 +125,10 @@ def todo_content(content: str) -> str:
 
 def todo_keep() -> dict[str, str]:
     return {"action": "keep"}
+
+
+def todo_clear() -> dict[str, str]:
+    return {"action": "clear"}
 
 
 def todo_edit(old: str, new: str) -> dict[str, str]:
@@ -437,8 +443,40 @@ def test_precompact_with_rename_omitted_accepted(tmp_path: Path) -> None:
             {"action": "edit", "old_string": "a", "new_string": "b"},
             'got "edit"',
         ),
-        ("task", {}, "action: required"),
-        ("todo", {}, "action: required"),
+        ("task", {}, 'action: required, a content string or {"action": "clear"}'),
+        (
+            "todo",
+            {},
+            'action: required, a content string or "clear", "keep" or "edit"',
+        ),
+        ("task", {"action": None}, 'must be "clear", got null'),
+        (
+            "todo",
+            {"action": None},
+            'must be "clear", "keep" or "edit", got null',
+        ),
+        ("task", {"action": True}, 'must be "clear", got boolean'),
+        ("todo", {"action": 5}, "got number"),
+        (
+            "task",
+            {"action": "clear", "content": "IMPORTANT UNSAVED"},
+            'unknown key "content"',
+        ),
+        (
+            "todo",
+            {"action": "keep", "content": "## Remaining\n\n- x\n"},
+            'unknown key "content"',
+        ),
+        (
+            "todo",
+            {"action": "clear", "old_string": "a"},
+            'unknown key "old_string"',
+        ),
+        (
+            "todo",
+            {"action": "edit", "old_string": "a", "new_string": "b", "content": "x"},
+            'unknown key "content"',
+        ),
         ("task", 42, "got number"),
         ("todo", 42, "got number"),
         (
@@ -469,6 +507,14 @@ def test_precompact_with_rename_omitted_accepted(tmp_path: Path) -> None:
         "task_edit_rejected",
         "task_no_action_key",
         "todo_no_action_key",
+        "task_null_action",
+        "todo_null_action",
+        "task_boolean_action",
+        "todo_number_action",
+        "task_clear_with_unknown_key",
+        "todo_keep_with_unknown_key",
+        "todo_clear_with_edit_key",
+        "todo_edit_with_unknown_key",
         "task_not_string_or_object",
         "todo_not_string_or_object",
         "todo_edit_missing_old_string",
@@ -492,6 +538,19 @@ def test_task_or_todo_action_vocabulary_errors_naming_field(
     a checked string, and an unchecked one reaches `apply_edit`'s
     `content.count(old)` as a TypeError traceback, which exits 1 and names no
     field.
+
+    The `action` key itself is checked by key presence, not by truthiness:
+    an absent one is `required` and names the whole vocabulary — that branch
+    is what an out-of-date producer sending the retired
+    `{"file_path": …, "content": …}` shape hits, so it has to say what to
+    write instead — while an explicit `null` is a value like any other and
+    reports what it is. Non-string values render as their JSON type, never a
+    Python repr (`got boolean`, not `got "True"`).
+
+    An action object carrying any other key is rejected too. Ignoring it is
+    the defect class the union closed one level up: an agent told
+    `must be "clear", got "write"` that corrects only the action leaves its
+    `content` behind, and the frame is removed with nothing said.
 
     `task_edit_rejected`, `todo_edit_missing_old_string` and
     `todo_edit_missing_new_string` restate, in action vocabulary,
@@ -659,6 +718,56 @@ def test_task_clear_never_existed_writes_nothing_no_d(tmp_path: Path) -> None:
     # about the task route rather than about an empty manifest.
     assert "W .claude/handoff-todo.md" in manifest.splitlines()
     assert "handoff-task.md" not in manifest
+
+
+def test_todo_clear_removes_pre_existing_file_manifest_records_d(
+    tmp_path: Path,
+) -> None:
+    """Mirror of the task row, and the only cover of `todo`'s destructive arm.
+
+    Written after a review found the whole branch dead to the suite: replacing
+    it with `return []` left every test passing, while three sibling mutations
+    on the same two functions redded 4, 1 and 2 rows.
+    """
+    repo = make_repo(tmp_path)
+    (repo / ".claude" / "handoff-todo.md").write_text("## Remaining\n\n- stale\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content("## Current task\n\nlive\n"),
+        "todo": todo_clear(),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-todo.md").exists()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    # The task line carries the live-manifest role the todo line plays in the
+    # task pair, so the pair differs only in whether the todo file exists first.
+    assert "W .claude/handoff-task.md" in manifest.splitlines()
+    assert "D .claude/handoff-todo.md" in manifest.splitlines()
+
+
+def test_todo_clear_never_existed_writes_nothing_no_d(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content("## Current task\n\nlive\n"),
+        "todo": todo_clear(),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-todo.md").exists()
+    assert (repo / ".claude" / "checkpoint-manifest").is_file()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    assert "W .claude/handoff-task.md" in manifest.splitlines()
+    assert "handoff-todo.md" not in manifest
 
 
 def test_task_write_only_headings_pre_existing_removed_manifest_records_d(
@@ -853,6 +962,7 @@ def test_todo_edit_requested_file_missing_errors(tmp_path: Path) -> None:
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
+    assert "todo.old_string" in result.stderr
     assert "does not exist" in result.stderr
 
 
@@ -973,8 +1083,7 @@ def test_task_and_todo_both_written_manifest_lists_both(tmp_path: Path) -> None:
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
     manifest = (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
-    assert "W .claude/handoff-task.md" in manifest
-    assert "W .claude/handoff-todo.md" in manifest
+    assert manifest == ["W .claude/handoff-task.md", "W .claude/handoff-todo.md"]
 
 
 # ==========================================================================

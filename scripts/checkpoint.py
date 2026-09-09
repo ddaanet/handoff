@@ -262,6 +262,40 @@ def validate_continuation(payload: JSONDict, skill: str, *, typed: bool) -> str:
     return continuation
 
 
+def _got(value: object) -> str:
+    """Render a rejected `action` value: quoted when a string, else its type.
+
+    A non-string action rendered with `f"{value}"` prints a Python repr —
+    `True`, not `true` — so the diagnostic names a spelling no JSON producer
+    could have sent. Every other type reads better as its type name anyway,
+    which is what the neighbouring diagnostics already say.
+    """
+    if _json_type(value) == "string":
+        return f'"{value}"'
+    return _json_type(value)
+
+
+def _reject_unknown_keys(
+    field: str, obj: JSONDict, action: str, allowed: tuple[str, ...]
+) -> None:
+    """Error unless obj carries only "action" and the action's own keys.
+
+    An action object that silently ignores what it does not recognize is the
+    defect class the tagged union was opened to close one level down: an agent
+    told `must be "clear", got "write"` that corrects only the action leaves
+    its `content` in place, and the frame is removed with nothing said.
+    """
+    extra = sorted(k for k in obj if k != "action" and k not in allowed)
+    if not extra:
+        return
+    takes = (
+        "takes no other key"
+        if not allowed
+        else "takes only " + " and ".join(f'"{k}"' for k in allowed)
+    )
+    err(field, f'unknown key "{extra[0]}", {{"action": "{action}"}} {takes}')
+
+
 def validate_task(payload: JSONDict) -> tuple[str, str]:
     """("write", content) or ("clear", "")."""
     if "task" not in payload:
@@ -271,12 +305,13 @@ def validate_task(payload: JSONDict) -> tuple[str, str]:
     if ttype == "string":
         return "write", cast("str", task)
     if ttype == "object":
-        action = task.get("action")
+        if "action" not in task:
+            err("task.action", 'required, a content string or {"action": "clear"}')
+        action = task["action"]
         if action == "clear":
+            _reject_unknown_keys("task", task, "clear", ())
             return "clear", ""
-        if action is None:
-            err("task.action", "required")
-        err("task.action", f'must be "clear", got "{action}"')
+        err("task.action", f'must be "clear", got {_got(action)}')
     err(
         "task",
         f'must be a content string or {{"action": "clear"}}, got {ttype}',
@@ -297,17 +332,23 @@ def validate_todo(payload: JSONDict) -> tuple[str, str, str, str]:
     if ttype == "string":
         return "write", cast("str", todo), "", ""
     if ttype == "object":
-        action = todo.get("action")
-        if action == "clear":
-            return "clear", "", "", ""
-        if action == "keep":
-            return "keep", "", "", ""
+        if "action" not in todo:
+            err(
+                "todo.action",
+                'required, a content string or "clear", "keep" or "edit"',
+            )
+        action = todo["action"]
+        if action in ("clear", "keep"):
+            _reject_unknown_keys("todo", todo, cast("str", action), ())
+            return cast("str", action), "", "", ""
         if action == "edit":
+            _reject_unknown_keys("todo", todo, "edit", ("old_string", "new_string"))
             old_string, new_string = _todo_edit_strings(todo)
             return "edit", "", old_string, new_string
-        if action is None:
-            err("todo.action", "required")
-        err("todo.action", f'must be "clear", "keep" or "edit", got "{action}"')
+        err(
+            "todo.action",
+            f'must be "clear", "keep" or "edit", got {_got(action)}',
+        )
     err(
         "todo",
         f"must be a content string or an object naming an action, got {ttype}",

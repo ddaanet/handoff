@@ -77,11 +77,16 @@ itself, and the prompt that resumes the work on the far side.
    JSON
    ```
 
-   Both keys are required and `null` is an error on each, as is omitting one.
-   `{"action": "clear"}` removes that file — for `task`, this is how a boundary
-   with nothing to carry says so. `{"action": "keep"}` leaves the list
-   untouched and `{"action": "edit", …}` strikes a finished item without
-   regenerating it — both `todo` only.
+   Both keys are required. `{"action": "clear"}` removes that file — for
+   `task`, this is how a boundary with nothing to carry says so; for `todo`,
+   it says every item landed. When the call has nothing to say about the
+   list, send `{"action": "keep"}`, which leaves it untouched: a scratch
+   list must survive a call that is silent about it, so `keep` is the
+   default and `clear` is a deliberate stand-down. `{"action": "edit", …}`
+   strikes a finished item without regenerating it — both `todo` only;
+   `edit` needs the file to exist and `old_string` to appear in it exactly
+   once. `null` is an error on both, as is omitting a key, or adding one
+   inside an action object.
 
    Author the continuation prompt **silently**. It gets typed visibly into
    the composer and lands in scrollback, so reprinting it in the reply

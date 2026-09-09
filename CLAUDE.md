@@ -813,12 +813,16 @@ outright regardless of path.
   branch, watch it go red), not observed passing. Also: schema validation
   (each required field missing, each literal with an unknown value, `rename`
   under `precompact`, `null` and an absent key on each of `task`/`todo`, an
-  action outside the field's own vocabulary, an object with no `action` key, a
+  action outside the field's own vocabulary, an explicit `null` action, a
+  non-string one, an object with no `action` key, an object carrying a key its
+  action does not take, a
   value that is neither string nor object, an `edit` missing or mistyping
   either of its strings, malformed JSON — each asserting a
   non-zero exit and that the message names the field), Edit application
   (`old_string` absent, ambiguous, successful), and empty-body removal
-  including that the deletion reaches the manifest. It does **not** cover
+  including that the deletion reaches the manifest — the `clear` action's own
+  pre-existing/never-existed pair covered on both `task` and `todo`, the todo
+  half mutation-checked after a review found that branch dead to the suite. It does **not** cover
   `write-stage.sh` or `bash-post.sh`, which this sentence used to claim: those
   are bash and are tested where the two bullets above say, in
   `tests/hook-test.bats` and `tests/checkpoint.bats`. The `skill` enum's four values
