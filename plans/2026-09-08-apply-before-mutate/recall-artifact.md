@@ -40,3 +40,38 @@ backup and empty for the call that read it. The mutation was live with the
 restore route broken. **Restore by inverting the exact string replacement**,
 then prove it: grep for the mutation marker and re-run the suite. Briefed to
 `craft` at `inbox/brief-mutation-check-restore.md`.
+
+## Added at `/runbook`, 2026-09-10
+
+Implementation-pattern selection. The index is still not in this session's
+context, so selection ran against store filenames again.
+
+- `memory/ddaanet/spec-enumerations-need-rederiving.md` — the outline
+  hand-lists the citation sites the rename must reach. Re-derived
+  mechanically before writing the runbook: `apply_task`/`apply_todo`/
+  `apply_edit` appear live in `scripts/checkpoint.py` (definitions at 378,
+  392, 411; prose citations at 364, 416, 420; calls at 440, 546-547),
+  `tests/test_checkpoint.py:538` and `docs/design.md:240` — matching the
+  outline exactly. Everything else is under `plans/` or
+  `docs/changelog/2026-09-07-…:53`, both frozen write-time records that are
+  not edited.
+- `memory/ddaanet/plan-contracts-not-full-code.md` — the runbook states
+  contracts; the `Interfaces:` block is the only verbatim element.
+- `memory/ddaanet/outside-in-tdd.md` — the architecture is settled, so the
+  slice's tests assert through the production entry point (a subprocess run
+  of `checkpoint.py`), which is what the existing suite already does.
+- `memory/ddaanet/uv-direnv-venv.md` — `just precommit` calls bare `pytest`
+  off the direnv-activated venv; no `uv run`.
+- `memory/ddaanet/design-doc-writing.md` — the changelog entry is a
+  write-time record and `docs/design.md` is present-tense current truth; the
+  2026-09-07 entry takes no superseding header.
+
+## Post-explore gate, 2026-09-10
+
+Exploration surfaced three things step 1 did not anticipate: the four
+existing `test_todo_edit_*` rows already carry `task: {"action": "clear"}`,
+so the outline's five rows are four extensions plus one new row rather than
+five additions; `Transition(NamedTuple)` is the module's precedent for a
+frozen record; and the outline's `(D5)` citation resolves nowhere in the
+repo. None of these routes to a memory entry the selection above missed —
+stated explicitly rather than left silent.
