@@ -1,11 +1,10 @@
 ## Current task
 
-`/orchestrate` finished `plans/2026-09-08-apply-before-mutate/runbook.md` — both
-phases, seven dispatches, no UNFIXABLE at any gate. The whole job rides a single
-commit, amended after each dispatch per item 2.1's own instruction, so the shas
-named inside `reports/item-1-1-s1-green.md` and `reports/item-2-1.md` are stale
-by construction and resolve to nothing; `reports/phase-2-corrector.md` carries a
-dated correction note for the same reason.
-
-Next is `/deliverable-review plans/2026-09-08-apply-before-mutate` in a fresh
-session on opus, then the pass-2 minors, then the release.
+The apply-before-mutate job is reviewed and closed: no critical or major
+findings, and its four minors are fixed and mutation-checked. A follow-up
+audit then verdicted all 25 findings of the earlier payload-union review
+against the current tree rather than against any later document's claim —
+`plans/2026-09-04-checkpoint-null-no-task-file/reports/fix-status-audit.md`,
+11 fixed, 10 deferred with a quoted decision, 4 open. One of the four is work
+nobody scheduled: M3 was closed in the ledger with half of it still standing,
+and the pass-2 ordering has not been revised to take it.
