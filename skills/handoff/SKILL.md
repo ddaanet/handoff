@@ -172,6 +172,8 @@ Task file rules:
   the frame next session.
 - No file paths or code beyond what's needed to say what's in progress.
   The working set is reconstructable from `git status` at load time.
+- No location to choose, unlike the todo file below: the checkpoint composes
+  the path above from the session root, and a direct Write there is denied.
 
 **Todo file template** (`./.claude/handoff-todo.md`):
 
@@ -198,6 +200,10 @@ Todo file rules:
 - No `#` heading — the read-time hook prepends one when it assembles the
   frame, same as the task file.
 - `## Open decisions` is dropped whenever none remain — no filler section.
+- **A decision the user has left unanswered across several frames is
+  declined, not missed.** Drop it, and never annotate one with the number of
+  times it has been raised. A listed decision blocks nothing either: work
+  that can proceed without the answer is listed as work.
 - No location other than `./.claude/handoff-todo.md`.
 - It is a remainder plus the open questions blocking it, not a plan of
   record — but it is versioned like the task file, so write it as

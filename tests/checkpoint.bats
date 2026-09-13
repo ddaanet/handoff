@@ -379,9 +379,9 @@ handoff_payload() {
     [ "$status" -eq 0 ]
     [ ! -e "$repo/.claude/checkpoint-manifest" ]
     echo "$output" \
-        | jq -e '.systemMessage | test("failed to stage: .claude/handoff-todo.md")' >/dev/null
+        | jq -e '.systemMessage | contains("failed to stage: .claude/handoff-todo.md")' >/dev/null
     echo "$output" \
-        | jq -e '.hookSpecificOutput.additionalContext | test("failed to stage: .claude/handoff-todo.md")' >/dev/null
+        | jq -e '.hookSpecificOutput.additionalContext | contains("failed to stage: .claude/handoff-todo.md")' >/dev/null
     # The remedy is an act, so it rides the agent channel alone; the user
     # channel carries the fact. Both halves of that asymmetry are pinned here,
     # since only the negative says the split was deliberate.
@@ -445,9 +445,9 @@ handoff_payload() {
     [ "$status" -eq 0 ]
     [ ! -e "$repo/.claude/checkpoint-manifest" ]
     echo "$output" \
-        | jq -e '.systemMessage | test("failed to stage: .claude/handoff-task.md")' >/dev/null
+        | jq -e '.systemMessage | contains("failed to stage: .claude/handoff-task.md")' >/dev/null
     echo "$output" \
-        | jq -e '.hookSpecificOutput.additionalContext | test("failed to stage: .claude/handoff-task.md")' >/dev/null
+        | jq -e '.hookSpecificOutput.additionalContext | contains("failed to stage: .claude/handoff-task.md")' >/dev/null
     echo "$output" \
         | jq -e '.hookSpecificOutput.additionalContext | test("Leave them staged") | not' >/dev/null
     [ -s "$err" ]
@@ -473,8 +473,8 @@ handoff_payload() {
     ' _ "$repo" "$BASHPOST" "$err"
     [ "$status" -eq 0 ]
     echo "$output" | jq -e '.systemMessage
-        | test("staged 1, deleted 0; failed to stage: .claude/handoff-todo.md")' >/dev/null
+        | contains("staged 1, deleted 0; failed to stage: .claude/handoff-todo.md")' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext
-        | test("staged: .claude/handoff-task.md; deleted: none; failed to stage: .claude/handoff-todo.md — stage with git add -f before the next commit. Leave them staged")' >/dev/null
+        | contains("staged: .claude/handoff-task.md; deleted: none; failed to stage: .claude/handoff-todo.md — stage with git add -f before the next commit. Leave them staged")' >/dev/null
     grep -q 'did not match any files' "$err"
 }

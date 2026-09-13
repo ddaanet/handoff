@@ -600,7 +600,7 @@ def test_malformed_json_errors_naming_payload(tmp_path: Path) -> None:
 def test_task_or_todo_null_or_absent_errors_naming_field(
     tmp_path: Path, skill: str, field: str, shape: str, reason: str
 ) -> None:
-    """D2: task/todo are each required by key presence, with no default.
+    """Both `task` and `todo` are required by key presence, with no default.
 
     `null` and an absent key are distinct, named errors on both fields — the
     defect being fixed is an agent choosing a spelling that silently did the

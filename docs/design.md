@@ -274,7 +274,15 @@ included, and a path it could not stage named on both channels rather than
 dropped from the counts — that name carries the whole report, a hook's stderr
 on `exit 0` reaching neither audience. A root that is not a git repository at
 all is separated ahead of the loop and reported once rather than once per
-path: nothing there can be staged, and nothing is wrong. Staging is all it does: a sentinel the checkpoint
+path: nothing there can be staged, and nothing is wrong. A `D` line for a
+path `git ls-files` does not list is skipped rather than attempted: both
+files are gitignored, so nothing but a hook ever stages them, and a `git
+reset` since the last checkpoint — or a file the user wrote by hand — leaves
+the path untracked, so this call's removal emits a `D` for something the
+index never held. `git add -f` exits 128 there with `did not match any
+files`, and that is the one benign failure in this loop. The guard's own exit
+status is read rather than inferred from its empty output, a failing `ls-files`
+being a repository `add` could not have staged into either. Staging is all it does: a sentinel the checkpoint
 wrote is armed at `Stop` like any other, so spawning the walker here would
 type into a live turn, which is the one thing the `Stop` gate exists to
 prevent.

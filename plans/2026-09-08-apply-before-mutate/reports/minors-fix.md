@@ -5,6 +5,14 @@
 **Commits:** `b22e11d` (review report), `f090b92` (the four fixes) — on `main`,
 not pushed.
 
+> **Corrected at review, 2026-09-13.** `f090b92` is on no branch. It was
+> replaced by the amend `ab8f5b2`, which carries the same four fixes plus this
+> report itself and two prose tweaks the amend added (`git diff f090b92
+> ab8f5b2 -- CLAUDE.md scripts/ tests/ docs/`: a `CLAUDE.md` rewrap and one
+> sentence of `apply_plan`'s docstring). Everything this report says about the
+> four fixes stands and is reachable at `ab8f5b2`; only the sha naming them
+> was superseded before the report was committed.
+
 ## m1 — `_plan_file` composes its own path
 
 `scripts/checkpoint.py:412`. Signature is now

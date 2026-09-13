@@ -738,7 +738,15 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
 - `plans/` — prospective content: specs, design proposals, implementation
   plans. Anything describing work not yet done, or describing how something
   was built rather than what it is. Write-time records like `docs/changelog/`
-  entries, so they are not revised as the code moves past them.
+  entries, so they are not revised as the code moves past them. A claim found
+  to be *wrong at the time it was written* — a miscount, a mutation whose
+  evidence does not reconstruct — is corrected in place with a
+  `> **Corrected at review, <date>.**` blockquote below the affected passage:
+  the sibling of the changelog's `> **Superseded <date>**`, and the same
+  scope rule. It quotes the original wording, names what was wrong, shows the
+  evidence, and says what still stands, so a later session reading the report
+  instead of re-running it is not misled and loses nothing the report got
+  right.
 
 ## Conventions
 
@@ -847,9 +855,11 @@ outright regardless of path.
   and `todo`, the todo half mutation-checked after a review found that branch
   dead to the suite, plus the `edit`-to-empty route, the one that reaches the
   emptiness rule through a computed body rather than one the payload states
-  outright. It does **not** cover `write-stage.sh` or `bash-post.sh`, which
-  this sentence used to claim: those are bash and are tested where the two
-  bullets above say, in `tests/hook-test.bats` and `tests/checkpoint.bats`. The `skill` enum's four values
+  outright, and `{"action": "keep"}` leaving a pre-existing list byte-identical
+  and off the manifest, which is what makes a wrap-up that says nothing about
+  the list safe (FR4). It does **not** cover `write-stage.sh` or `bash-post.sh`:
+  those are bash and are tested where the two bullets above say, in
+  `tests/hook-test.bats` and `tests/checkpoint.bats`. The `skill` enum's four values
   each accepted, the two retired driven-skill names rejected, `rename` rejected
   under `precompact` and `restart`, required under the other two, and each
   boundary's directive asserted against the absence of the other's.

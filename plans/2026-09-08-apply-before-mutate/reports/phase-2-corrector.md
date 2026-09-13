@@ -110,7 +110,7 @@ against the report.
   `pytest` (229 passed, 11 deselected)
 - Tree holds only the three modified doc files and this report; no commit made.
 
-> **Corrected at audit, 2026-09-13.** This report states that `FilePlan`'s
+> **Corrected at review, 2026-09-13.** This report states that `FilePlan`'s
 > docstring was left as found because `scripts/` was scope-OUT. The commit
 > carrying this report fixes it: the orchestrator applied the narrowing
 > inline after reading the finding, since leaving it would have left the

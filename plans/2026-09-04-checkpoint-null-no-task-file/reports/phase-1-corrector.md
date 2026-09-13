@@ -172,6 +172,22 @@ would have produced.
   the only coverage that the root comes from `HANDOFF_ROOT`, so I checked it
   rather than trusting the runbook's claim.
 
+> **Corrected at review, 2026-09-13.** The mutation this bullet records is not
+> the one that reds the tests it names. Both spellings re-run against the
+> unchanged suite:
+>
+> | Mutation in `validate_root` | Result |
+> |---|---|
+> | `root = os.environ.get("HANDOFF_ROOT", "") or str(Path.cwd())` — the fallback as written | reds `test_handoff_root_unset_refuses` **alone**; both named tests stay green (1 failed, 2 passed) |
+> | `root = str(Path.cwd())` — unconditional | reds all three, the drift test included |
+>
+> A *fallback* cannot red either named test: both set `HANDOFF_ROOT`, so the
+> `or` branch is never taken. The bullet's conclusion stands —
+> `test_drifted_cwd_writes_injected_root_never_cwd` does discriminate, and the
+> unconditional spelling is the evidence for it — but the mutation as recorded
+> proves only that the unset branch is covered. Nothing else in this report
+> depends on the wrong spelling.
+
 ### Lead 3 — `main`'s boundary gate
 
 Holds for all four skills. `validate_task`/`validate_todo`/`apply_task`/
