@@ -538,11 +538,19 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   says nothing about it, FR4/FR5). Both keys are required by key presence, so
   `null` and an absent key are each a named error rather than a spelling that
   quietly does the wrong thing; there is no `file_path`, the path being
-  composed from `HANDOFF_ROOT`. Removes a file whose resulting body is empty
-  via `is_empty_body` (FR6) — unlink-if-present on both routes, existence
-  sampled before any write, so a `D` manifest line records only a removal that
-  actually happened. See
-  `docs/changelog/2026-09-07-the-payload-names-its-actions.md`.
+  composed from `HANDOFF_ROOT`. Each half resolves to a `FilePlan` — the path,
+  the act, the body and the manifest lines that record it — and every failure
+  the two halves raise happens while resolving, so a wrap-up is applied whole
+  or not at all: nothing touches the disk until both plans exist. The
+  guarantee's subject is those two halves and their manifest, not every `err()`
+  reachable from `main()` — `compose_sentinel`'s read-back fires after both
+  halves are applied, with the manifest already written — and an `OSError` from
+  the filesystem sits outside it, stranding a half-applied wrap-up. Removes a
+  file whose resulting body is empty via `is_empty_body` (FR6) —
+  unlink-if-present on both routes, existence sampled in the plan phase, so a
+  `D` manifest line records only a removal that actually happened. See
+  `docs/changelog/2026-09-07-the-payload-names-its-actions.md` and
+  `docs/changelog/2026-09-13-nothing-is-written-until-both-halves-resolve.md`.
   Writes `.claude/checkpoint-manifest` —
   always, even with zero lines, so `bash-post.sh`'s presence-gate still
   fires for a call that touched neither file — and composes `.claude/autodrive`
@@ -611,9 +619,9 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `is_empty_body` is FR6's generic emptiness test: strips heading
   (`#`) and blank lines, and what remains decides — a `## Remaining` with no
   items or a task file with headings and no content both count as empty.
-  Shared by `checkpoint.py` (after a Write/Edit it just applied) and
-  `write-stage.sh` (after the agent's own direct edit to `handoff-todo.md`)
-  so the two writers cannot drift on what counts as empty.
+  Shared by `checkpoint.py` (on a half's resolved body, before anything is
+  applied) and `write-stage.sh` (after the agent's own direct edit to
+  `handoff-todo.md`) so the two writers cannot drift on what counts as empty.
   `memory_directive` gates on the `gitlore-memory` submodule
   registration (FR12) and a dirty worktree, then instructs the agent to
   summarize → get approval → write `.claude/gitlore-memory-message`, and
@@ -799,7 +807,7 @@ outright regardless of path.
   itself — schema validation, write semantics, directive composition, the
   transition/sentinel matrix — moved with the port to
   `tests/test_checkpoint.py` (pytest), described below.
-  `tests/test_checkpoint.py` (128 tests) covers `scripts/checkpoint.py`'s own
+  `tests/test_checkpoint.py` (139 tests) covers `scripts/checkpoint.py`'s own
   behavior end-to-end via subprocess, ported from what was
   `tests/checkpoint.bats`'s exhaustive coverage of `checkpoint.sh` (merged,
   before that, from the deleted `tests/memory-probe.bats` +
@@ -819,13 +827,17 @@ outright regardless of path.
   value that is neither string nor object, an `edit` missing or mistyping
   either of its strings, malformed JSON — each asserting a
   non-zero exit and that the message names the field), Edit application
-  (`old_string` absent, ambiguous, successful), and empty-body removal
-  including that the deletion reaches the manifest — the `clear` action's own
-  pre-existing/never-existed pair covered on both `task` and `todo`, the todo
-  half mutation-checked after a review found that branch dead to the suite. It does **not** cover
-  `write-stage.sh` or `bash-post.sh`, which this sentence used to claim: those
-  are bash and are tested where the two bullets above say, in
-  `tests/hook-test.bats` and `tests/checkpoint.bats`. The `skill` enum's four values
+  (`old_string` absent, ambiguous, the file missing, successful — each of the
+  three failures over the same fixture as the positive, and each asserting the
+  task file survives with its original bytes and no manifest is written), and
+  empty-body removal including that the deletion reaches the manifest — the
+  `clear` action's own pre-existing/never-existed pair covered on both `task`
+  and `todo`, the todo half mutation-checked after a review found that branch
+  dead to the suite, plus the `edit`-to-empty route, the one that reaches the
+  emptiness rule through a computed body rather than one the payload states
+  outright. It does **not** cover `write-stage.sh` or `bash-post.sh`, which
+  this sentence used to claim: those are bash and are tested where the two
+  bullets above say, in `tests/hook-test.bats` and `tests/checkpoint.bats`. The `skill` enum's four values
   each accepted, the two retired driven-skill names rejected, `rename` rejected
   under `precompact` and `restart`, required under the other two, and each
   boundary's directive asserted against the absence of the other's.

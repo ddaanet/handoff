@@ -29,7 +29,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, NamedTuple, NoReturn, cast
+from typing import Any, Literal, NamedTuple, NoReturn, cast
 
 import _checkpoint_lib as lib
 
@@ -361,7 +361,7 @@ def _todo_edit_strings(todo: JSONDict) -> tuple[str, str]:
 
     Typing them here is what keeps `edit` from being the one arm of the union
     that types nothing: every other arm's payload is a checked string, and an
-    unchecked one reaches apply_edit's `content.count(old)` as a TypeError,
+    unchecked one reaches edited_body's `content.count(old)` as a TypeError,
     which exits 1 and names no field (FR2).
     """
     strings: list[str] = []
@@ -375,10 +375,27 @@ def _todo_edit_strings(todo: JSONDict) -> tuple[str, str]:
     return strings[0], strings[1]
 
 
-def apply_edit(field: str, path: Path, old: str, new: str) -> None:
-    """Replace old with new, first occurrence only.
+class FilePlan(NamedTuple):
+    """What one half will do to its file, resolved before anything is written.
 
-    Errors, naming field, if old is absent or ambiguous.
+    A NamedTuple, like Transition beside it, so the record itself is frozen.
+    Every plan carrying a manifest line comes from _plan_file, so a plan cannot
+    claim a `D` it will not perform; plan_todo's `keep` builds the empty plan
+    directly, ahead of that resolver, because FR4 forbids it even a stat.
+    """
+
+    act: Literal["write", "remove", "none"]
+    path: Path
+    body: str
+    manifest_lines: list[str]
+
+
+def edited_body(field: str, path: Path, old: str, new: str) -> str:
+    """Return path's content with old replaced by new, first occurrence only.
+
+    Errors, naming field, if old is absent or ambiguous. Returns the replacement
+    rather than writing it, which is what lets both err() sites run while a plan
+    is still being resolved, ahead of any write (FR2).
     """
     content = path.read_text(encoding="utf-8")
     count = content.count(old)
@@ -386,62 +403,69 @@ def apply_edit(field: str, path: Path, old: str, new: str) -> None:
         err(f"{field}.old_string", f"not found in {path}")
     if count > 1:
         err(f"{field}.old_string", f"ambiguous, {count} occurrences in {path}")
-    path.write_text(content.replace(old, new, 1), encoding="utf-8")
+    return content.replace(old, new, 1)
 
 
-def apply_task(root: Path, action: str, content: str) -> list[str]:
-    """Apply the task write or clear (FR5/FR6/FR7/D3).
+def _plan_file(path: Path, rel: str, body: str) -> FilePlan:
+    """Resolve one file's plan from its would-be body (FR5/FR6/FR7).
 
-    Returns manifest lines. Both routes to removal — the explicit `clear` and a
-    body that is empty under `is_empty_body` — are one unlink-if-present:
-    existence is sampled before any write, a `D` line records only a removal
-    that actually happened, and an empty body is never written first.
+    An empty body is a removal (FR6) — existence is sampled here, before
+    anything is written, so a `D` line records only a removal that will actually
+    happen. A non-empty body is a write, unconditionally.
     """
-    path = root / HANDOFF_REL_TASK
     existed = path.is_file()
-    if action == "clear" or lib.is_empty_body(content):
+    if lib.is_empty_body(body):
         if not existed:
-            return []
-        path.unlink()
-        return [f"D {HANDOFF_REL_TASK}"]
-    path.write_text(content, encoding="utf-8")
-    return [f"W {HANDOFF_REL_TASK}"]
+            return FilePlan("none", path, "", [])
+        return FilePlan("remove", path, "", [f"D {rel}"])
+    return FilePlan("write", path, body, [f"W {rel}"])
 
 
-def apply_todo(root: Path, action: str, content: str, old: str, new: str) -> list[str]:
-    """Apply the todo write, edit, clear or keep (FR5/FR6/FR7/D3).
+def plan_task(root: Path, action: str, content: str) -> FilePlan:
+    """Resolve the task write or clear to a plan (FR5/FR6/FR7).
 
-    Returns manifest lines. "keep" returns [] without touching the file, not
-    even to stat it, which is why existence is sampled below that branch and
-    not at the top as in apply_task. Every other action samples it before any
-    write: `edit` requires the file to exist, and both routes to removal — the
-    explicit `clear` and a resulting body empty under `is_empty_body` — are
-    unlink-if-present, a `D` line recording only a removal that actually
-    happened. Unlike apply_task's, that emptiness test reads the file rather
-    than `content`, since an `edit`'s result exists only on disk.
+    `clear` resolves to the empty string, so it reaches removal through
+    _plan_file's own emptiness rule rather than a branch of its own.
     """
-    if action == "keep":
-        return []
+    body = "" if action == "clear" else content
+    return _plan_file(root / HANDOFF_REL_TASK, HANDOFF_REL_TASK, body)
+
+
+def plan_todo(root: Path, action: str, content: str, old: str, new: str) -> FilePlan:
+    """Resolve the todo write, edit, clear or keep to a plan (FR5/FR6/FR7).
+
+    `keep` short-circuits ahead of _plan_file, straight to the empty plan: it
+    must not reach a rule that reads an absent body as a removal, and it takes
+    no stat (FR4). `edit` keeps its own explicit file-absent err() ahead of
+    edited_body, so the stat _plan_file then takes is deliberate — a
+    precondition check and an existence sample are different questions.
+    """
     path = root / HANDOFF_REL_TODO
-    existed = path.is_file()
+    if action == "keep":
+        return FilePlan("none", path, "", [])
     if action == "clear":
-        if not existed:
-            return []
-        path.unlink()
-        return [f"D {HANDOFF_REL_TODO}"]
-    if action == "write":
-        path.write_text(content, encoding="utf-8")
+        body = ""
     elif action == "edit":
-        if not existed:
+        if not path.is_file():
             err(
                 "todo.old_string",
                 f"edit requested but {HANDOFF_REL_TODO} does not exist",
             )
-        apply_edit("todo", path, old, new)
-    if lib.is_empty_body(path.read_text(encoding="utf-8")):
-        path.unlink()
-        return [f"D {HANDOFF_REL_TODO}"] if existed else []
-    return [f"W {HANDOFF_REL_TODO}"]
+        body = edited_body("todo", path, old, new)
+    else:
+        body = content
+    return _plan_file(path, HANDOFF_REL_TODO, body)
+
+
+def apply_plan(plan: FilePlan) -> None:
+    """Perform the write or the unlink a plan names.
+
+    No failure branch.
+    """
+    if plan.act == "write":
+        plan.path.write_text(plan.body, encoding="utf-8")
+    elif plan.act == "remove":
+        plan.path.unlink()
 
 
 def write_manifest(root: Path, manifest_lines: list[str]) -> None:
@@ -543,10 +567,11 @@ def main() -> int:
     if skill in ("handoff", "precompact"):
         task_action, task_content = validate_task(payload)
         todo_action, todo_content, todo_old, todo_new = validate_todo(payload)
-        manifest_lines = apply_task(root, task_action, task_content)
-        manifest_lines += apply_todo(
-            root, todo_action, todo_content, todo_old, todo_new
-        )
+        task_plan = plan_task(root, task_action, task_content)
+        todo_plan = plan_todo(root, todo_action, todo_content, todo_old, todo_new)
+        apply_plan(task_plan)
+        apply_plan(todo_plan)
+        manifest_lines = task_plan.manifest_lines + todo_plan.manifest_lines
     write_manifest(root, manifest_lines)
 
     memory, second = compose_directives(skill, root, commit_mode)

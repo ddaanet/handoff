@@ -535,7 +535,7 @@ def test_task_or_todo_action_vocabulary_errors_naming_field(
     either required key independently: each exits 2 naming the offending field
     and its own reason. The two mistyped rows are what keeps `edit` from being
     the one arm of the union that types nothing: every other arm's content is
-    a checked string, and an unchecked one reaches `apply_edit`'s
+    a checked string, and an unchecked one reaches `edited_body`'s
     `content.count(old)` as a TypeError traceback, which exits 1 and names no
     field.
 
@@ -887,8 +887,17 @@ def test_todo_write_no_items_never_existed_no_d(tmp_path: Path) -> None:
     assert "handoff-todo.md" not in manifest
 
 
-def test_todo_edit_replaces_first_occurrence_stages_w(tmp_path: Path) -> None:
+def test_todo_edit_and_task_clear_both_apply_manifest_records_d_and_w(
+    tmp_path: Path,
+) -> None:
+    """Positive twin of the three surviving-task-file negatives below, over the
+    same pre-existing-task-file fixture: only the todo `old_string`'s match
+    count moves. Both halves apply, so the manifest carries the task's `D`
+    ahead of the todo's `W` — the order `main` resolves them in."""
     repo = make_repo(tmp_path)
+    task_path = repo / ".claude" / "handoff-task.md"
+    task_before = "## Current task\n\nrecognisable\n"
+    task_path.write_text(task_before)
     (repo / ".claude" / "handoff-todo.md").write_text(
         "## Remaining\n\n- finish A\n- finish B\n"
     )
@@ -903,18 +912,61 @@ def test_todo_edit_replaces_first_occurrence_stages_w(tmp_path: Path) -> None:
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 0
+    assert not task_path.exists()
     content = (repo / ".claude" / "handoff-todo.md").read_text()
     assert "finish A" not in content
     assert "finish B" in content
-    assert (
-        "W .claude/handoff-todo.md"
-        in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
-    )
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    assert manifest.splitlines() == [
+        "D .claude/handoff-task.md",
+        "W .claude/handoff-todo.md",
+    ]
 
 
-def test_todo_edit_old_string_absent_errors(tmp_path: Path) -> None:
+def test_todo_edit_emptying_the_list_removes_it_manifest_records_d(
+    tmp_path: Path,
+) -> None:
+    """The edit-to-empty route: an `edit` whose replacement leaves the body
+    empty removes the file and records its `D` (FR6).
+
+    The only route to removal that reaches the emptiness rule through a computed
+    body rather than one the payload states outright, and the one the `write`
+    rows beside it do not cover.
+
+    Carries the same pre-existing-task-file fixture as its four siblings, so the
+    manifest holds the task's `D` beside this row's own — asserted by membership
+    rather than the positive's exact two lines.
+    """
     repo = make_repo(tmp_path)
-    (repo / ".claude" / "handoff-todo.md").write_text("## Remaining\n\n- keep this\n")
+    task_path = repo / ".claude" / "handoff-task.md"
+    task_before = "## Current task\n\nrecognisable\n"
+    task_path.write_text(task_before)
+    (repo / ".claude" / "handoff-todo.md").write_text("## Remaining\n\n- only item\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_clear(),
+        "todo": todo_edit("- only item\n", ""),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-todo.md").exists()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text()
+    assert "D .claude/handoff-todo.md" in manifest.splitlines()
+
+
+def test_todo_edit_old_string_absent_errors_task_file_survives(
+    tmp_path: Path,
+) -> None:
+    repo = make_repo(tmp_path)
+    task_path = repo / ".claude" / "handoff-task.md"
+    task_before = "## Current task\n\nrecognisable\n"
+    task_path.write_text(task_before)
+    todo_before = "## Remaining\n\n- keep this\n"
+    (repo / ".claude" / "handoff-todo.md").write_text(todo_before)
     payload = {
         "skill": "handoff",
         "commit": "with-commit",
@@ -926,14 +978,23 @@ def test_todo_edit_old_string_absent_errors(tmp_path: Path) -> None:
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
-    assert "old_string" in result.stderr
+    assert "todo.old_string" in result.stderr
     assert "not found" in result.stderr
-    assert "keep this" in (repo / ".claude" / "handoff-todo.md").read_text()
+    assert (repo / ".claude" / "handoff-todo.md").read_text() == todo_before
+    assert task_path.is_file()
+    assert task_path.read_text() == task_before
+    assert not (repo / ".claude" / "checkpoint-manifest").exists()
 
 
-def test_todo_edit_old_string_ambiguous_errors(tmp_path: Path) -> None:
+def test_todo_edit_old_string_ambiguous_errors_task_file_survives(
+    tmp_path: Path,
+) -> None:
     repo = make_repo(tmp_path)
-    (repo / ".claude" / "handoff-todo.md").write_text("## Remaining\n\n- dup\n- dup\n")
+    task_path = repo / ".claude" / "handoff-task.md"
+    task_before = "## Current task\n\nrecognisable\n"
+    task_path.write_text(task_before)
+    todo_before = "## Remaining\n\n- dup\n- dup\n"
+    (repo / ".claude" / "handoff-todo.md").write_text(todo_before)
     payload = {
         "skill": "handoff",
         "commit": "with-commit",
@@ -945,12 +1006,21 @@ def test_todo_edit_old_string_ambiguous_errors(tmp_path: Path) -> None:
     }
     result = run_checkpoint(repo, payload)
     assert result.returncode == 2
-    assert "old_string" in result.stderr
+    assert "todo.old_string" in result.stderr
     assert "ambiguous" in result.stderr
+    assert (repo / ".claude" / "handoff-todo.md").read_text() == todo_before
+    assert task_path.is_file()
+    assert task_path.read_text() == task_before
+    assert not (repo / ".claude" / "checkpoint-manifest").exists()
 
 
-def test_todo_edit_requested_file_missing_errors(tmp_path: Path) -> None:
+def test_todo_edit_requested_file_missing_errors_task_file_survives(
+    tmp_path: Path,
+) -> None:
     repo = make_repo(tmp_path)
+    task_path = repo / ".claude" / "handoff-task.md"
+    task_before = "## Current task\n\nrecognisable\n"
+    task_path.write_text(task_before)
     payload = {
         "skill": "handoff",
         "commit": "with-commit",
@@ -964,6 +1034,9 @@ def test_todo_edit_requested_file_missing_errors(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "todo.old_string" in result.stderr
     assert "does not exist" in result.stderr
+    assert task_path.is_file()
+    assert task_path.read_text() == task_before
+    assert not (repo / ".claude" / "checkpoint-manifest").exists()
 
 
 def test_todo_keep_leaves_pre_existing_list_alone(tmp_path: Path) -> None:

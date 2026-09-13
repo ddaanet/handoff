@@ -237,11 +237,15 @@ discard. Ignoring one reopens the defect one level down — an agent told
 branch is what an out-of-date producer sending the retired
 `{"file_path": …, "content": …}` shape lands on, so it has to say what to
 write instead. There is no `file_path` —
-`apply_task`/`apply_todo` compose the real path from `HANDOFF_ROOT`, so a
+`plan_task`/`plan_todo` compose the real path from `HANDOFF_ROOT`, so a
 payload-supplied one would ask the agent to derive a path from a root it
 cannot read, only to be checked against the one the write uses anyway. A
-violation exits non-zero naming the offending field.
-[The payload names its actions](changelog/2026-09-07-the-payload-names-its-actions.md)
+violation exits non-zero naming the offending field. The wrap-up is applied
+whole or not at all: both halves resolve to a plan — the path, the act, the
+body and the manifest lines that record it — before either file is touched,
+so every failure the two halves raise leaves the disk as it was.
+[The payload names its actions](changelog/2026-09-07-the-payload-names-its-actions.md),
+[Nothing is written until both halves resolve](changelog/2026-09-13-nothing-is-written-until-both-halves-resolve.md)
 
 It gets its root from `HANDOFF_ROOT`, injected into the command's
 environment by a `PreToolUse(Bash)` hook (`inject-checkpoint-root.sh`) that
