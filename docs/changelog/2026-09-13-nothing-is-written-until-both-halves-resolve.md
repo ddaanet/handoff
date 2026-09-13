@@ -22,7 +22,7 @@ file it edited earlier in the session.
 Each half resolves to a `FilePlan` — the path, the act (`write`, `remove` or
 nothing), the body when there is one, and the manifest lines that record it —
 and every failure the wrap-up's own write path raises happens while
-resolving. Only once both plans exist does anything touch the disk.
+resolving. Only once both plans exist does anything get written.
 
 ```
 plan_task ─┐

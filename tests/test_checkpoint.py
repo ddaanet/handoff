@@ -1039,6 +1039,38 @@ def test_todo_edit_requested_file_missing_errors_task_file_survives(
     assert not (repo / ".claude" / "checkpoint-manifest").exists()
 
 
+def test_todo_edit_old_string_absent_errors_task_file_not_created(
+    tmp_path: Path,
+) -> None:
+    """The mirror of the three rows above: a task half that would write.
+
+    Each of those carries task_clear(), so together they pin that a failing todo
+    half does not delete the task file. None of them reaches the opposite sign —
+    a task half with content, which before the plan-then-apply split wrote a
+    frame to disk with no manifest behind it, leaving nothing to stage it.
+    """
+    repo = make_repo(tmp_path)
+    task_path = repo / ".claude" / "handoff-task.md"
+    todo_before = "## Remaining\n\n- keep this\n"
+    (repo / ".claude" / "handoff-todo.md").write_text(todo_before)
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content("## Current task\n\nwould have been written\n"),
+        "todo": todo_edit("- not present", "- x"),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 2
+    assert "todo.old_string" in result.stderr
+    assert "not found" in result.stderr
+    assert not task_path.exists()
+    assert (repo / ".claude" / "handoff-todo.md").read_text() == todo_before
+    assert not (repo / ".claude" / "checkpoint-manifest").exists()
+
+
 def test_todo_keep_leaves_pre_existing_list_alone(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     before = "## Remaining\n\n- untouched\n"

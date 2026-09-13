@@ -379,9 +379,12 @@ class FilePlan(NamedTuple):
     """What one half will do to its file, resolved before anything is written.
 
     A NamedTuple, like Transition beside it, so the record itself is frozen.
-    Every plan carrying a manifest line comes from _plan_file, so a plan cannot
-    claim a `D` it will not perform; plan_todo's `keep` builds the empty plan
-    directly, ahead of that resolver, because FR4 forbids it even a stat.
+    Every plan carrying a manifest line comes from _plan_file, which composes
+    the path from the same `rel` it writes into that line, so a plan cannot
+    claim a `D` it will not perform — a structural property of the resolver
+    rather than a convention its callers keep. plan_todo's `keep` builds the
+    empty plan directly, ahead of that resolver, because FR4 forbids it even a
+    stat.
     """
 
     act: Literal["write", "remove", "none"]
@@ -406,13 +409,17 @@ def edited_body(field: str, path: Path, old: str, new: str) -> str:
     return content.replace(old, new, 1)
 
 
-def _plan_file(path: Path, rel: str, body: str) -> FilePlan:
+def _plan_file(root: Path, rel: str, body: str) -> FilePlan:
     """Resolve one file's plan from its would-be body (FR5/FR6/FR7).
+
+    Composes the path from `rel` rather than taking both, so the file a plan
+    acts on and the file its manifest line names cannot disagree.
 
     An empty body is a removal (FR6) — existence is sampled here, before
     anything is written, so a `D` line records only a removal that will actually
     happen. A non-empty body is a write, unconditionally.
     """
+    path = root / rel
     existed = path.is_file()
     if lib.is_empty_body(body):
         if not existed:
@@ -428,7 +435,7 @@ def plan_task(root: Path, action: str, content: str) -> FilePlan:
     _plan_file's own emptiness rule rather than a branch of its own.
     """
     body = "" if action == "clear" else content
-    return _plan_file(root / HANDOFF_REL_TASK, HANDOFF_REL_TASK, body)
+    return _plan_file(root, HANDOFF_REL_TASK, body)
 
 
 def plan_todo(root: Path, action: str, content: str, old: str, new: str) -> FilePlan:
@@ -454,18 +461,23 @@ def plan_todo(root: Path, action: str, content: str, old: str, new: str) -> File
         body = edited_body("todo", path, old, new)
     else:
         body = content
-    return _plan_file(path, HANDOFF_REL_TODO, body)
+    return _plan_file(root, HANDOFF_REL_TODO, body)
 
 
 def apply_plan(plan: FilePlan) -> None:
     """Perform the write or the unlink a plan names.
 
-    No failure branch.
+    Neither arm calls err(), and the unlink tolerates a file already gone — one
+    removed between _plan_file's stat and this call would otherwise raise
+    FileNotFoundError ahead of write_manifest, with the other half possibly
+    applied, which is the outcome resolving both plans first exists to remove.
+    The `D` line stays correct when that happens: the file is absent either way,
+    so bash-post.sh's `git add -f` stages the deletion regardless.
     """
     if plan.act == "write":
         plan.path.write_text(plan.body, encoding="utf-8")
     elif plan.act == "remove":
-        plan.path.unlink()
+        plan.path.unlink(missing_ok=True)
 
 
 def write_manifest(root: Path, manifest_lines: list[str]) -> None:

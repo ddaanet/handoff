@@ -541,7 +541,7 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   composed from `HANDOFF_ROOT`. Each half resolves to a `FilePlan` — the path,
   the act, the body and the manifest lines that record it — and every failure
   the two halves raise happens while resolving, so a wrap-up is applied whole
-  or not at all: nothing touches the disk until both plans exist. The
+  or not at all: nothing is written until both plans exist. The
   guarantee's subject is those two halves and their manifest, not every `err()`
   reachable from `main()` — `compose_sentinel`'s read-back fires after both
   halves are applied, with the manifest already written — and an `OSError` from
@@ -807,7 +807,7 @@ outright regardless of path.
   itself — schema validation, write semantics, directive composition, the
   transition/sentinel matrix — moved with the port to
   `tests/test_checkpoint.py` (pytest), described below.
-  `tests/test_checkpoint.py` (139 tests) covers `scripts/checkpoint.py`'s own
+  `tests/test_checkpoint.py` (140 tests) covers `scripts/checkpoint.py`'s own
   behavior end-to-end via subprocess, ported from what was
   `tests/checkpoint.bats`'s exhaustive coverage of `checkpoint.sh` (merged,
   before that, from the deleted `tests/memory-probe.bats` +
@@ -829,8 +829,10 @@ outright regardless of path.
   non-zero exit and that the message names the field), Edit application
   (`old_string` absent, ambiguous, the file missing, successful — each of the
   three failures over the same fixture as the positive, and each asserting the
-  task file survives with its original bytes and no manifest is written), and
-  empty-body removal including that the deletion reaches the manifest — the
+  task file survives with its original bytes and no manifest is written, plus
+  the mirror of those three, where the task half carries content and is not
+  created), and empty-body removal including that the deletion reaches the
+  manifest — the
   `clear` action's own pre-existing/never-existed pair covered on both `task`
   and `todo`, the todo half mutation-checked after a review found that branch
   dead to the suite, plus the `edit`-to-empty route, the one that reaches the
