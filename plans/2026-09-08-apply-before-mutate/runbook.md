@@ -38,16 +38,18 @@ The requirements absent from that table are the ones this change cannot reach,
 named so the omission reads as deliberate rather than as a gap: FR1 (one entry
 point), FR3 (the task file's write guard), FR8 and FR9 (the sentinel and the
 directives, both composed after the apply and untouched by the reordering),
-FR-G, FR-H, NFR2 and NFR3.
+FR12 (the gitlore submodule registration the memory directive gates on), FR-G,
+FR-H, NFR2 and NFR3.
 
 **Out of scope**, and named so an executor does not widen into them: the
 validators (`validate_task`, `validate_todo`, `_todo_edit_strings`) and the
 union's vocabulary — their messages must not move; `scripts/bash-post.sh` and
 the manifest format; the sentinel composer; `scripts/_checkpoint_lib.py`
 (`is_empty_body` is called from a new place, not changed); both `SKILL.md`
-bodies — a producer sending a valid payload cannot observe this change. The
-remaining pass-2 minors (m5, m7, m12, m14, and the cosmetic set) are separate
-work. Frozen write-time records are not edited: everything under `plans/`, and
+bodies — a wrap-up that applies cleanly is byte-for-byte what it is today, and
+neither body speaks to what a failed one leaves behind. The remaining pass-2
+minors (m5, m7, m12, m14, and the cosmetic set) are separate work. Frozen
+write-time records are not edited: everything under `plans/`, and
 `docs/changelog/2026-09-07-the-payload-names-its-actions.md` — which cites
 `apply_task`/`apply_todo` at `:53` and keeps that citation, because it records
 what was true when it was written.
@@ -56,8 +58,10 @@ what was true when it was written.
 touched.
 
 1. The outline cites `(D5)` for `keep`'s no-stat guarantee. `D5` is defined
-   nowhere in this repo — it appears only in that outline line. The guarantee
-   is FR4's, and FR4 is what the code and the runbook cite. (`D2`/`D3` are
+   nowhere in this repo — it appears only in that outline line. The
+   requirement is FR4's — a call silent about the scratch list leaves it alone
+   — and taking no stat is how `plan_todo` honours it rather than a guarantee
+   of its own; FR4 is what the code and the runbook cite. (`D2`/`D3` are
    already known not to resolve in `docs/design.md`; that is pass-2 minor m12
    and is not fixed here, but no new dangling citation is added: concretely,
    `D3` is not re-typed into the two docstrings item 1.1 rewrites, and `D2` at
@@ -67,8 +71,10 @@ touched.
    verified by grep — but `CLAUDE.md` is not one bullet: the
    `_checkpoint_lib.py` bullet's account of *when* `checkpoint.py` calls
    `is_empty_body` (`:614`) is falsified by the reordering, and the Testing
-   section's test count and empty-body coverage sentence (`:802`) both move
-   with the new row. Item 2.1 carries all three sites.
+   section's test count (`:802`) and its empty-body coverage sentence (`:822`)
+   both move with the new row. Item 2.1 carries all three sites — two of them
+   corrections, and `:543` an addition to a claim that stays true but stops
+   saying enough.
 
 ## Phase 1: The apply phase resolves before it mutates (type: tdd)
 
@@ -87,8 +93,11 @@ touched.
      half carries the trigger. Four of the five already exist in the file
      under the `todo` `edit` heading and are **extended in place**, not
      duplicated; each is renamed so its name states the second claim it now
-     makes. None of the four names is cited live outside
-     `tests/test_checkpoint.py` (verified 2026-09-10 by grep over
+     makes. None of the four writes a task file today — `make_repo` creates an
+     empty `.claude/` — so each gains that write; only the
+     `"task": {"action": "clear"}` half is already there. None of the four
+     names is cited live outside `tests/test_checkpoint.py` (verified
+     2026-09-10 by grep over
      `CLAUDE.md`, `docs/`, `scripts/`, `skills/` and `tests/*.bats`; the hits
      under `plans/` are frozen write-time records and are not edited).
 
@@ -117,44 +126,49 @@ touched.
        edited item absent and its sibling still present), and the manifest's
        lines being exactly `D .claude/handoff-task.md` and
        `W .claude/handoff-todo.md`.
-     - `test_todo_edit_emptying_the_list_removes_it_manifest_records_d` —
-       new. A pre-existing todo file whose only item the edit replaces with
-       the empty string, leaving a `## Remaining` heading and nothing under
-       it. Asserts exit 0, the todo file gone from disk, and
+     - `test_todo_edit_emptying_the_list_removes_it_manifest_records_d` — new.
+       A pre-existing todo file whose only item the edit replaces with the
+       empty string, leaving a `## Remaining` heading and nothing under it.
+       Asserts exit 0, the todo file gone from disk, and
        `D .claude/handoff-todo.md` in the manifest. This is the route
        `apply_todo`'s docstring names as the whole reason its emptiness test
-       reads the file, and it has no row today.
+       reads the file, and it has no row today. It carries the same task half
+       as the other four, so the manifest holds the task `D` beside it — which
+       is why this row asserts membership where the positive asserts exactly
+       two lines.
 
      **Evidence protocol.** The three negatives are the red: run them against
      unchanged `scripts/checkpoint.py` and record that each fails on its
-     surviving-task-file assertion — not on a missing symbol, and not on the
-     no-manifest assertion, which is green before and after. The positive and
-     the `edit`-to-empty row are green against unchanged code and are
-     characterisation, so each earns its evidence by a mutation of the landed
-     implementation instead (below). Report the red output verbatim.
+     surviving-task-file assertion — not on a missing fixture (confirm the
+     pre-existing task file is on disk before the run: a `FileNotFoundError`
+     from an unwritten fixture prints as a failure and proves nothing), and
+     not on the no-manifest assertion, which is green before and after. The
+     positive and the `edit`-to-empty row are green against unchanged code and
+     are characterisation, so each earns its evidence by a mutation of the
+     landed implementation instead (below). Report the red output verbatim.
 
      Then the implementation. `main()` builds both plans, applies both, and
-     calls `write_manifest` with the concatenated lines; `write_manifest`
-     stays unconditional, since the empty manifest is `bash-post.sh`'s
-     presence gate (FR7). `plan_task` and `plan_todo` replace
-     `apply_task`/`apply_todo`: each resolves its action to a body — `clear`
-     resolves to the empty string, so it reaches removal through FR6's own
-     rule rather than a branch of its own — then hands that body to the shared
-     resolver, which applies FR6 and samples existence, so a `D` line records
-     only a removal that will actually happen. `plan_todo`'s `keep`
-     short-circuits ahead of the resolver straight to the empty plan: it must
-     not reach a rule that reads an absent body as a removal, and it takes no
-     stat (FR4). The row that reds if it ever falls through is the existing
-     `test_todo_keep_leaves_pre_existing_list_alone`: `keep`'s content is the
-     empty string, which the resolver reads as a removal. `plan_todo`'s `edit`
-     branch keeps its own explicit
-     file-absent `err()` ahead of `edited_body`, so the second stat the
-     resolver then takes is deliberate — a precondition check and an existence
-     sample are different questions, and one saved stat does not justify
-     coupling them. `apply_edit` becomes `edited_body`, returning the
-     replacement instead of writing it, which is what lets its two `err()`
-     sites run in the plan phase; there is no alias and no back-compat
-     wrapper.
+     calls `write_manifest` with the concatenated lines — the task plan's
+     first, then the todo plan's, the order the positive's exact-two-lines
+     assertion pins; `write_manifest` stays unconditional, since the empty
+     manifest is `bash-post.sh`'s presence gate (FR7). `plan_task` and
+     `plan_todo` replace `apply_task`/`apply_todo`: each resolves its action
+     to a body — `clear` resolves to the empty string, so it reaches removal
+     through FR6's own rule rather than a branch of its own — then hands that
+     body to the shared resolver, which applies FR6 and samples existence, so
+     a `D` line records only a removal that will actually happen.
+     `plan_todo`'s `keep` short-circuits ahead of the resolver straight to the
+     empty plan: it must not reach a rule that reads an absent body as a
+     removal, and it takes no stat (FR4). The row that reds if it ever falls
+     through is the existing `test_todo_keep_leaves_pre_existing_list_alone`:
+     `keep`'s content is the empty string, which the resolver reads as a
+     removal. `plan_todo`'s `edit` branch keeps its own explicit file-absent
+     `err()` ahead of `edited_body`, so the second stat the resolver then
+     takes is deliberate — a precondition check and an existence sample are
+     different questions, and one saved stat does not justify coupling them.
+     `apply_edit` becomes `edited_body`, returning the replacement instead of
+     writing it, which is what lets its two `err()` sites run in the plan
+     phase; there is no alias and no back-compat wrapper.
 
      **The rename reaches every live citation, re-derived rather than copied:**
      in `scripts/checkpoint.py`, all three definitions (`apply_edit` `:378`,
@@ -174,45 +188,51 @@ touched.
      one remaining live case, `D2` at `tests/test_checkpoint.py:603`, stays out
      of scope.
 
-     **Mutation checks, run after the suite is green, one at a time.**
-     (a) Ordering: move the task half's `apply_plan` call back above the
+     **Mutation checks, run after the suite is green, one at a time.** (a)
+     Ordering: move the task half's `apply_plan` call back above the
      `plan_todo` call and confirm the three negatives red again and nothing
      else does. (b) Empty-body route: drop the emptiness test from the shared
      resolver and confirm `test_todo_edit_emptying_the_list_removes_it_...`
-     reds — it will not be alone, since the existing `write`-route empty-body
-     rows read the same resolver; record which rows red and confirm the new
-     row is among them. (c) The positive's second claim: drop the task plan's
-     manifest lines from `main()`'s concatenation — apply both plans,
-     concatenate the todo plan's lines alone — and confirm
-     `test_todo_edit_and_task_clear_both_apply_...` reds on its exact-two-lines
-     assertion. Like (b) it will not red alone: every row asserting a task `W`
-     or `D` line reds with it, so record which and confirm the positive is
-     among them. (d) Existence sampling: make the shared resolver emit `D`
-     unconditionally on the removal route and confirm the four never-existed
-     rows red — `test_task_clear_never_existed_writes_nothing_no_d` (`:701`),
+     reds — it will not be alone: the existing `write`-route empty-body rows
+     read the same resolver, and so do both `clear`-removes-pre-existing rows
+     (`:677`, `:723`), since `clear` reaches removal through that same rule.
+     Record which rows red and confirm the new row is among them. (c) The
+     positive's second claim: drop the task plan's manifest lines from
+     `main()`'s concatenation — apply both plans, concatenate the todo plan's
+     lines alone — and confirm `test_todo_edit_and_task_clear_both_apply_...`
+     reds on its exact-two-lines assertion. Like (b) it will not red alone:
+     every row asserting a task `W` or `D` line reds with it, so record which
+     and confirm the positive is among them. (d) Existence sampling: make the
+     shared resolver emit `D` unconditionally on the removal route — leaving
+     `act` alone, so the rows red on the absent-`D` assertion rather than on
+     an unlink of a file that is not there — and confirm the four
+     never-existed rows red —
+     `test_task_clear_never_existed_writes_nothing_no_d` (`:701`),
      `test_todo_clear_never_existed_writes_nothing_no_d` (`:753`),
      `test_task_write_only_headings_never_existed_no_d` (`:795`) and
      `test_todo_write_no_items_never_existed_no_d` (`:868`). The positive is
      **not** among them and must stay green: its task half clears a file that
      is there, so the removal route emits `D` with the guard or without it.
 
-     **Restore protocol, non-negotiable.** Mutate `scripts/checkpoint.py` in
-     place — never by relocating a test — and restore by inverting the exact
-     string replacement, in the same Bash call that made it where possible.
-     Do not stage a backup copy under `$TMPDIR`: `$TMPDIR` is not stable
-     across Bash calls in this session, and a mutation whose restore route
-     has evaporated is live code. After each restore, prove it: `git diff
-     --stat scripts/checkpoint.py` clean against the committed state and the
-     full suite green, before the next mutation.
+     **Restore protocol, non-negotiable.** Commit the slice first: these
+     checks run against committed code, which is what makes the proof below
+     mean anything. Mutate `scripts/checkpoint.py` in place — never by
+     relocating a test — and restore by inverting the exact string
+     replacement, in the same Bash call that made it where possible. Do not
+     stage a backup copy under `$TMPDIR`: `$TMPDIR` is not stable across Bash
+     calls, and a mutation whose restore route has evaporated is live code.
+     After each restore, prove it: `git diff --stat scripts/checkpoint.py`
+     empty, and the full suite green, before the next mutation.
 
   Interfaces:
-  - `class FilePlan(NamedTuple)` — what one half will do to its file,
-    resolved before anything is written. A `NamedTuple`, like `Transition`
-    beside it, so the record itself is frozen; `manifest_lines` stays a plain
-    list because `write_manifest`'s signature does not move. Its three shapes
-    are produced in one place so a plan cannot claim a `D` it will not
-    perform.
-  - `FilePlan.act: Literal["write", "remove", "none"]`
+  - `class FilePlan(NamedTuple)` — what one half will do to its file, resolved
+    before anything is written. A `NamedTuple`, like `Transition` beside it,
+    so the record itself is frozen; `manifest_lines` stays a plain list
+    because `write_manifest`'s signature does not move. Its three shapes are
+    produced in one place so a plan cannot claim a `D` it will not perform.
+  - `FilePlan.act: Literal["write", "remove", "none"]` — `Literal` joins the
+    existing `typing` import: a name on a line already there, not a new
+    module, so NFR1's note stands
   - `FilePlan.path: Path` — composed from `root`; composing it is not a stat
   - `FilePlan.body: str` — the bytes to write; `""` unless `act == "write"`
   - `FilePlan.manifest_lines: list[str]` — `["W <rel>"]`, `["D <rel>"]`, or
@@ -275,15 +295,19 @@ touched.
   carrying this work is still open.
 
   `docs/design.md` §One channel, one writer: one sentence stating the
-  guarantee positively — the checkpoint applies a wrap-up whole or not at
-  all, both halves resolving to a plan before either file is touched. Its
-  subject is those two halves, not every `err()` in `main()`: `design.md` is
+  guarantee positively — the checkpoint applies a wrap-up whole or not at all,
+  both halves resolving to a plan before either file is touched. Its subject
+  is those two halves, not every `err()` in `main()`: `design.md` is
   present-tense current truth, and a sentence claiming the checkpoint never
   fails after a write would be false of `compose_sentinel`'s read-back the day
-  it is written. Then the `apply_task`/`apply_todo` citation in that section's
-  `file_path` paragraph (`:240`) rewired to `plan_task`/`plan_todo`. Present tense, no
-  account of what the code used to do; that account is the changelog entry's
-  job.
+  it is written. It joins the write-semantics paragraph ending `A violation
+  exits non-zero naming the offending field.` (`:243`) — the same paragraph
+  whose `:240` citation this item rewires — and that paragraph takes a
+  trailing `[<Title>](changelog/<file>.md)` line naming the new entry, as its
+  three siblings in that section do. Then the `apply_task`/`apply_todo`
+  citation in that `file_path` paragraph (`:240`) rewired to
+  `plan_task`/`plan_todo`. Present tense, no account of what the code used to
+  do; that account is the changelog entry's job.
 
   `CLAUDE.md` takes three edits, not one — re-derived by grep rather than by
   reading, since every bullet involved is long.
@@ -296,22 +320,27 @@ touched.
   2. The `scripts/_checkpoint_lib.py` bullet says `is_empty_body` is shared by
      "`checkpoint.py` (after a Write/Edit it just applied)" (`:614`). After
      this change the checkpoint tests a resolved body **before** applying
-     anything, on both halves, so that parenthetical is the one sentence in the
-     file the reordering falsifies outright. `write-stage.sh`'s half of the same
-     sentence is untouched, and so is the reason the two share the function.
-  3. The Testing section's `tests/test_checkpoint.py` bullet (`:802`) carries a
-     test count and a sentence enumerating the empty-body coverage; the new row
-     moves both. Re-derive the count with `pytest tests/test_checkpoint.py
+     anything, on both halves, so that parenthetical is the one sentence in
+     the file the reordering falsifies outright. `write-stage.sh`'s half of
+     the same sentence is untouched, and so is the reason the two share the
+     function.
+  3. The Testing section's `tests/test_checkpoint.py` bullet (`:802`) carries
+     a test count and a sentence enumerating the empty-body coverage; the new
+     row moves both. Re-derive the count with `pytest tests/test_checkpoint.py
      --collect-only -q` and write what it reports rather than incrementing the
-     number on the page — the page reads 128 and the file already collects more
-     than that — and extend the empty-body sentence to name the `edit`-to-empty
-     route beside the `clear` pair it already names.
+     number on the page — the page reads 128 and the file already collects
+     more than that — and extend the empty-body sentence to name the
+     `edit`-to-empty route beside the `clear` pair it already names. The same
+     bullet's "Edit application (`old_string` absent, ambiguous, successful)"
+     phrase no longer describes those three rows, which now also assert the
+     task file survives; say so. That keeps an existing sentence true for rows
+     this slice rewrites — it is not m16's wider fix, which stays deferred.
 
   All four files land in one pass and one commit with item 1.1's code and
   tests: this repo's convention puts the changelog entry, its index line and
   the invalidated design prose in the same pass as the change, and the
-  standing bundling rule puts what corresponds to a change in one commit.
-  Item 1.1's slice commit is the one to carry them — with `just precommit`
-  green, amend it (`git commit --amend`, subject unchanged) rather than
+  standing bundling rule puts what corresponds to a change in one commit. Item
+  1.1's slice commit is the one to carry them — with `just precommit` green,
+  amend it (`git commit --amend --no-edit`, subject unchanged) rather than
   adding a second commit. Nothing is pushed at this point, so the amend is
   safe; state in the report that it happened.

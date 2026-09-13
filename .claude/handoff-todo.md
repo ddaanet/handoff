@@ -1,14 +1,5 @@
 ## Open decisions
 
-- Whether the runbook's two recorded departures from the proofed outline
-  stand; they are items 4 and 13 of the `/proof` agenda. (1) The outline cites
-  `(D5)` for `keep`'s no-stat guarantee, and `D5` is defined nowhere in the
-  repo, so the runbook cites FR4 instead. (2) The outline says `CLAUDE.md`'s
-  `scripts/checkpoint.py` bullet "names no functions, so nothing else in it
-  moves" — true of that bullet, false of the file: `:614`'s account of when
-  `checkpoint.py` calls `is_empty_body` is falsified by the reordering, and
-  `:802`'s test count reads 128 where the file collects 138. Item 2.1 now
-  carries three `CLAUDE.md` sites rather than one.
 - The version bump for the release carrying this work. `plugin.json` is at
   0.13.1 with `v0.13.1` tagged, and the tagged-union work is unreleased. My
   recommendation is 0.14.0 — `CLAUDE.md` calls a payload-shape change breaking
@@ -26,8 +17,10 @@
 
 ## Remaining
 
-- Resume `/proof` on `plans/2026-09-08-apply-before-mutate/runbook.md`, then
-  `/orchestrate` it in a fresh session.
+- `/orchestrate` `plans/2026-09-08-apply-before-mutate/runbook.md` in a fresh
+  session. `/proof` passed it 2026-09-13 — 18 items, 4 approved, 14 revised
+  and applied, nothing killed or skipped; the runbook is edited and
+  uncommitted.
 - Pass 2, substantive — m5 (a handoff root that is not a git repository now
   reports `failed to stage` on both channels at every checkpoint, plus git's
   raw `fatal:` on stderr; one `git rev-parse --git-dir` separates the whole-run
