@@ -232,7 +232,17 @@ rule inside itself: its own `action` is read by key presence, so an explicit
 the named action does not take is a named error rather than a silent
 discard. Ignoring one reopens the defect one level down — an agent told
 `must be "clear", got "write"` that corrects only the action leaves its
-`content` in place, and the frame is removed with nothing said. The two
+`content` in place, and the frame is removed with nothing said. The payload's
+own key set is closed the same way, a level up: a key outside the union any
+skill takes is named rather than discarded, since a *misspelled required* key
+already fails by key presence while a *superfluous* one — `tasks` beside a
+well-formed `task` and `todo` — did not. That check is flat rather than
+per-skill, because every known key under a skill that forbids it is already
+rejected upstream by a message naming the skill or the transition, and a
+per-skill check has no point to run but ahead of those, where it would
+replace their wording with a generic one. What is left for it is a key
+belonging to no skill's vocabulary, which has nothing skill-specific to say
+about it. The two
 `required` messages name the whole vocabulary for the same reason: that
 branch is what an out-of-date producer sending the retired
 `{"file_path": …, "content": …}` shape lands on, so it has to say what to
@@ -245,7 +255,8 @@ whole or not at all: both halves resolve to a plan — the path, the act, the
 body and the manifest lines that record it — before either file is touched,
 so every failure the two halves raise leaves the disk as it was.
 [The payload names its actions](changelog/2026-09-07-the-payload-names-its-actions.md),
-[Nothing is written until both halves resolve](changelog/2026-09-13-nothing-is-written-until-both-halves-resolve.md)
+[Nothing is written until both halves resolve](changelog/2026-09-13-nothing-is-written-until-both-halves-resolve.md),
+[The vocabulary is closed at both levels](changelog/2026-09-14-the-vocabulary-is-closed-at-both-levels.md)
 
 It gets its root from `HANDOFF_ROOT`, injected into the command's
 environment by a `PreToolUse(Bash)` hook (`inject-checkpoint-root.sh`) that

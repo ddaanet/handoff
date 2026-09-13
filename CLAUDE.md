@@ -538,7 +538,15 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   says nothing about it, FR4/FR5). Both keys are required by key presence, so
   `null` and an absent key are each a named error rather than a spelling that
   quietly does the wrong thing; there is no `file_path`, the path being
-  composed from `HANDOFF_ROOT`. Each half resolves to a `FilePlan` — the path,
+  composed from `HANDOFF_ROOT`. The payload's own key set is closed the same
+  way — `validate_top_level_keys`, called straight after `validate_skill` and
+  so ahead of every write, names any key outside the union any skill takes,
+  which is what a *superfluous* key needed, a misspelled required one already
+  failing by key presence. Flat rather than skill-dependent: every known key
+  under a skill that forbids it is already rejected upstream by a message
+  naming the skill or the transition, so a per-skill check would only run
+  first and replace that wording with a generic one. See
+  `docs/changelog/2026-09-14-the-vocabulary-is-closed-at-both-levels.md`. Each half resolves to a `FilePlan` — the path,
   the act, the body and the manifest lines that record it — and every failure
   the two halves raise happens while resolving, so a wrap-up is applied whole
   or not at all: nothing is written until both plans exist. The
@@ -838,7 +846,12 @@ outright regardless of path.
   mentions the trigger file — and it is mutation-checked (disable the
   branch, watch it go red), not observed passing. Also: schema validation
   (each required field missing, each literal with an unknown value, `rename`
-  under `precompact`, `null` and an absent key on each of `task`/`todo`, an
+  under `precompact`, a superfluous top-level key under each of the four
+  skills — spelled `bogus` rather than `tasks`, which reads as a plausible
+  field and could pass on an unrelated diagnostic, and with the `handoff` row
+  carrying a `clear` over a pre-existing frame so that moving the check below
+  the two halves reds it, mutation-checked — `null` and an absent key on each
+  of `task`/`todo`, an
   action outside the field's own vocabulary, an explicit `null` action, a
   non-string one, an object with no `action` key, an object carrying a key its
   action does not take, a

@@ -586,6 +586,85 @@ def test_malformed_json_errors_naming_payload(tmp_path: Path) -> None:
     assert "payload" in result.stderr
 
 
+def test_top_level_unknown_key_errors_under_handoff(tmp_path: Path) -> None:
+    """A superfluous top-level key is a named error, not a silent no-op.
+
+    M3's residual: `_reject_unknown_keys` closes this one level down, inside
+    each action object, but nothing compared the payload's own key set — a typo
+    like "bogus" (never "tasks"/"todos", which read as a plausible intentional
+    key and would not guard against a vacuous pass) sailed through untouched.
+    `"bogus"` cannot appear in any other message this otherwise-well-formed
+    handoff payload could produce, so a pass here is not an accident of some
+    unrelated diagnostic.
+
+    The payload's task half is `clear` over a pre-existing frame, so the row
+    also pins where the check runs: rejected before anything is applied, the
+    frame survives byte-identical and no manifest is written. Moved below the
+    two halves, the same payload would remove the file and report an error
+    naming only the key.
+    """
+    repo = make_repo(tmp_path)
+    stale = "## Current task\n\nIMPORTANT UNSAVED\n"
+    (repo / ".claude" / "handoff-task.md").write_text(stale)
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
+        "bogus": "x",
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 2
+    assert "bogus" in result.stderr
+    assert (repo / ".claude" / "handoff-task.md").is_file()
+    assert (repo / ".claude" / "handoff-task.md").read_text() == stale
+    assert not (repo / ".claude" / "checkpoint-manifest").exists()
+
+
+def test_top_level_unknown_key_errors_under_precompact(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    payload = {
+        "skill": "precompact",
+        "commit": "without-commit",
+        "compact": False,
+        "continue": None,
+        "task": task_clear(),
+        "todo": todo_keep(),
+        "bogus": "x",
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 2
+    assert "bogus" in result.stderr
+
+
+def test_top_level_unknown_key_errors_under_autoname(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    payload = {"skill": "autoname", "rename": "A Side Conversation", "bogus": "x"}
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 2
+    assert "bogus" in result.stderr
+
+
+def test_top_level_unknown_key_errors_under_restart(tmp_path: Path) -> None:
+    """Guard against a vacuous pass on the generic "unknown skill" message.
+
+    That message's own fixed vocabulary contains the words "restart" and
+    "compact" (it lists all four skill names), so a naive `"restart" in stderr`
+    assertion would pass even if this payload were instead rejected for some
+    unrelated reason. Assert on the offending key's name, and rule the generic
+    message out explicitly, mirroring test_restart_session_id_unset_errors.
+    """
+    repo = make_repo(tmp_path)
+    payload = {"skill": "restart", "continue": None, "bogus": "x"}
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 2
+    assert "bogus" in result.stderr
+    assert 'must be "handoff"' not in result.stderr
+
+
 @pytest.mark.parametrize("skill", ["handoff", "precompact"])
 @pytest.mark.parametrize(
     ("field", "shape", "reason"),

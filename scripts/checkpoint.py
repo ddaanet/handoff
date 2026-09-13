@@ -138,6 +138,37 @@ def validate_skill(payload: JSONDict) -> str:
     return cast("str", skill)
 
 
+def validate_top_level_keys(payload: JSONDict) -> None:
+    """Error naming the first (sorted) key outside the union any skill takes.
+
+    Flat rather than skill-dependent: each of the four skill-specific
+    validators below already rejects a *known* key present under the wrong
+    skill, with a message more specific than this one could give (naming the
+    skill, or the action it collides with) — a skill-dependent check placed
+    this early would shadow those and regress their tests for no gain. What
+    none of them is positioned to catch is a key outside the vocabulary
+    altogether (a typo like "tasks"), which collides with nothing skill-
+    specific to name; this is the one place that closes that gap.
+    """
+    extra = sorted(k for k in payload if k not in _TOP_LEVEL_KEYS)
+    if not extra:
+        return
+    takes = ", ".join(f'"{k}"' for k in _TOP_LEVEL_KEYS)
+    err("payload", f'unknown key "{extra[0]}", takes only {takes}')
+
+
+_TOP_LEVEL_KEYS = (
+    "skill",
+    "commit",
+    "rename",
+    "task",
+    "todo",
+    "clear",
+    "compact",
+    "continue",
+)
+
+
 def validate_commit_mode(payload: JSONDict, skill: str) -> str:
     """Return the commit mode.
 
@@ -565,6 +596,7 @@ def main() -> int:
     payload = read_payload()
     root = validate_root()
     skill = validate_skill(payload)
+    validate_top_level_keys(payload)
 
     if skill == "autoname":
         validate_autoname_forbidden_fields(payload)
