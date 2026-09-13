@@ -303,6 +303,12 @@ handoff_payload() {
     wt="$BATS_TEST_TMPDIR/bp-wt"
     mkdir -p "$wt/.claude" "$tmp/.git/worktrees/wtbp"
     printf 'gitdir: %s\n' "$tmp/.git/worktrees/wtbp" > "$wt/.git"
+    # handoff_root needs only the `gitdir:` line above; the three files below
+    # are what make `git -C "$wt"` resolve too, so this row keeps testing the
+    # root resolution rather than falling into the not-a-repository branch.
+    printf '../..\n' > "$tmp/.git/worktrees/wtbp/commondir"
+    printf '%s\n' "$wt/.git" > "$tmp/.git/worktrees/wtbp/gitdir"
+    printf 'ref: refs/heads/wtbp\n' > "$tmp/.git/worktrees/wtbp/HEAD"
     : > "$wt/.claude/checkpoint-manifest"
     run bash -c '
         jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
@@ -376,18 +382,60 @@ handoff_payload() {
         | jq -e '.systemMessage | test("failed to stage: .claude/handoff-todo.md")' >/dev/null
     echo "$output" \
         | jq -e '.hookSpecificOutput.additionalContext | test("failed to stage: .claude/handoff-todo.md")' >/dev/null
+    # The remedy is an act, so it rides the agent channel alone; the user
+    # channel carries the fact. Both halves of that asymmetry are pinned here,
+    # since only the negative says the split was deliberate.
+    echo "$output" \
+        | jq -e '.hookSpecificOutput.additionalContext | test("stage with git add -f")' >/dev/null
+    echo "$output" \
+        | jq -e '.systemMessage | test("git add -f") | not' >/dev/null
     grep -q 'index.lock' "$err"
+}
+
+# The whole-run case, which every other bash-post row `git init`s past. Without
+# the rev-parse guard each manifest line fails its own `git add` and one fact —
+# there is no repository — is reported once per path, in the wording reserved
+# for a defect and with a remedy naming a repository that does not exist. The
+# fixture is a garbage `.git` rather than a bare directory so an enclosing repo
+# cannot rescue the walk into success wherever BATS_TEST_TMPDIR happens to sit.
+# The empty stderr is the guard's own `2>/dev/null` earning its place: the one
+# message it discards is the one the report speaks for.
+@test "bash-post: root is not a git repository -> reported once, not once per path" {
+    repo="$BATS_TEST_TMPDIR/bp-norepo"; mkdir -p "$repo/.claude"
+    printf 'not a gitfile\n' > "$repo/.git"
+    printf 'task body\n' > "$repo/.claude/handoff-task.md"
+    printf '%s\n' "W .claude/handoff-task.md" "W .claude/handoff-todo.md" \
+        > "$repo/.claude/checkpoint-manifest"
+    err="$repo/stderr.txt"
+    run bash -c '
+        jq -nc --arg cwd "$1" "{cwd:\$cwd, tool_name:\"Bash\", tool_input:{command:\"ls\"}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash "$2" 2>"$3"
+    ' _ "$repo" "$BASHPOST" "$err"
+    [ "$status" -eq 0 ]
+    [ ! -e "$repo/.claude/checkpoint-manifest" ]
+    echo "$output" | jq -e '.systemMessage | test("is not a git repository")' >/dev/null
+    echo "$output" | jq -e '.systemMessage | test("failed to stage") | not' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext
+        | test("is not a git repository")' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext
+        | test("failed to stage") | not' >/dev/null
+    echo "$output" | jq -e '.hookSpecificOutput.additionalContext
+        | test("git add -f") | not' >/dev/null
+    [ ! -s "$err" ]
 }
 
 # The pair for row 2: the same `D` line for a path ls-files does not list, but
 # here because git cannot read the index at all rather than because the path
 # never entered it. `add` could not have staged into that repo either, so the
-# guard must report it, not swallow it. `.git` is a garbage file so the failure
-# holds wherever BATS_TEST_TMPDIR happens to sit — an enclosing repo cannot
-# rescue it into a successful, empty ls-files.
+# guard must report it, not swallow it. The repository is real and only its
+# index is garbage: that is what isolates this branch from the whole-run guard,
+# which a broken `.git` — the fixture this row used to carry — now takes first,
+# and it is what keeps the failure from depending on where BATS_TEST_TMPDIR
+# sits, since the repo is this directory's own.
 @test "bash-post: D whose index cannot be read -> reported, not swallowed by the guard" {
     repo="$BATS_TEST_TMPDIR/bp-d-broken"; mkdir -p "$repo/.claude"
-    printf 'not a gitfile\n' > "$repo/.git"
+    git -C "$repo" init -q
+    printf 'not an index\n' > "$repo/.git/index"
     printf '%s\n' "D .claude/handoff-task.md" > "$repo/.claude/checkpoint-manifest"
     err="$repo/stderr.txt"
     run bash -c '
@@ -427,6 +475,6 @@ handoff_payload() {
     echo "$output" | jq -e '.systemMessage
         | test("staged 1, deleted 0; failed to stage: .claude/handoff-todo.md")' >/dev/null
     echo "$output" | jq -e '.hookSpecificOutput.additionalContext
-        | test("staged: .claude/handoff-task.md; deleted: none; failed to stage: .claude/handoff-todo.md. Leave them staged")' >/dev/null
+        | test("staged: .claude/handoff-task.md; deleted: none; failed to stage: .claude/handoff-todo.md — stage with git add -f before the next commit. Leave them staged")' >/dev/null
     grep -q 'did not match any files' "$err"
 }

@@ -79,14 +79,16 @@ itself, and the prompt that resumes the work on the far side.
 
    Both keys are required. `{"action": "clear"}` removes that file — for
    `task`, this is how a boundary with nothing to carry says so; for `todo`,
-   it says every item landed. When the call has nothing to say about the
-   list, send `{"action": "keep"}`, which leaves it untouched: a scratch
-   list must survive a call that is silent about it, so `keep` is the
-   default and `clear` is a deliberate stand-down. `{"action": "edit", …}`
-   strikes a finished item without regenerating it — both `todo` only;
-   `edit` needs the file to exist and `old_string` to appear in it exactly
-   once. `null` is an error on both, as is omitting a key, or adding one
-   inside an action object.
+   it says every item landed. Content that is empty once headings and blank
+   lines are stripped removes the file too, on either key — a `## Remaining`
+   with no items stands the list down as surely as `clear` does. When the
+   call has nothing to say about the list, send `{"action": "keep"}`, which
+   leaves it untouched: a scratch list must survive a call that is silent
+   about it, so `keep` is the default and `clear` is a deliberate
+   stand-down. `{"action": "edit", …}` strikes a finished item without
+   regenerating it — both `todo` only; `edit` needs the file to exist and
+   `old_string` to appear in it exactly once. `null` is an error on both, as
+   is omitting a key, or adding one inside an action object.
 
    Author the continuation prompt **silently**. It gets typed visibly into
    the composer and lands in scrollback, so reprinting it in the reply

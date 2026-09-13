@@ -671,13 +671,23 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   deferred to the rare positive path. When the manifest is present, stages
   every listed path with `git add -f` (deletions included), consumes
   then emits a dual-channel summary and deletes the manifest. A path it could
-  not stage is **named** on both channels rather than dropped from the counts:
-  the `2>/dev/null` that used to make a stranded `index.lock` read as
+  not stage is **named** on both channels rather than dropped from the counts,
+  and that name *is* the report: a hook's stderr on `exit 0` reaches neither
+  audience, landing on a `hook_success` transcript attachment that carries no
+  `rendered` field (verified against CC 2.1.270). The `2>/dev/null` that used
+  to make a stranded `index.lock` read as
   `staged 0, deleted 0` is gone, and the one benign failure it was
   covering — a `D` for a gitignored path that never entered the index — is
   guarded away with `git ls-files` instead, whose own exit status is read, not
-  inferred from empty output. See
-  `docs/changelog/2026-09-07-the-payload-names-its-actions.md`.
+  inferred from empty output. The remedy for a genuine failure rides the agent
+  channel alone, the manifest being consumed either way and nothing downstream
+  staging these paths. A root that is not a git repository is the one
+  `2>/dev/null` left: `git rev-parse --git-dir` separates that whole-run case
+  ahead of the loop and reports it once rather than once per path, in wording
+  that does not read as a defect, because there nothing can be staged and
+  nothing is wrong. See
+  `docs/changelog/2026-09-07-the-payload-names-its-actions.md` and
+  `docs/changelog/2026-09-13-the-named-path-is-the-report.md`.
   Staging is all it
   does: a sentinel the checkpoint wrote is armed at `Stop` like any other, so
   consuming it here would spawn the walker mid-turn, which is the one thing the

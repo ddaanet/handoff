@@ -271,7 +271,10 @@ the *next* command (which in the routine wrap-up is the user's `/commit`),
 and where tmux is unreachable. `PostToolUse(Bash)` (`bash-post.sh`) consumes
 the manifest instead — `git add -f` for every listed path, deletions
 included, and a path it could not stage named on both channels rather than
-dropped from the counts. Staging is all it does: a sentinel the checkpoint
+dropped from the counts — that name carries the whole report, a hook's stderr
+on `exit 0` reaching neither audience. A root that is not a git repository at
+all is separated ahead of the loop and reported once rather than once per
+path: nothing there can be staged, and nothing is wrong. Staging is all it does: a sentinel the checkpoint
 wrote is armed at `Stop` like any other, so spawning the walker here would
 type into a live turn, which is the one thing the `Stop` gate exists to
 prevent.

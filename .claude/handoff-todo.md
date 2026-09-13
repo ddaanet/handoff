@@ -18,23 +18,13 @@
   skill.
 - Whether to run the shared `memory/MEMORY.md` compaction. `/gitlore:index-audit`
   is the pass. Blocked on an explicit go-ahead, since it rewrites the index
-  every ddaanet repo loads. Ten memory writes are queued behind it.
+  every ddaanet repo loads. Eleven memory writes are queued behind it.
 - Whether `skills/handoff/SKILL.md` should be trimmed back under the ≤2000-word
-  guideline in `CLAUDE.md`. It is 2152 words; the overrun predates the M2/m13
-  paragraph.
+  guideline in `CLAUDE.md`. It is 2186 words; the overrun predates both the
+  M2/m13 paragraph and m14's FR6 sentence.
 
 ## Remaining
 
-- Pass 2, substantive — settle m6 first: if a PostToolUse hook's stderr never
-  reaches the user outside debug mode, m5 shrinks to transcript noise and
-  `bash-post.sh:75-79`'s comment needs downgrading to what the bats rows
-  actually pin (`checkpoint.bats:405` proves only that git's message reaches
-  the process's stderr). Then m5 — a handoff root that is not a git repository
-  reports `failed to stage` on both channels at every checkpoint, plus git's
-  raw `fatal:` on stderr; one `git rev-parse --git-dir` separates the
-  whole-run case, and none of the nine `bash-post` rows covers it. Then m7
-  (`bash-post.sh:70` consumes the manifest even when every path failed), and
-  m14 (FR6's empty-body removal is stated in neither skill body).
 - m12 is smaller than it reads: the C1 restructure deleted two of its three
   `D2`/`D3` citations outright, so only `tests/test_checkpoint.py:603`'s
   docstring is left, and `D2` is defined only in the 2026-09-04 runbook.
@@ -78,6 +68,15 @@
   very exception falsifying it; (10) a review finding can be closed with half
   of it standing, so audit a finding's status against the artifact it names —
   never against a later plan, report, changelog entry or commit message, each
-  of which is a claim about the state rather than the state. Briefed to craft
+  of which is a claim about the state rather than the state; (11) a hook's
+  stderr on `exit 0` reaches neither audience — it lands on a `hook_success`
+  transcript attachment with no `rendered` field — so a hook that wants its
+  stdout JSON parsed has no channel but `systemMessage`/`additionalContext`,
+  and the probe shape that shows it (a scratch `--settings` hook under a
+  nested `claude --print --output-format stream-json --verbose`, markers read
+  back out of the on-disk transcript JSONL). Briefed to craft
   at `inbox/brief-mutation-check-restore.md`; the ddaanet-tier facts are still
-  owed.
+  owed. (11) also belongs in plugin-craft's `hook-authoring` skill, whose
+  `references/output-channels.md` states the conclusion without the mechanism
+  and flags its own stderr claim stale-suspect — that repo is read-only from
+  here, so it is a proposal to make, not an edit.

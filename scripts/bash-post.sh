@@ -27,6 +27,27 @@ cwd="$(handoff_root "$raw_cwd")"
 manifest="$cwd/.claude/checkpoint-manifest"
 [ -f "$manifest" ] || exit 0
 
+emit() {
+    jq -nc --arg s "$1" --arg c "$2" \
+        '{systemMessage: $s, hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $c}}'
+}
+
+# A root that is not a git repository is the environment, not a defect: nothing
+# can be staged, and nothing is wrong with the checkpoint that wrote the
+# manifest. Without this check every line fails its own `git add` and one fact
+# is reported once per path, in the wording reserved for breakage and with a
+# remedy naming a repository that does not exist. The manifest is consumed all
+# the same: there is no staging here to lose, and a later checkpoint composes a
+# fresh one. The `2>/dev/null` is the one kind this file keeps — provoking
+# `fatal: not a git repository` is this check's whole mechanism, and the branch
+# below is what speaks for that message.
+if ! git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+    rm -f "$manifest"
+    emit "handoff-checkpoint: nothing staged, $cwd is not a git repository" \
+        "checkpoint manifest consumed — nothing staged: $cwd is not a git repository. The task and todo files are written; only staging them needs one."
+    exit 0
+fi
+
 staged=()
 deleted=()
 failed=()
@@ -74,18 +95,29 @@ agent_ctx="checkpoint manifest consumed — staged: ${staged[*]:-none}; deleted:
 
 # A path that could not be staged used to vanish from the counts with git's own
 # explanation eaten by the redirect — a stranded index.lock read as "staged 0,
-# deleted 0" on both channels. git's stderr now reaches the user; this names
-# which path it was, on both channels and in one spelling, since the counts
-# alone cannot say and two wordings of one fact read as two facts.
+# deleted 0" on both channels. Naming the path on both channels is the whole
+# report: a PostToolUse hook's stderr on exit 0 reaches neither audience. It is
+# recorded on a `hook_success` transcript attachment, which carries no
+# `rendered` field and so is neither echoed to the user nor injected into the
+# model's context — unlike `additionalContext`, which arrives as its own,
+# rendered attachment (verified against CC 2.1.270). One spelling on both
+# channels, since the counts alone cannot say which path it was and two
+# wordings of one fact read as two facts.
 #
 # `${failed[*]}` joins on a space, which would be ambiguous for a path holding
 # one. It cannot: checkpoint.py composes every manifest line from its two path
 # constants and the payload no longer carries a `file_path`, so the only names
 # that reach here are `.claude/handoff-task.md` and `.claude/handoff-todo.md`.
 # Same bound as the `${staged[*]}` / `${deleted[*]}` joins above.
+#
+# The manifest is consumed either way, so a failure costs the staging outright:
+# retrying here would re-run the same `git add` against the same stranded lock,
+# and nothing downstream stages these paths. The remedy therefore rides the
+# agent channel alone — it is an act, and an act belongs where something can
+# perform it; the user channel carries the fact.
 if [ ${#failed[@]} -gt 0 ]; then
     summary="$summary; failed to stage: ${failed[*]}"
-    agent_ctx="$agent_ctx; failed to stage: ${failed[*]}"
+    agent_ctx="$agent_ctx; failed to stage: ${failed[*]} — stage with git add -f before the next commit"
 fi
 agent_ctx="$agent_ctx."
 
@@ -99,5 +131,4 @@ if [ $(( ${#staged[@]} + ${#deleted[@]} )) -gt 0 ]; then
     agent_ctx="$agent_ctx Leave them staged; whatever commit lands next carries them."
 fi
 
-jq -nc --arg s "$summary" --arg c "$agent_ctx" \
-    '{systemMessage: $s, hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $c}}'
+emit "$summary" "$agent_ctx"
