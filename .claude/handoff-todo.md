@@ -19,8 +19,7 @@
 
 - `/orchestrate` `plans/2026-09-08-apply-before-mutate/runbook.md` in a fresh
   session. `/proof` passed it 2026-09-13 — 18 items, 4 approved, 14 revised
-  and applied, nothing killed or skipped; the runbook is edited and
-  uncommitted.
+  and applied, nothing killed or skipped.
 - Pass 2, substantive — m5 (a handoff root that is not a git repository now
   reports `failed to stage` on both channels at every checkpoint, plus git's
   raw `fatal:` on stderr; one `git rev-parse --git-dir` separates the whole-run
