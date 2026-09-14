@@ -141,7 +141,11 @@ collided as numbers.
   written whole. The task file is authored whole, so it has no edit action
   and the schema refuses one.
 - **FR6** — A file whose body is empty is removed, and the removal staged.
-  File present ⟹ content pending.
+  File present ⟹ content pending. Empty is what is left once blank lines and
+  ATX headings are taken out, a heading being markdown's own — so a shebang,
+  a `#tag`, or a `# comment` inside an indented code block are all content,
+  and a line of spaces is not.
+  [A heading is not a leading `#`](changelog/2026-09-14-a-heading-is-not-a-leading-hash.md)
 - **FR7** — Everything the checkpoint writes is staged with `git add -f`,
   deletions included. The checkpoint cannot do it itself (NFR1), so it
   records the paths in `.claude/checkpoint-manifest` and `PostToolUse(Bash)`

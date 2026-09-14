@@ -624,9 +624,16 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   `checkpoint_sdd_directive` is `sdd_directive`,
   `checkpoint_todo_boundary` is `todo_boundary` — content and composition
   order (FR9) unchanged.
-  `is_empty_body` is FR6's generic emptiness test: strips heading
-  (`#`) and blank lines, and what remains decides — a `## Remaining` with no
+  `is_empty_body` is FR6's generic emptiness test: strips ATX headings
+  and blank lines, and what remains decides — a `## Remaining` with no
   items or a task file with headings and no content both count as empty.
+  The heading test is markdown's own (up to three leading spaces, 1-6 `#`,
+  then the line's end or whitespace), against the line with trailing
+  whitespace removed, which is what keeps a line of spaces out of the content
+  class and `#!/bin/sh`, `#tag` and a four-space-indented `# comment` inside
+  it. Stripping each line instead would close the first two and read that
+  comment as a heading — the same defect one indent along. See
+  `docs/changelog/2026-09-14-a-heading-is-not-a-leading-hash.md`.
   Shared by `checkpoint.py` (on a half's resolved body, before anything is
   applied) and `write-stage.sh` (after the agent's own direct edit to
   `handoff-todo.md`) so the two writers cannot drift on what counts as empty.
@@ -870,7 +877,12 @@ outright regardless of path.
   emptiness rule through a computed body rather than one the payload states
   outright, and `{"action": "keep"}` leaving a pre-existing list byte-identical
   and off the manifest, which is what makes a wrap-up that says nothing about
-  the list safe (FR4). It does **not** cover `write-stage.sh` or `bash-post.sh`:
+  the list safe (FR4). The emptiness rule's own spellings sit here too — a
+  whitespace-only body removing the file on the task half and on the todo
+  half, a `#!/bin/sh` body preserved as content, and a parametrized pair
+  pinning the indent boundary from both sides — each of the predicate's three
+  halves mutation-checked separately, redding its own rows and no others;
+  `write-stage.sh`'s side of the same predicate is a bats row. It does **not** cover `write-stage.sh` or `bash-post.sh`:
   those are bash and are tested where the two bullets above say, in
   `tests/hook-test.bats` and `tests/checkpoint.bats`. The `skill` enum's four values
   each accepted, the two retired driven-skill names rejected, `rename` rejected

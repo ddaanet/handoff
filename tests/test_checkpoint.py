@@ -893,6 +893,134 @@ def test_task_write_only_headings_never_existed_no_d(tmp_path: Path) -> None:
     assert "handoff-task.md" not in manifest
 
 
+def test_task_write_whitespace_only_pre_existing_removed_manifest_records_d(
+    tmp_path: Path,
+) -> None:
+    """M4 route A: a body of spaces alone is blank, not content — the old `line
+    == ""` test missed it (it exited 0 with a `W` and a 3-byte file); testing
+    the line with its trailing whitespace removed catches it and removes the
+    file, same as any other empty body."""
+    repo = make_repo(tmp_path)
+    (repo / ".claude" / "handoff-task.md").write_text("## Current task\n\nstale\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content("   "),
+        "todo": todo_content("## Remaining\n\n- an item\n"),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-task.md").exists()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    assert "D .claude/handoff-task.md" in manifest
+    assert "W .claude/handoff-todo.md" in manifest
+
+
+def test_todo_write_whitespace_only_pre_existing_removed_manifest_records_d(
+    tmp_path: Path,
+) -> None:
+    """Mirror of the task row on the todo half.
+
+    The deliverable-review audit found the todo side of a sibling removal
+    branch dead to the suite once before (see
+    test_todo_clear_removes_pre_existing_file_manifest_records_d); this route
+    gets its own todo-half row rather than leaving it to the task row above.
+    """
+    repo = make_repo(tmp_path)
+    (repo / ".claude" / "handoff-todo.md").write_text("## Remaining\n\n- stale\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content("## Current task\n\nreal content\n"),
+        "todo": todo_content("   "),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert not (repo / ".claude" / "handoff-todo.md").exists()
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    assert "D .claude/handoff-todo.md" in manifest
+    assert "W .claude/handoff-task.md" in manifest
+
+
+def test_task_write_shebang_like_body_preserved_manifest_records_w(
+    tmp_path: Path,
+) -> None:
+    """M4 route B: `#!/bin/sh` starts with `#` but is not an ATX heading — the
+    old `startswith("#")` test misjudged it empty and removed the file.
+
+    An ATX heading is 1-6 `#` then end-of-line or whitespace; `#!/bin/sh` and
+    `#tag` are neither, and both must be preserved as content.
+    """
+    repo = make_repo(tmp_path)
+    content = "#!/bin/sh\n"
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content(content),
+        "todo": todo_keep(),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    assert (repo / ".claude" / "handoff-task.md").is_file()
+    assert (repo / ".claude" / "handoff-task.md").read_text() == content
+    assert (
+        "W .claude/handoff-task.md"
+        in (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    )
+
+
+@pytest.mark.parametrize(
+    ("body", "act"),
+    [
+        ("   ## Current task\n", "D"),
+        ("    # run the migration first\n", "W"),
+    ],
+    ids=["three_spaces_indents_a_heading", "four_spaces_opens_a_code_block"],
+)
+def test_heading_indent_bound_is_markdowns_own(
+    tmp_path: Path, body: str, act: str
+) -> None:
+    """Route B at its margin: the leading-space bound is what keeps a code block
+    out of the heading class.
+
+    Markdown indents a heading by up to three spaces and opens a code block at
+    the fourth, so a `# comment` inside one is content exactly as `#!/bin/sh`
+    is. Testing each line stripped of *leading* whitespace too would read that
+    comment as a heading and remove a file whose only content it is — route B
+    again, one indent along.
+    """
+    repo = make_repo(tmp_path)
+    (repo / ".claude" / "handoff-task.md").write_text("## Current task\n\nstale\n")
+    payload = {
+        "skill": "handoff",
+        "commit": "with-commit",
+        "rename": "T",
+        "clear": False,
+        "continue": None,
+        "task": task_content(body),
+        "todo": todo_keep(),
+    }
+    result = run_checkpoint(repo, payload)
+    assert result.returncode == 0
+    task = repo / ".claude" / "handoff-task.md"
+    manifest = (repo / ".claude" / "checkpoint-manifest").read_text().splitlines()
+    assert f"{act} .claude/handoff-task.md" in manifest
+    if act == "D":
+        assert not task.exists()
+    else:
+        assert task.is_file()
+        assert task.read_text() == body
+
+
 @pytest.mark.parametrize("skill", ["handoff", "precompact"])
 def test_todo_write_creates_file_manifest_records_w(tmp_path: Path, skill: str) -> None:
     """Mirrors test_task_write_creates_file_manifest_records_w's own note: the

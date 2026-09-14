@@ -588,6 +588,29 @@ compact" ]
     git -C "$git_tmp" status --porcelain .claude/handoff-todo.md | grep -q '^D'
 }
 
+# m4 route A (shared with test_checkpoint.py's whitespace-only rows via
+# is_empty_body): a direct agent edit that leaves the todo file holding only
+# spaces is blank, not content, and is removed the same as any other empty
+# body.
+@test "write-stage (handoff-todo.md whitespace-only): removed and the removal staged" {
+    git_tmp="$BATS_TEST_TMPDIR/git-whitespace"
+    mkdir -p "$git_tmp/.claude"
+    git -C "$git_tmp" init -q
+    printf '## Remaining\n\n- item\n' > "$git_tmp/.claude/handoff-todo.md"
+    git -C "$git_tmp" add -f .claude/handoff-todo.md
+    git -C "$git_tmp" -c user.email=t@t -c user.name=t commit -qm seed
+    printf '   \n' > "$git_tmp/.claude/handoff-todo.md"
+    run bash -c '
+        jq -nc --arg fp "$1/.claude/handoff-todo.md" \
+            "{tool_name:\"Write\", tool_input:{file_path:\$fp}}" \
+        | CLAUDE_PROJECT_DIR="$1" bash scripts/write-stage.sh
+    ' _ "$git_tmp"
+    [ "$status" -eq 0 ]
+    [ ! -e "$git_tmp/.claude/handoff-todo.md" ]
+    echo "$output" | jq -e '.systemMessage == "handoff-todo.md emptied — removed and staged."' >/dev/null
+    git -C "$git_tmp" status --porcelain .claude/handoff-todo.md | grep -q '^D'
+}
+
 @test "write-stage (unrelated path: no-op)" {
     run bash -c '
         jq -nc --arg fp "$1/README.md" \

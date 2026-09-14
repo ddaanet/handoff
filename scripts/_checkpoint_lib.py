@@ -10,6 +10,7 @@ or "" when silent; the caller decides whether to print it.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -21,17 +22,33 @@ def _printf_lines(*args: str) -> str:
 
 
 def is_empty_body(content: str) -> bool:
-    """Report whether content is empty once headings/blank lines are stripped.
+    """Report whether content is empty once ATX headings/blanks are removed.
 
-    A `## Remaining` with no items, a task file with headings and no content.
-    Shared by checkpoint.py and write-stage.sh so the two writers cannot drift
-    on what counts as empty.
+    A `## Remaining` with no items, a task file with headings and no content:
+    both are empty. Shared by checkpoint.py and write-stage.sh so the two
+    writers cannot drift on what counts as empty.
+
+    "Blank" is the line with no trailing whitespace left, so a line of spaces
+    alone is blank rather than content. "Heading" is an ATX heading and not
+    merely a leading `#` (`_ATX_HEADING`): `#!/bin/sh`, `#tag` and a run of
+    seven `#` are all content, the `#` run in each being followed by something
+    other than whitespace or the line's end. The leading-space bound is
+    markdown's own: up to three indents a heading, and a fourth opens a code
+    block, whose `# comment` line is content like any other. Testing the
+    stripped line instead would put that line back in the class this function
+    exists to keep out of it.
     """
-    for line in content.split("\n"):
-        if line == "" or line.startswith("#"):
+    for raw in content.split("\n"):
+        line = raw.rstrip()
+        if line == "" or _ATX_HEADING.fullmatch(line):
             continue
         return False
     return True
+
+
+# Markdown's own ATX rule: up to three leading spaces, 1-6 `#`, then the line
+# ends or whitespace separates the text. Read only by is_empty_body, above.
+_ATX_HEADING = re.compile(r" {0,3}#{1,6}(\s.*)?")
 
 
 def _resolve_submodule_path(root: str) -> str:
