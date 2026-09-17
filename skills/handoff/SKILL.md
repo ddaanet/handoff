@@ -10,27 +10,18 @@ and what's still undecided. When the user wants the reset carried out
 rather than prepared, this skill drives it too — the rename, the `/clear`,
 and the prompt that resumes the work on the far side.
 
-A clear is the cheaper reset. A compaction pays to summarise and loses
-accuracy doing it; a clear discards the conversation and carries the frame
-across intact. What it gives up is everything the frame does not carry,
-which is the plugin's whole thesis about what a session boundary needs.
-
 `handoff-checkpoint` handles the writes, the staging and the transition
 file — this skill's job is deciding what goes in them.
 
 ## Protocol
 
-**Make zero tool calls before invoking `handoff-checkpoint`.** Steps 1 and 3
-both decide from the conversation already in context — the deciding agent
-already holds everything it needs. A Read, Bash, or Grep call here
-duplicates work `handoff-checkpoint` does internally, and risks acting on
-state that is stale by the time it writes.
+### Step 1: Decide, then checkpoint
 
-### Step 1: Decide what this call is for
+**Make no tool call before `handoff-checkpoint` other than memory
+writes.**
 
-Three answers, from the request and the state of the work. None of them has
-a default: a default is the answer given by an agent that never considered
-the question, and considering it is the whole contribution.
+Decide the following from the request and the state of the work. None of
+them has a default: considering the question is the whole contribution.
 
 **Is the transition typed?** `clear: true` when the user asked for the
 reset to be carried out — "clear and continue", "continue in a new
@@ -43,7 +34,8 @@ clear; do not ask whether to proceed.
 submitted into the session the clear opens, or `null` when nothing follows
 it. The seam section below decides what it carries. It is only meaningful
 alongside a typed transition — nothing would type it otherwise, and the
-checkpoint rejects the combination.
+checkpoint rejects the combination. Author it **silently**: it is typed
+visibly into the composer, so reprinting it in the reply shows it twice.
 
 **Does the ask imply a commit?** Two answers of equal weight:
 
@@ -58,19 +50,12 @@ The ask stops at the transition. A commit named in a continuation prompt is
 on the far side of it, where no live session owes it, so it is not evidence
 of `with-commit`.
 
-Under `with-commit`, memory bodies state present-tense truth — the change
-described as made rather than proposed. Memory phrased as pending is false
-from the moment the change exists, and gets re-injected that way at the
-next session start.
+**Capture memory.** If durable learnings surfaced this session, write them
+to auto-memory now, before the checkpoint. Under `with-commit`, memory
+bodies state present-tense truth — the change described as made rather
+than proposed. Skip if nothing durable surfaced — do not force.
 
-### Step 2: Update memory
-
-If durable learnings surfaced this session, capture them in
-auto-memory now. Skip if nothing durable surfaced — do not force.
-
-### Step 3: Decide, then checkpoint
-
-First, decide all of the following:
+Then decide the content:
 
 - **Session title** — a concise, specific title (≤ ~50 characters, Title
   Case, no surrounding quotes, no trailing punctuation) for the work done
@@ -80,9 +65,7 @@ First, decide all of the following:
   using the template below.
 - **Todo content** — whether there are open decisions still to make, or a
   task list with open items in play; if so, draft the todo content using
-  the template below (open decisions first, then remaining items). A
-  `/clear` does not paraphrase either the way a compaction would — it
-  discards them, so disk is the only place they survive.
+  the template below (open decisions first, then remaining items).
 
 Then run `handoff-checkpoint` (Bash), piping the whole wrap-up as JSON on
 stdin via a heredoc:
@@ -110,22 +93,12 @@ items stands the list down as surely as `clear` does. When the call has
 nothing to say about the list, send `{"action": "keep"}`, which leaves it
 untouched: a scratch list must survive a call that is silent about it, so
 `keep` is the default and `clear` is a deliberate stand-down.
-`{"action": "edit", …}` strikes a finished item without regenerating it —
-both `todo` only; `edit` needs the file to exist and `old_string` to appear
-in it exactly once. `null` is an error on both, as is omitting a key, or
-adding one inside an action object.
+`{"action": "edit", …}` strikes a finished item without regenerating it.
+`keep` and `edit` apply to `todo` only; `edit` needs the file to exist and
+`old_string` to appear in it exactly once. `null` is an error on both, as
+is omitting a key, or adding one inside an action object.
 
-Author the continuation prompt **silently**. It gets typed visibly into the
-composer and lands in scrollback, so reprinting it in the reply shows the
-same text twice with no veto value.
-
-When the ask includes a commit, it lands **before** the transition is
-armed: before this call when nothing holds the sentinel back, and before
-`handoff-approved` when the directive in step 4 does. Arm first and the
-clear runs at the turn boundary instead of the commit — and under
-`with-commit` that strands memory owed to a commit nobody makes.
-
-### Step 4: Follow the directive
+### Step 2: Follow the directive
 
 `handoff-checkpoint` prints nothing when there is nothing further to do. If
 it prints a directive, follow it exactly; the directive carries its own
@@ -134,17 +107,29 @@ it. A non-zero exit names the offending field on stderr — fix the payload
 and retry.
 
 A driven transition whose directive needs an answer is written but not
-armed, and the directive says how to release it. That is what keeps the
-clear from running at the end of the turn that asked the question.
+armed, and the directive says how to release it.
 
-### Step 5: Say what the boundary is ready for
+When the ask includes a commit, make it **after** the checkpoint, so it
+carries the handoff files the checkpoint staged, and **before** the
+transition is armed: before the turn ends when no directive holds the
+transition, and before `handoff-approved` when one does. Arm first and the
+clear runs instead of the commit — under `with-commit`, stranding memory
+owed to a commit nobody makes.
+
+### Step 3: Say what the boundary is ready for
 
 Once nothing is left awaiting an answer, end on one line. Where the
 transition is prepared, name what comes next: under `with-commit` the
 commit then the clear — "Ready to commit, then /clear" — and under
 `without-commit` the clear alone. Where it is driven, one line saying the
-clear is armed, and the turn ends. The frame is on disk and this is a
-handover, not a report.
+clear is armed, and the turn ends.
+
+## File templates
+
+Neither file takes a `#` heading — the read-time hook prepends one when it
+assembles the frame next session. Neither has a location to choose: the
+paths below are the only ones, and the checkpoint composes the task file's
+from the session root, denying a direct Write there.
 
 **Task file template** (`./.claude/handoff-task.md`):
 
@@ -155,25 +140,13 @@ handover, not a report.
 agent picks up. Usually one sentence. Where work genuinely spans several
 concurrent threads, name them; a session under pressure carries what it
 carries. Threads, not steps — a list of steps is a task list, and that
-goes in `handoff-todo.md`. Not a recap. Not git bookkeeping: whether work
-is committed/pushed is reconstructable from `git status` at load time, so
-never write it here.>
+goes in `handoff-todo.md`. Not a recap.>
 ```
-
-This file is the current-task half of the seam: a snapshot of what was in
-progress, nothing else. Anything still unsettled — even a detail that must
-survive verbatim — belongs in the todo file instead: it is the file the
-agent keeps open all session, so a decision that resolves or changes shape
-mid-session is corrected there rather than waiting for the next checkpoint.
 
 Task file rules:
 
-- No `#` heading — the read-time hook prepends one when it assembles
-  the frame next session.
 - No file paths or code beyond what's needed to say what's in progress.
   The working set is reconstructable from `git status` at load time.
-- No location to choose, unlike the todo file below: the checkpoint composes
-  the path above from the session root, and a direct Write there is denied.
 
 **Todo file template** (`./.claude/handoff-todo.md`):
 
@@ -197,14 +170,10 @@ Todo file rules:
   never checked off, and a resolved decision is dropped too. What
   landed is reconstructable from `git log`; anything still listed reads
   as outstanding and gets redone.
-- No `#` heading — the read-time hook prepends one when it assembles the
-  frame, same as the task file.
-- `## Open decisions` is dropped whenever none remain — no filler section.
 - **A decision the user has left unanswered across several frames is
   declined, not missed.** Drop it, and never annotate one with the number of
   times it has been raised. A listed decision blocks nothing either: work
   that can proceed without the answer is listed as work.
-- No location other than `./.claude/handoff-todo.md`.
 - It is a remainder plus the open questions blocking it, not a plan of
   record — but it is versioned like the task file, so write it as
   something that reads well in history.
@@ -243,9 +212,10 @@ newline would submit it early.
 ## Anti-patterns
 
 - Reading `handoff-task.md`, `handoff-todo.md`, or any other file "to
-  check" before deciding what to write in Step 1 or Step 3. The decision
+  check" before deciding what to write in Step 1. The decision
   comes from the conversation already in context — re-reading duplicates
-  what `handoff-checkpoint` does internally.
+  what `handoff-checkpoint` does internally, against state that may be
+  stale by the time it writes.
 - Padding "Current task" to look thorough. Length should track how many
   threads are genuinely in flight, not effort.
 - A task list in `## Current task`. Steps go to `handoff-todo.md`; the
@@ -264,9 +234,8 @@ newline would submit it early.
 - Asking whether to clear, or telling the user to run `/clear`, under a
   driven transition. Both are settled by the request and the armed file.
 - Reprinting the continuation prompt, or printing the `/clear` line, as
-  something for the user to run. There is one producer of that pasteable
-  form and it is the hook — which is also what covers a session outside
-  tmux, where there is no composer to type into.
+  something for the user to run. The hook is the one producer of that
+  pasteable form.
 - Writing `.claude/autodrive` directly. The checkpoint composes it from
   the payload; a hand-written one is a second writer of the same channel.
 

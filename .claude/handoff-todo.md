@@ -1,5 +1,3 @@
 ## Open decisions
 
-- Whether `skills/handoff/SKILL.md` should be trimmed back under the ≤2000-word
-  guideline in `CLAUDE.md`. It is 2213 words; the overrun predates both the
-  M2/m13 paragraph and m14's FR6 sentence, and m17's two lines added to it.
+- Whether Step 3 of `skills/handoff/SKILL.md` and step 5 of `skills/precompact/SKILL.md` should still end a prepared `with-commit` boundary on "Ready to commit, then /clear" (resp. /compact), now that Step 2 has the agent make the commit the ask implies in the same turn, after the checkpoint.

@@ -923,18 +923,28 @@ threshold](changelog/2026-08-01-context-threshold-trigger.md),
 it](changelog/2026-08-09-samples-are-scoped-to-the-compaction.md), and
 [the removal](changelog/2026-08-10-drop-context-threshold-nudge.md).
 
-**Deciding makes zero tool calls.** `handoff`'s Step 1 and Step 3 both decide
+**Deciding makes no tool call but the memory writes.** `handoff` decides
 from the conversation already in context — the agent already holds
 everything it needs, and a Read/Bash/Grep call there duplicates work
 `handoff-checkpoint` does internally while risking action on state gone
 stale by write time. A live session read the rule seconds beforehand and
 still `cat`-ed both task files "to check": a general verify-before-acting
 habit overrode an instruction that read as descriptive rather than binding.
-The rule is now one standing prohibition ahead of both steps, phrased as an
-imperative on the next action, with the reason stated inline and a matching
-`## Anti-patterns` entry.
+The rule is one prohibition at the head of the one step that decides and
+checkpoints, phrased as an imperative on the next action, with the reason
+stated in the matching `## Anti-patterns` entry. The memory writes are its
+stated exception and sit inside that step, before the checkpoint call — whose
+memory directive keys on a dirty submodule — and after the commit answer that
+sets their tense: an unconditional "zero tool calls" with memory as a
+separate step between the two deciding ones was contradicted by its own
+protocol. A commit the ask implies is not an exception, because it comes
+after the checkpoint: it has to, to carry the handoff files the checkpoint
+staged, and it still lands before the transition is armed at `Stop` or
+released by `handoff-approved`.
 [Deciding makes zero tool calls, stated
-once](changelog/2026-08-11-decide-with-zero-tool-calls.md)
+once](changelog/2026-08-11-decide-with-zero-tool-calls.md),
+[Memory moves inside the deciding
+step](changelog/2026-09-17-memory-moves-inside-the-deciding-step.md)
 
 **Nothing about the exiting process is read.** A driven restart once
 identified it by a bounded parent-chain walk, to replay its argv — `$PPID`

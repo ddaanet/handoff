@@ -44,7 +44,8 @@ itself, and the prompt that resumes the work on the far side.
    re-injects it that way.
 
 2. If durable learnings surfaced this session, capture them in auto-memory
-   now. Skip if nothing durable surfaced — do not force.
+   now, before the checkpoint, in the tense the commit answer sets. Skip if
+   nothing durable surfaced — do not force.
 
 3. Decide the task snapshot and, when open decisions or a task list with
    open items are in play, the todo content — one `## Current task`
@@ -86,8 +87,8 @@ itself, and the prompt that resumes the work on the far side.
    leaves it untouched: a scratch list must survive a call that is silent
    about it, so `keep` is the default and `clear` is a deliberate
    stand-down. `{"action": "edit", …}` strikes a finished item without
-   regenerating it — both `todo` only; `edit` needs the file to exist and
-   `old_string` to appear in it exactly once. `null` is an error on both, as
+   regenerating it. `keep` and `edit` apply to `todo` only; `edit` needs the
+   file to exist and `old_string` to appear in it exactly once. `null` is an error on both, as
    is omitting a key, or adding one inside an action object.
 
    Author the continuation prompt **silently**. It gets typed visibly into
@@ -100,9 +101,11 @@ itself, and the prompt that resumes the work on the far side.
    compaction re-injects nothing and the summariser's paraphrase is all
    that survives of the files just written.
 
-   When the ask includes a commit, it lands **before** the transition is
-   armed: before this call when nothing holds the sentinel back, and before
-   `handoff-approved` when the directive in step 4 does.
+   When the ask includes a commit, make it **after** this call, so it
+   carries the handoff files the checkpoint staged, and **before** the
+   transition is armed: before the turn ends when no directive holds the
+   transition, and before `handoff-approved` when the directive in step 4
+   does.
 
 4. Follow any directive it prints **exactly**. Nothing printed → nothing
    further to do. The checkpoint owns the decision; do not re-derive or

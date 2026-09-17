@@ -78,11 +78,16 @@ empty and removed: see `docs/changelog/2026-07-22-a-place-for-the-todo-list.md`,
   reads this one). Step 1 decides all three fields the payload cannot derive:
   whether the transition is typed, whether a continuation follows it, and
   commit awareness — **does the ask this call serves imply a commit** — which
-  makes it write memory as if the change has landed. Step 3 decides the
-  title/task/remainder, then issues one `handoff-checkpoint` Bash call with
-  the whole wrap-up as a JSON heredoc; step 4 follows whatever directive the
-  checkpoint prints, which may be the one naming `handoff-approved`; step 5
-  reports what the boundary is ready for, in one line. It writes no sentinel
+  makes it write memory as if the change has landed. Still in step 1, and
+  before the checkpoint, it captures memory — the only tool calls allowed
+  ahead of that call, since the checkpoint's memory directive keys on a dirty
+  submodule. It then decides the title/task/remainder and issues one
+  `handoff-checkpoint` Bash call with the whole wrap-up as a JSON heredoc.
+  Step 2 follows whatever directive the checkpoint prints, which may be the
+  one naming `handoff-approved`, and places a commit the ask implies: after
+  the checkpoint, so it carries the staged handoff files, and before the
+  transition is armed. Step 3 reports what the boundary is ready for, in one
+  line. It writes no sentinel
   itself — the checkpoint composes it.
 - `skills/autoname/SKILL.md` — the `/handoff:autoname` skill. Decides a
   session title from the conversation (no tool calls), then runs one
